@@ -320,6 +320,17 @@ check_dir_exists() {
     fi
 }
 
+check_dir_not_exists() {
+    local dir="$1"
+    local description="$2"
+    if [ ! -d "$dir" ]; then
+        log_info "✓ Correctly missing $description: $dir"
+    else
+        log_error "✗ Unexpectedly found $description: $dir"
+        ((ERRORS++))
+    fi
+}
+
 check_file_not_empty() {
     local file="$1"
     local description="$2"
@@ -427,6 +438,9 @@ check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/hooks.yaml"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment" "all deployment data in Helm collection directory"
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/logs-app.txt" "values.yaml"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/pods" "all pod data in Helm collection directory"
+# Processes are only collected from running pods; the Helm deployment is intentionally misconfigured (CreateContainerConfigError)
+# so the processes directory should NOT exist
+check_dir_not_exists "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" "processes directory (expected missing - no running pods)"
 
 check_dir_not_empty "$OUTPUT_DIR/operator" "Operator collection directory"
 check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator" "rhdh-operator namespace in Operator collection directory"
@@ -456,6 +470,11 @@ for ns in "$NS" "$NS_STATEFULSET"; do
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/logs-app.txt" "Backstage CR Deployment logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/pods" "all pod data in $cr in Backstage CRs in Operator collection directory"
+    # Process list collection (from running pods)
+    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" "processes directory in $cr deployment"
+    check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "backstage-backend container process list"
+    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "PID" "process list header"
+    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "node" "Node.js process in process list"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/logs-db.txt" "Backstage CR DB StatefulSet logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/pods" "all DB StatefulSet pods data in $cr in Backstage CRs in Operator collection directory"
