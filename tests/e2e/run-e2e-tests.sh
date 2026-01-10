@@ -194,13 +194,18 @@ NS_STATEFULSET="test-e2e-$TIMESTAMP-2"
 kubectl create namespace "$NS_STATEFULSET"
 CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
 
-log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
+log_info "Deploying Backstage CR (kind: Deployment in v1alpha4) with 2 replicas..."
 BACKSTAGE_CR="my-rhdh-op"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
+spec:
+  deployment:
+    patch:
+      spec:
+        replicas: 2
 EOF
 # Added in 1.9
 log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
@@ -320,17 +325,6 @@ check_dir_exists() {
     fi
 }
 
-check_dir_not_exists() {
-    local dir="$1"
-    local description="$2"
-    if [ ! -d "$dir" ]; then
-        log_info "✓ Correctly missing $description: $dir"
-    else
-        log_error "✗ Unexpectedly found $description: $dir"
-        ((ERRORS++))
-    fi
-}
-
 check_file_not_empty() {
     local file="$1"
     local description="$2"
@@ -439,8 +433,18 @@ check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment" 
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/logs-app.txt" "values.yaml"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/pods" "all pod data in Helm collection directory"
 # Processes are only collected from running pods; the Helm deployment is intentionally misconfigured (CreateContainerConfigError)
-# so the processes directory should NOT exist
-check_dir_not_exists "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" "processes directory (expected missing - no running pods)"
+# so the processes directory should NOT exist (or be empty if created)
+if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" ]; then
+    # If processes dir exists, it should be empty (no running pods to collect from)
+    if [ -n "$(ls -A "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" 2>/dev/null)" ]; then
+        log_error "✗ Unexpectedly found process data in processes directory (expected empty - no running pods)"
+        ((ERRORS++))
+    else
+        log_info "✓ Correctly found empty processes directory (no running pods)"
+    fi
+else
+    log_info "✓ Correctly missing processes directory (expected - no running pods)"
+fi
 
 check_dir_not_empty "$OUTPUT_DIR/operator" "Operator collection directory"
 check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator" "rhdh-operator namespace in Operator collection directory"
@@ -460,9 +464,11 @@ check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" 
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR" "Backstage CR is listed in the All CRDs list"
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR_STATEFULSET" "Backstage CR (kind: StatefulSet) is listed in the All CRDs list"
 cr=$BACKSTAGE_CR
+expected_replicas=2
 for ns in "$NS" "$NS_STATEFULSET"; do
     if [ "$ns" == "$NS_STATEFULSET" ]; then
         cr=$BACKSTAGE_CR_STATEFULSET
+        expected_replicas=1
     fi
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns" "$ns namespace in Backstage CRs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/_configmaps" "$ns namespace configmaps in Backstage CRs in Operator collection directory"
@@ -470,11 +476,25 @@ for ns in "$NS" "$NS_STATEFULSET"; do
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/logs-app.txt" "Backstage CR Deployment logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/pods" "all pod data in $cr in Backstage CRs in Operator collection directory"
-    # Process list collection (from running pods)
+    # Process list collection (from running pods) - now organized by pod
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" "processes directory in $cr deployment"
-    check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "backstage-backend container process list"
-    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "PID" "process list header"
-    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "node" "Node.js process in process list"
+    # Verify process collection from each pod (organized in per-pod subdirectories)
+    pod_dirs=$(find "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+    if [ "$pod_dirs" -eq "$expected_replicas" ]; then
+        log_info "✓ Found $pod_dirs pod process directories (expected: $expected_replicas replicas)"
+    else
+        log_error "✗ Expected $expected_replicas pod process directories, found $pod_dirs"
+        ((ERRORS++))
+    fi
+    # Validate process files in each pod directory
+    for pod_dir in "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes"/pod=*; do
+        if [ -d "$pod_dir" ]; then
+            pod_name=$(basename "$pod_dir")
+            check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in $pod_name"
+            check_file_contains "$pod_dir/container=backstage-backend.txt" "PID" "process list header in $pod_name"
+            check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in $pod_name"
+        fi
+    done
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/logs-db.txt" "Backstage CR DB StatefulSet logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/pods" "all DB StatefulSet pods data in $cr in Backstage CRs in Operator collection directory"
