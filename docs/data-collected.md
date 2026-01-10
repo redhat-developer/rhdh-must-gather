@@ -31,6 +31,13 @@ This tool focuses exclusively on RHDH-related resources as well some very minima
 - **Node.js version**: Runtime Node.js version from `node --version`
 - **Container user ID**: Security context information from `id` command
 - **Dynamic plugins structure**: Directory listing of `dynamic-plugins-root` filesystem
+- **Running processes**: Complete list of all running processes in each container (collected via `/proc` filesystem enumeration)
+  - Process ID (PID) and Parent Process ID (PPID)
+  - Process state (R=running, S=sleeping, D=disk sleep, Z=zombie, T=stopped)
+  - Memory usage (RSS and Virtual Size in KB)
+  - Process name and full command line
+  - Memory summary from `/proc/meminfo`
+  - Useful for correlating with heap dumps to identify orphaned or zombie processes
 - **Application configuration**
   - **Generated app-config**: `app-config.dynamic-plugins.yaml` created by the dynamic plugins installer
   - **Dynamic plugins**
