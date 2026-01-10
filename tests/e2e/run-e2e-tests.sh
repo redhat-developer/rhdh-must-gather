@@ -265,21 +265,16 @@ NS_STATEFULSET="test-e2e-$TIMESTAMP-2"
 kubectl create namespace "$NS_STATEFULSET"
 CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
 
-log_info "Deploying Backstage CR (kind: Deployment in v1alpha4) with 2 replicas..."
+log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
 BACKSTAGE_CR="my-rhdh-op"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
-spec:
-  deployment:
-    patch:
-      spec:
-        replicas: 2
 EOF
 # Added in 1.9
-log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
+log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
 BACKSTAGE_CR_STATEFULSET="my-rhdh-op-statefulset"
 kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
@@ -289,6 +284,9 @@ metadata:
 spec:
   deployment:
     kind: StatefulSet
+    patch:
+      spec:
+        replicas: 2
 EOF
 
 # wait until the Backstage CR is reconciled
@@ -537,11 +535,11 @@ check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" 
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR" "Backstage CR is listed in the All CRDs list"
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR_STATEFULSET" "Backstage CR (kind: StatefulSet) is listed in the All CRDs list"
 cr=$BACKSTAGE_CR
-expected_replicas=2
+expected_replicas=1
 for ns in "$NS" "$NS_STATEFULSET"; do
     if [ "$ns" == "$NS_STATEFULSET" ]; then
         cr=$BACKSTAGE_CR_STATEFULSET
-        expected_replicas=1
+        expected_replicas=2
     fi
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns" "$ns namespace in Backstage CRs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/_configmaps" "$ns namespace configmaps in Backstage CRs in Operator collection directory"
