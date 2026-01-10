@@ -50,6 +50,74 @@ is_openshift() {
     kubectl api-resources --api-group=config.openshift.io 2>/dev/null | grep -q clusterversion
 }
 
+# Dump debug information to help troubleshoot CI failures
+dump_debug_info() {
+    log_warn "=== DEBUG INFO START ==="
+    
+    # Helm deployment info (if namespace exists)
+    if [ -n "${NS:-}" ]; then
+        log_warn "--- Helm Release Status (namespace: $NS) ---"
+        helm -n "$NS" list 2>/dev/null || true
+        
+        if [ -n "${HELM_RELEASE:-}" ]; then
+            log_warn "--- Helm Release '$HELM_RELEASE' History ---"
+            helm -n "$NS" history "$HELM_RELEASE" 2>/dev/null || true
+        fi
+        
+        log_warn "--- Pods in namespace $NS ---"
+        kubectl -n "$NS" get pods -o wide 2>/dev/null || true
+        
+        log_warn "--- Events in namespace $NS ---"
+        kubectl -n "$NS" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+        
+        # Helm pod logs
+        if [ -n "${HELM_POD:-}" ]; then
+            log_warn "--- Helm Pod '$HELM_POD' Description ---"
+            kubectl -n "$NS" describe pod "$HELM_POD" 2>/dev/null || true
+            log_warn "--- Helm Pod '$HELM_POD' Logs ---"
+            kubectl -n "$NS" logs "$HELM_POD" --all-containers=true 2>/dev/null | tail -100 || true
+        fi
+        
+        # Backstage CR info
+        if [ -n "${BACKSTAGE_CR:-}" ]; then
+            log_warn "--- Backstage CR '$BACKSTAGE_CR' in namespace $NS ---"
+            kubectl -n "$NS" get backstage "$BACKSTAGE_CR" -o yaml 2>/dev/null || true
+            log_warn "--- Backstage CR '$BACKSTAGE_CR' Description ---"
+            kubectl -n "$NS" describe backstage "$BACKSTAGE_CR" 2>/dev/null || true
+            log_warn "--- Backstage Deployment Pods in namespace $NS ---"
+            kubectl -n "$NS" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o wide 2>/dev/null || true
+            log_warn "--- Backstage Deployment Pod Logs (if any) ---"
+            kubectl -n "$NS" logs -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --all-containers=true --tail=100 2>/dev/null || true
+        fi
+    fi
+    
+    # StatefulSet namespace info
+    if [ -n "${NS_STATEFULSET:-}" ]; then
+        log_warn "--- Pods in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get pods -o wide 2>/dev/null || true
+        
+        log_warn "--- Events in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+        
+        if [ -n "${BACKSTAGE_CR_STATEFULSET:-}" ]; then
+            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' in namespace $NS_STATEFULSET ---"
+            kubectl -n "$NS_STATEFULSET" get backstage "$BACKSTAGE_CR_STATEFULSET" -o yaml 2>/dev/null || true
+            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' Description ---"
+            kubectl -n "$NS_STATEFULSET" describe backstage "$BACKSTAGE_CR_STATEFULSET" 2>/dev/null || true
+        fi
+    fi
+    
+    # Operator logs
+    log_warn "--- RHDH Operator Deployment Status ---"
+    kubectl -n rhdh-operator get deployment rhdh-operator -o wide 2>/dev/null || true
+    log_warn "--- RHDH Operator Pods ---"
+    kubectl -n rhdh-operator get pods -o wide 2>/dev/null || true
+    log_warn "--- RHDH Operator Logs (last 100 lines) ---"
+    kubectl -n rhdh-operator logs -l app.kubernetes.io/name=rhdh-operator --tail=100 2>/dev/null || true
+    
+    log_warn "=== DEBUG INFO END ==="
+}
+
 # Cleanup function to handle multiple cleanup tasks
 CLEANUP_TASKS=()
 # shellcheck disable=SC2329
@@ -169,11 +237,13 @@ until HELM_POD=$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=$HELM_
 done
 if [ -z "$HELM_POD" ]; then
     log_error "Could not find Helm-deployed RHDH pod in namespace $NS."
+    dump_debug_info
     exit 1
 fi
 if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS" --timeout=5m 2>/dev/null; then
     POD_REASON=$(kubectl -n "$NS" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
     log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time. Test may not be operating under expected conditions."
+    dump_debug_info
     exit 1
 fi
 
@@ -186,6 +256,7 @@ CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
 log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
 if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
     log_error "Timed out waiting for rhdh-operator deployment to be available."
+    dump_debug_info
     exit 1
 fi
 log_info "rhdh-operator deployment is now available."
@@ -224,6 +295,7 @@ EOF
 log_info "Waiting for Backstage CR $BACKSTAGE_CR to be reconciled..."
 if ! kubectl -n "$NS" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR --timeout=5m; then
     log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR to be reconciled."
+    dump_debug_info
     exit 1
 fi
 log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
@@ -232,6 +304,7 @@ log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
 log_info "Waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled..."
 if ! kubectl -n "$NS_STATEFULSET" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR_STATEFULSET --timeout=5m; then
     log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled."
+    dump_debug_info
     exit 1
 fi
 log_info "Backstage CR $BACKSTAGE_CR_STATEFULSET is now ready and deployed."
