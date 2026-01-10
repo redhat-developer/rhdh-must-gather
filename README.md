@@ -340,6 +340,9 @@ Usage: ./must_gather [params...]
 │               │   │           ├── process-info.txt        # Process and memory info
 │               │   │           ├── heap-dump.log           # Collection logs
 │               │   │           └── pod-spec.yaml           # Pod specification
+│               │   ├── processes/      # Process list from running pods (all replicas)
+│               │   │   └── pod=[pod-name]/         # Per-pod directory
+│               │   │       └── container=[container-name].txt  # Process list per container
 │               │   └── pods/           # Pod details and logs
 │               │       ├── pods.txt
 │               │       ├── pods.yaml
@@ -406,6 +409,9 @@ Usage: ./must_gather [params...]
                 │   │           ├── process-info.txt        # Process and memory info
                 │   │           ├── heap-dump.log           # Collection logs
                 │   │           └── pod-spec.yaml           # Pod specification
+                │   ├── processes/      # Process list from running pods (all replicas)
+                │   │   └── pod=[pod-name]/         # Per-pod directory
+                │   │       └── container=[container-name].txt  # Process list per container
                 │   └── pods/           # Application pods
                 │       ├── pods.txt
                 │       ├── pods.yaml

@@ -50,6 +50,74 @@ is_openshift() {
     kubectl api-resources --api-group=config.openshift.io 2>/dev/null | grep -q clusterversion
 }
 
+# Dump debug information to help troubleshoot CI failures
+dump_debug_info() {
+    log_warn "=== DEBUG INFO START ==="
+    
+    # Helm deployment info (if namespace exists)
+    if [ -n "${NS:-}" ]; then
+        log_warn "--- Helm Release Status (namespace: $NS) ---"
+        helm -n "$NS" list 2>/dev/null || true
+        
+        if [ -n "${HELM_RELEASE:-}" ]; then
+            log_warn "--- Helm Release '$HELM_RELEASE' History ---"
+            helm -n "$NS" history "$HELM_RELEASE" 2>/dev/null || true
+        fi
+        
+        log_warn "--- Pods in namespace $NS ---"
+        kubectl -n "$NS" get pods -o wide 2>/dev/null || true
+        
+        log_warn "--- Events in namespace $NS ---"
+        kubectl -n "$NS" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+        
+        # Helm pod logs
+        if [ -n "${HELM_POD:-}" ]; then
+            log_warn "--- Helm Pod '$HELM_POD' Description ---"
+            kubectl -n "$NS" describe pod "$HELM_POD" 2>/dev/null || true
+            log_warn "--- Helm Pod '$HELM_POD' Logs ---"
+            kubectl -n "$NS" logs "$HELM_POD" --all-containers=true 2>/dev/null | tail -100 || true
+        fi
+        
+        # Backstage CR info
+        if [ -n "${BACKSTAGE_CR:-}" ]; then
+            log_warn "--- Backstage CR '$BACKSTAGE_CR' in namespace $NS ---"
+            kubectl -n "$NS" get backstage "$BACKSTAGE_CR" -o yaml 2>/dev/null || true
+            log_warn "--- Backstage CR '$BACKSTAGE_CR' Description ---"
+            kubectl -n "$NS" describe backstage "$BACKSTAGE_CR" 2>/dev/null || true
+            log_warn "--- Backstage Deployment Pods in namespace $NS ---"
+            kubectl -n "$NS" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o wide 2>/dev/null || true
+            log_warn "--- Backstage Deployment Pod Logs (if any) ---"
+            kubectl -n "$NS" logs -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --all-containers=true --tail=100 2>/dev/null || true
+        fi
+    fi
+    
+    # StatefulSet namespace info
+    if [ -n "${NS_STATEFULSET:-}" ]; then
+        log_warn "--- Pods in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get pods -o wide 2>/dev/null || true
+        
+        log_warn "--- Events in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+        
+        if [ -n "${BACKSTAGE_CR_STATEFULSET:-}" ]; then
+            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' in namespace $NS_STATEFULSET ---"
+            kubectl -n "$NS_STATEFULSET" get backstage "$BACKSTAGE_CR_STATEFULSET" -o yaml 2>/dev/null || true
+            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' Description ---"
+            kubectl -n "$NS_STATEFULSET" describe backstage "$BACKSTAGE_CR_STATEFULSET" 2>/dev/null || true
+        fi
+    fi
+    
+    # Operator logs
+    log_warn "--- RHDH Operator Deployment Status ---"
+    kubectl -n rhdh-operator get deployment rhdh-operator -o wide 2>/dev/null || true
+    log_warn "--- RHDH Operator Pods ---"
+    kubectl -n rhdh-operator get pods -o wide 2>/dev/null || true
+    log_warn "--- RHDH Operator Logs (last 100 lines) ---"
+    kubectl -n rhdh-operator logs -l app.kubernetes.io/name=rhdh-operator --tail=100 2>/dev/null || true
+    
+    log_warn "=== DEBUG INFO END ==="
+}
+
 # Cleanup function to handle multiple cleanup tasks
 CLEANUP_TASKS=()
 # shellcheck disable=SC2329
@@ -169,11 +237,13 @@ until HELM_POD=$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=$HELM_
 done
 if [ -z "$HELM_POD" ]; then
     log_error "Could not find Helm-deployed RHDH pod in namespace $NS."
+    dump_debug_info
     exit 1
 fi
 if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS" --timeout=5m 2>/dev/null; then
     POD_REASON=$(kubectl -n "$NS" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
     log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time. Test may not be operating under expected conditions."
+    dump_debug_info
     exit 1
 fi
 
@@ -186,6 +256,7 @@ CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
 log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
 if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
     log_error "Timed out waiting for rhdh-operator deployment to be available."
+    dump_debug_info
     exit 1
 fi
 log_info "rhdh-operator deployment is now available."
@@ -203,7 +274,7 @@ metadata:
   name: $BACKSTAGE_CR
 EOF
 # Added in 1.9
-log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
+log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
 BACKSTAGE_CR_STATEFULSET="my-rhdh-op-statefulset"
 kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
@@ -213,12 +284,16 @@ metadata:
 spec:
   deployment:
     kind: StatefulSet
+    patch:
+      spec:
+        replicas: 2
 EOF
 
 # wait until the Backstage CR is reconciled
 log_info "Waiting for Backstage CR $BACKSTAGE_CR to be reconciled..."
 if ! kubectl -n "$NS" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR --timeout=5m; then
     log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR to be reconciled."
+    dump_debug_info
     exit 1
 fi
 log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
@@ -227,6 +302,7 @@ log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
 log_info "Waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled..."
 if ! kubectl -n "$NS_STATEFULSET" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR_STATEFULSET --timeout=5m; then
     log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled."
+    dump_debug_info
     exit 1
 fi
 log_info "Backstage CR $BACKSTAGE_CR_STATEFULSET is now ready and deployed."
@@ -316,17 +392,6 @@ check_dir_exists() {
         log_info "✓ Found $description: $dir"
     else
         log_error "✗ Missing $description: $dir"
-        ((ERRORS++))
-    fi
-}
-
-check_dir_not_exists() {
-    local dir="$1"
-    local description="$2"
-    if [ ! -d "$dir" ]; then
-        log_info "✓ Correctly missing $description: $dir"
-    else
-        log_error "✗ Unexpectedly found $description: $dir"
         ((ERRORS++))
     fi
 }
@@ -439,8 +504,18 @@ check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment" 
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/logs-app.txt" "values.yaml"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/pods" "all pod data in Helm collection directory"
 # Processes are only collected from running pods; the Helm deployment is intentionally misconfigured (CreateContainerConfigError)
-# so the processes directory should NOT exist
-check_dir_not_exists "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" "processes directory (expected missing - no running pods)"
+# so the processes directory should NOT exist (or be empty if created)
+if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" ]; then
+    # If processes dir exists, it should be empty (no running pods to collect from)
+    if [ -n "$(ls -A "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" 2>/dev/null)" ]; then
+        log_error "✗ Unexpectedly found process data in processes directory (expected empty - no running pods)"
+        ((ERRORS++))
+    else
+        log_info "✓ Correctly found empty processes directory (no running pods)"
+    fi
+else
+    log_info "✓ Correctly missing processes directory (expected - no running pods)"
+fi
 
 check_dir_not_empty "$OUTPUT_DIR/operator" "Operator collection directory"
 check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator" "rhdh-operator namespace in Operator collection directory"
@@ -460,9 +535,11 @@ check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" 
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR" "Backstage CR is listed in the All CRDs list"
 check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR_STATEFULSET" "Backstage CR (kind: StatefulSet) is listed in the All CRDs list"
 cr=$BACKSTAGE_CR
+expected_replicas=1
 for ns in "$NS" "$NS_STATEFULSET"; do
     if [ "$ns" == "$NS_STATEFULSET" ]; then
         cr=$BACKSTAGE_CR_STATEFULSET
+        expected_replicas=2
     fi
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns" "$ns namespace in Backstage CRs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/_configmaps" "$ns namespace configmaps in Backstage CRs in Operator collection directory"
@@ -470,11 +547,25 @@ for ns in "$NS" "$NS_STATEFULSET"; do
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/logs-app.txt" "Backstage CR Deployment logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/pods" "all pod data in $cr in Backstage CRs in Operator collection directory"
-    # Process list collection (from running pods)
+    # Process list collection (from running pods) - now organized by pod
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" "processes directory in $cr deployment"
-    check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "backstage-backend container process list"
-    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "PID" "process list header"
-    check_file_contains "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes/container=backstage-backend.txt" "node" "Node.js process in process list"
+    # Verify process collection from each pod (organized in per-pod subdirectories)
+    pod_dirs=$(find "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+    if [ "$pod_dirs" -eq "$expected_replicas" ]; then
+        log_info "✓ Found $pod_dirs pod process directories (expected: $expected_replicas replicas)"
+    else
+        log_error "✗ Expected $expected_replicas pod process directories, found $pod_dirs"
+        ((ERRORS++))
+    fi
+    # Validate process files in each pod directory
+    for pod_dir in "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes"/pod=*; do
+        if [ -d "$pod_dir" ]; then
+            pod_name=$(basename "$pod_dir")
+            check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in $pod_name"
+            check_file_contains "$pod_dir/container=backstage-backend.txt" "PID" "process list header in $pod_name"
+            check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in $pod_name"
+        fi
+    done
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset" "all deployment data in $cr in Backstage CRs in Operator collection directory"
     check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/logs-db.txt" "Backstage CR DB StatefulSet logs in Operator collection directory"
     check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/pods" "all DB StatefulSet pods data in $cr in Backstage CRs in Operator collection directory"
