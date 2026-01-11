@@ -45,6 +45,7 @@ teardown() {
     run "${SCRIPTS_DIR}/must_gather" --help
     [ "$status" -eq 0 ]
     [[ "$output" =~ "--without-operator" ]]
+    [[ "$output" =~ "--without-orchestrator" ]]
     [[ "$output" =~ "--without-helm" ]]
     [[ "$output" =~ "--without-platform" ]]
     [[ "$output" =~ "--without-route" ]]

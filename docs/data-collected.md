@@ -25,6 +25,50 @@ This tool focuses exclusively on RHDH-related resources as well some very minima
 - **Operator Infrastructure**: Deployments, logs, and configurations in operator namespaces
 - **[Application Runtime Data](#application-runtime-data-extracted-from-rhdh-containers-if-running)**
 
+#### Orchestrator-Flavored Deployments
+RHDH can be deployed using the Orchestrator flavor, which includes additional infrastructure components. The must-gather tool automatically detects and collects information about these components:
+
+- **OpenShift Serverless Operator** (in `openshift-serverless` namespace):
+  - ClusterServiceVersions (CSV) with operator version information
+  - Operator deployments, pods, and logs
+  - OLM subscriptions for version tracking
+  - Knative OpenShift and Knative OpenShift Ingress operator logs
+
+- **OpenShift Serverless Logic Operator** (in `openshift-serverless-logic` namespace):
+  - ClusterServiceVersions (CSV) with operator version information
+  - Operator deployments, pods, and logs
+  - OLM subscriptions for version tracking
+  - Logic operator logs
+
+- **Orchestrator CRDs**:
+  - `sonataflowplatforms.sonataflow.org` - SonataFlowPlatform CRD
+  - `sonataflows.sonataflow.org` - SonataFlow workflow CRD
+  - `sonataflowclusterplatforms.sonataflow.org` - SonataFlowClusterPlatform CRD
+  - `sonataflowbuilds.sonataflow.org` - SonataFlowBuild CRD
+  - `knativeservings.operator.knative.dev` - KnativeServing CRD
+  - `knativeeventings.operator.knative.dev` - KnativeEventing CRD
+  - `knativekafkas.operator.serverless.openshift.io` - KnativeKafka CRD (optional)
+
+- **SonataFlowPlatform Custom Resources**:
+  - Full CR definitions and descriptions
+  - Related deployments, services, and logs
+  - Data Index Service information
+  - SonataFlow workflows in the same namespace
+
+- **Knative Resources**:
+  - KnativeServing CRs and namespace resources (`knative-serving`)
+  - KnativeEventing CRs and namespace resources (`knative-eventing`)
+  - KnativeKafka CRs (if installed)
+
+- **Orchestrator Summary**: A consolidated `summary.txt` file with:
+  - OpenShift Serverless operator version
+  - OpenShift Serverless Logic operator version
+  - List of SonataFlowPlatform CRs and their status
+  - List of SonataFlow workflows and their status
+  - Knative Serving and Eventing status
+
+**Note**: Orchestrator data collection can be skipped with `--without-orchestrator` flag if the Orchestrator flavor is not in use.
+
 #### Application Runtime Data (extracted from RHDH containers, if running)
 - **RHDH version information**: `backstage.json` contains Backstage version
 - **Build metadata**: `build-metadata.json` with RHDH version, Backstage version, upstream/midstream sources, and build timestamp
