@@ -275,9 +275,13 @@ collect_rhdh_info_from_running_pods() {
   local upstream_repo=""
   local midstream_repo=""
 
+  # shellcheck disable=SC2016 # Variables are intentionally expanded inside the container, not on the host
   backstage_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$BACKSTAGE_VERSION"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
   rhdh_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$RHDH_VERSION"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
   upstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$UPSTREAM_REPO"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
   midstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$MIDSTREAM_REPO"' 2>/dev/null || true)
 
   # Build Metadata to extract the RHDH version information
