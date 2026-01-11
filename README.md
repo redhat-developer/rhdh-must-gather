@@ -148,12 +148,15 @@ Usage: ./must_gather [params...]
   > - platform
   > - helm
   > - operator
+  > - orchestrator
   > - route
   > - ingress
   > - namespace-inspect
 
   > You can exclude specific data collection types:
   --without-operator            Skip operator-based RHDH deployment data collection
+  --without-orchestrator        Skip Orchestrator-flavored deployment data collection
+                                (OpenShift Serverless, Serverless Logic, SonataFlowPlatform)
   --without-helm                Skip Helm-based RHDH deployment data collection  
   --without-platform            Skip platform detection and information
   --without-route               Skip OpenShift route collection
@@ -227,6 +230,7 @@ Usage: ./must_gather [params...]
 | Flag | Description | Use Case |
 |------|-------------|----------|
 | `--without-operator` | Skip operator-based RHDH deployment data | When you know RHDH is deployed via Helm only |
+| `--without-orchestrator` | Skip Orchestrator-related data (Serverless, Serverless Logic, SonataFlowPlatform) | When you know you don't have any Orchestrator flavor instances of RHDH |
 | `--without-helm` | Skip Helm-based RHDH deployment data | When you know RHDH is deployed via Operator only |
 | `--without-platform` | Skip platform detection and information | For minimal collections when platform info is not needed |
 | `--without-route` | Skip OpenShift route collection | For non-OpenShift clusters or when routes are not relevant |
@@ -355,6 +359,58 @@ Usage: ./must_gather [params...]
 │                       ├── pods.txt
 │                       ├── pods.yaml
 │                       └── pods.describe.txt
+├── orchestrator/                   # Orchestrator-flavored deployment data (if detected)
+│   ├── summary.txt                 # Summary of all detected Orchestrator components and versions
+│   ├── serverless-operators/       # OpenShift Serverless operators information
+│   │   ├── ns=openshift-serverless/        # OpenShift Serverless operator namespace
+│   │   │   ├── csv-list.txt                # ClusterServiceVersion list (operator version)
+│   │   │   ├── csv-all.yaml                # CSV details
+│   │   │   ├── deployments.txt             # Operator deployments
+│   │   │   ├── pods.txt                    # Operator pods
+│   │   │   ├── subscriptions.txt           # OLM subscriptions
+│   │   │   └── logs-*.txt                  # Operator logs
+│   │   └── ns=openshift-serverless-logic/  # OpenShift Serverless Logic operator namespace
+│   │       ├── csv-list.txt                # ClusterServiceVersion list (operator version)
+│   │       ├── csv-all.yaml                # CSV details
+│   │       ├── deployments.txt             # Operator deployments
+│   │       ├── pods.txt                    # Operator pods
+│   │       ├── subscriptions.txt           # OLM subscriptions
+│   │       └── logs-logic-operator.txt     # Logic operator logs
+│   ├── crds/                       # Orchestrator-related Custom Resource Definitions
+│   │   ├── found-crds.txt          # List of detected Orchestrator CRDs
+│   │   ├── sonataflowplatforms.sonataflow.org.yaml     # SonataFlowPlatform CRD
+│   │   ├── sonataflows.sonataflow.org.yaml             # SonataFlow CRD
+│   │   ├── knativeservings.operator.knative.dev.yaml   # KnativeServing CRD
+│   │   └── knativeeventings.operator.knative.dev.yaml  # KnativeEventing CRD
+│   ├── sonataflow-platforms/       # SonataFlowPlatform Custom Resources
+│   │   ├── all-sonataflow-platforms.txt    # List of all SonataFlowPlatform CRs
+│   │   └── ns=[namespace]/         # Per-namespace SonataFlowPlatform data
+│   │       └── [platform-name]/    # Per-platform directory
+│   │           ├── [platform-name].yaml    # SonataFlowPlatform CR definition
+│   │           ├── describe.txt            # CR description
+│   │           ├── related-deployments.txt # Platform-related deployments
+│   │           ├── related-services.txt    # Platform-related services
+│   │           ├── logs.txt                # Platform-related logs
+│   │           └── workflows/              # SonataFlow workflows in this namespace
+│   │               ├── all-workflows.txt   # List of workflows
+│   │               └── [workflow-name]/    # Per-workflow directory
+│   │                   ├── workflow.yaml   # SonataFlow workflow definition
+│   │                   ├── describe.txt    # Workflow description
+│   │                   ├── pods.txt        # Workflow pods
+│   │                   └── logs.txt        # Workflow logs
+│   └── knative/                    # Knative resources
+│       ├── knative-serving-list.txt        # KnativeServing CRs list
+│       ├── knative-serving.yaml            # KnativeServing CR details
+│       ├── knative-eventing-list.txt       # KnativeEventing CRs list
+│       ├── knative-eventing.yaml           # KnativeEventing CR details
+│       ├── knative-serving/                # knative-serving namespace resources
+│       │   ├── deployments.txt
+│       │   ├── pods.txt
+│       │   └── services.txt
+│       └── knative-eventing/               # knative-eventing namespace resources
+│           ├── deployments.txt
+│           ├── pods.txt
+│           └── services.txt
 └── operator/                       # Operator deployment data (if RHDH operators found)
     ├── all-deployments.txt         # List of all RHDH operator deployments
     ├── olm/                        # OLM information

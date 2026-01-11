@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+
+# Orchestrator Data Collection Script
+# Collects information for RHDH Orchestrator-flavored deployments
+# Detects OpenShift Serverless, Serverless Logic operators, and SonataFlowPlatform CRs
+
+set -euo pipefail
+
+# Get script directory for calling other scripts
+DIR_NAME=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+source "${DIR_NAME}/common.sh"
+
+log_info "Starting Orchestrator data collection..."
+
+orchestrator_dir="$BASE_COLLECTION_PATH/orchestrator"
+ensure_directory "$orchestrator_dir"
+
+# Flag to track if any Orchestrator components were found
+orchestrator_detected=false
+
+# ============================================================================
+# Serverless Operators Detection and Collection
+# ============================================================================
+
+function gather_serverless_operators() {
+    log_info "Checking for OpenShift Serverless operators..."
+
+    local serverless_dir="$orchestrator_dir/serverless-operators"
+    ensure_directory "$serverless_dir"
+
+    # Check for OpenShift Serverless operator (Knative Serving/Eventing)
+    local serverless_ns="openshift-serverless"
+    if $KUBECTL_CMD get namespace "$serverless_ns" >/dev/null 2>&1; then
+        log_info "\tFound OpenShift Serverless namespace: $serverless_ns"
+        orchestrator_detected=true
+
+        local serverless_ns_dir="$serverless_dir/ns=$serverless_ns"
+        ensure_directory "$serverless_ns_dir"
+
+        # Collect CSV (ClusterServiceVersion) for version info
+        safe_exec "$KUBECTL_CMD get csv -n '$serverless_ns'" "$serverless_ns_dir/csv-list.txt" "CSVs in $serverless_ns"
+        safe_exec "$KUBECTL_CMD get csv -n '$serverless_ns' -o yaml" "$serverless_ns_dir/csv-all.yaml" "CSV details in $serverless_ns"
+
+        # Collect operator deployment
+        safe_exec "$KUBECTL_CMD get deployments -n '$serverless_ns'" "$serverless_ns_dir/deployments.txt" "Deployments in $serverless_ns"
+        safe_exec "$KUBECTL_CMD get deployments -n '$serverless_ns' -o yaml" "$serverless_ns_dir/deployments.yaml" "Deployment details in $serverless_ns"
+
+        # Collect operator pods
+        safe_exec "$KUBECTL_CMD get pods -n '$serverless_ns'" "$serverless_ns_dir/pods.txt" "Pods in $serverless_ns"
+        safe_exec "$KUBECTL_CMD describe pods -n '$serverless_ns'" "$serverless_ns_dir/pods.describe.txt" "Pod descriptions in $serverless_ns"
+
+        # Collect operator logs
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --selector='name=knative-openshift' ${log_collection_args:-}" \
+            "$serverless_ns_dir/logs-knative-openshift.txt" "Knative OpenShift operator logs"
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --selector='name=knative-openshift-ingress' ${log_collection_args:-}" \
+            "$serverless_ns_dir/logs-knative-openshift-ingress.txt" "Knative OpenShift Ingress operator logs"
+
+        # Collect subscription info
+        safe_exec "$KUBECTL_CMD get subscription -n '$serverless_ns'" "$serverless_ns_dir/subscriptions.txt" "Subscriptions in $serverless_ns"
+        safe_exec "$KUBECTL_CMD get subscription -n '$serverless_ns' -o yaml" "$serverless_ns_dir/subscriptions.yaml" "Subscription details in $serverless_ns"
+    else
+        log_info "\tOpenShift Serverless namespace not found (namespace: $serverless_ns)"
+        echo "OpenShift Serverless namespace ($serverless_ns) not found" > "$serverless_dir/serverless-not-installed.txt"
+    fi
+
+    # Check for OpenShift Serverless Logic operator
+    local logic_ns="openshift-serverless-logic"
+    if $KUBECTL_CMD get namespace "$logic_ns" >/dev/null 2>&1; then
+        log_info "\tFound OpenShift Serverless Logic namespace: $logic_ns"
+        orchestrator_detected=true
+
+        local logic_ns_dir="$serverless_dir/ns=$logic_ns"
+        ensure_directory "$logic_ns_dir"
+
+        # Collect CSV for version info
+        safe_exec "$KUBECTL_CMD get csv -n '$logic_ns'" "$logic_ns_dir/csv-list.txt" "CSVs in $logic_ns"
+        safe_exec "$KUBECTL_CMD get csv -n '$logic_ns' -o yaml" "$logic_ns_dir/csv-all.yaml" "CSV details in $logic_ns"
+
+        # Collect operator deployment
+        safe_exec "$KUBECTL_CMD get deployments -n '$logic_ns'" "$logic_ns_dir/deployments.txt" "Deployments in $logic_ns"
+        safe_exec "$KUBECTL_CMD get deployments -n '$logic_ns' -o yaml" "$logic_ns_dir/deployments.yaml" "Deployment details in $logic_ns"
+
+        # Collect operator pods
+        safe_exec "$KUBECTL_CMD get pods -n '$logic_ns'" "$logic_ns_dir/pods.txt" "Pods in $logic_ns"
+        safe_exec "$KUBECTL_CMD describe pods -n '$logic_ns'" "$logic_ns_dir/pods.describe.txt" "Pod descriptions in $logic_ns"
+
+        # Collect operator logs
+        safe_exec "$KUBECTL_CMD logs -n '$logic_ns' --all-containers -l 'app.kubernetes.io/name=logic-operator-rhel8' ${log_collection_args:-}" \
+            "$logic_ns_dir/logs-logic-operator.txt" "Serverless Logic operator logs"
+
+        # Collect subscription info
+        safe_exec "$KUBECTL_CMD get subscription -n '$logic_ns'" "$logic_ns_dir/subscriptions.txt" "Subscriptions in $logic_ns"
+        safe_exec "$KUBECTL_CMD get subscription -n '$logic_ns' -o yaml" "$logic_ns_dir/subscriptions.yaml" "Subscription details in $logic_ns"
+    else
+        log_info "\tOpenShift Serverless Logic namespace not found (namespace: $logic_ns)"
+        echo "OpenShift Serverless Logic namespace ($logic_ns) not found" > "$serverless_dir/serverless-logic-not-installed.txt"
+    fi
+}
+
+# ============================================================================
+# Orchestrator CRDs Collection
+# ============================================================================
+
+function gather_orchestrator_crds() {
+    log_info "Collecting Orchestrator-related Custom Resource Definitions..."
+
+    local crds_dir="$orchestrator_dir/crds"
+    ensure_directory "$crds_dir"
+
+    # Orchestrator-related CRDs
+    local orchestrator_crds=(
+        # SonataFlow / Serverless Logic CRDs
+        "sonataflowplatforms.sonataflow.org"
+        "sonataflows.sonataflow.org"
+        "sonataflowclusterplatforms.sonataflow.org"
+        "sonataflowbuilds.sonataflow.org"
+        # Knative Serving CRDs
+        "knativeservings.operator.knative.dev"
+        # Knative Eventing CRDs
+        "knativeeventings.operator.knative.dev"
+        # Knative Kafka CRDs (optional)
+        "knativekafkas.operator.serverless.openshift.io"
+    )
+
+    local found_crds=()
+    for crd in "${orchestrator_crds[@]}"; do
+        if $KUBECTL_CMD get crd "$crd" >/dev/null 2>&1; then
+            log_info "\tFound CRD: $crd"
+            orchestrator_detected=true
+            found_crds+=("$crd")
+            safe_exec "$KUBECTL_CMD get crd '$crd' -o yaml" "$crds_dir/${crd}.yaml" "CRD definition for $crd"
+            safe_exec "$KUBECTL_CMD describe crd '$crd'" "$crds_dir/${crd}.describe.txt" "CRD description for $crd"
+        else
+            log_debug "\tCRD not found: $crd"
+        fi
+    done
+
+    if [[ ${#found_crds[@]} -eq 0 ]]; then
+        echo "No Orchestrator-related CRDs found" > "$crds_dir/no-crds.txt"
+    else
+        printf '%s\n' "${found_crds[@]}" > "$crds_dir/found-crds.txt"
+    fi
+}
+
+# ============================================================================
+# SonataFlowPlatform CRs Collection
+# ============================================================================
+
+function gather_sonataflow_platforms() {
+    log_info "Searching for SonataFlowPlatform Custom Resources..."
+
+    local sfp_dir="$orchestrator_dir/sonataflow-platforms"
+    ensure_directory "$sfp_dir"
+
+    # Check if SonataFlowPlatform CRD exists
+    if ! $KUBECTL_CMD get crd sonataflowplatforms.sonataflow.org >/dev/null 2>&1; then
+        log_info "\tSonataFlowPlatform CRD not found - Serverless Logic may not be installed"
+        echo "SonataFlowPlatform CRD not found" > "$sfp_dir/crd-not-found.txt"
+        return 0
+    fi
+
+    namespace_args=$(get_namespace_args)
+    safe_exec "$KUBECTL_CMD get sonataflowplatforms.sonataflow.org $namespace_args" "$sfp_dir/all-sonataflow-platforms.txt" \
+        "All SonataFlowPlatform CRs"
+    safe_exec "$KUBECTL_CMD get sonataflowplatforms.sonataflow.org $namespace_args -o json | jq -r '.items[]'" "$sfp_dir/all-sonataflow-platforms.json" \
+        "All SonataFlowPlatform CRs - JSON"
+
+    # Parse the JSON to get namespace/name pairs
+    local sfps
+    sfps=$(jq -r '"\(.metadata.namespace)/\(.metadata.name)"' < "$sfp_dir/all-sonataflow-platforms.json" 2>/dev/null || echo "")
+    rm -rf "$sfp_dir/all-sonataflow-platforms.json"
+
+    if [[ -z "$sfps" ]]; then
+        log_info "\tNo SonataFlowPlatform CRs found"
+        echo "No SonataFlowPlatform CRs found" > "$sfp_dir/no-platforms.txt"
+        return 0
+    fi
+
+    orchestrator_detected=true
+
+    # Process each SonataFlowPlatform
+    for sfp_info in $sfps; do
+        if [[ -z "$sfp_info" ]]; then
+            continue
+        fi
+
+        local sfp_ns=""
+        local sfp_name="$sfp_info"
+
+        # Handle namespace/name format
+        if [[ "$sfp_info" == *"/"* ]]; then
+            sfp_ns=$(echo "$sfp_info" | cut -d'/' -f1)
+            sfp_name=$(echo "$sfp_info" | cut -d'/' -f2)
+        fi
+
+        log_info "--> Processing SonataFlowPlatform $sfp_name in namespace $sfp_ns"
+
+        local sfp_cr_dir="$sfp_dir/ns=$sfp_ns/$sfp_name"
+        ensure_directory "$sfp_cr_dir"
+
+        # Collect SonataFlowPlatform CR details
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' get sonataflowplatforms.sonataflow.org '$sfp_name' -o yaml" \
+            "$sfp_cr_dir/$sfp_name.yaml" "SonataFlowPlatform CR $sfp_name"
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' describe sonataflowplatforms.sonataflow.org '$sfp_name'" \
+            "$sfp_cr_dir/describe.txt" "SonataFlowPlatform CR description"
+
+        # Collect Data Index Service info if present
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' get deployments -l 'app.kubernetes.io/component=sonataflow-platform'" \
+            "$sfp_cr_dir/related-deployments.txt" "SonataFlowPlatform related deployments"
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' get services -l 'sonataflow.org/platform=$sfp_name'" \
+            "$sfp_cr_dir/related-services.txt" "SonataFlowPlatform related services"
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers ${log_collection_args:-}" \
+            "$sfp_cr_dir/logs.txt" "SonataFlowPlatform related logs"
+
+        # Collect SonataFlow workflows in the same namespace
+        gather_sonataflows_in_namespace "$sfp_ns" "$sfp_cr_dir"
+    done
+}
+
+# ============================================================================
+# SonataFlow Workflows Collection
+# ============================================================================
+
+function gather_sonataflows_in_namespace() {
+    local ns="$1"
+    local output_dir="$2"
+
+    log_info "\tCollecting SonataFlow workflows in namespace $ns..."
+
+    local workflows_dir="$output_dir/workflows"
+    ensure_directory "$workflows_dir"
+
+    # Check if SonataFlow CRD exists
+    if ! $KUBECTL_CMD get crd sonataflows.sonataflow.org >/dev/null 2>&1; then
+        log_debug "\tSonataFlow CRD not found"
+        return 0
+    fi
+
+    safe_exec "$KUBECTL_CMD -n '$ns' get sonataflows.sonataflow.org" "$workflows_dir/all-workflows.txt" \
+        "SonataFlow workflows in $ns"
+
+    # Get list of workflows
+    local workflows
+    workflows=$($KUBECTL_CMD -n "$ns" get sonataflows.sonataflow.org -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+
+    if [[ -z "$workflows" ]]; then
+        echo "No SonataFlow workflows found in namespace $ns" > "$workflows_dir/no-workflows.txt"
+        return 0
+    fi
+
+    for workflow in $workflows; do
+        log_info "\t\tProcessing SonataFlow workflow: $workflow"
+        
+        local wf_dir="$workflows_dir/$workflow"
+        ensure_directory "$wf_dir"
+
+        safe_exec "$KUBECTL_CMD -n '$ns' get sonataflows.sonataflow.org '$workflow' -o yaml" \
+            "$wf_dir/workflow.yaml" "SonataFlow $workflow definition"
+        safe_exec "$KUBECTL_CMD -n '$ns' describe sonataflows.sonataflow.org '$workflow'" \
+            "$wf_dir/describe.txt" "SonataFlow $workflow description"
+        
+        # Collect related pods and logs for this workflow
+        safe_exec "$KUBECTL_CMD -n '$ns' get pods -l 'sonataflow.org/workflow-app=$workflow'" \
+            "$wf_dir/pods.txt" "SonataFlow $workflow pods"
+        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers ${log_collection_args:-}" \
+            "$wf_dir/logs.txt" "SonataFlow $workflow logs"
+    done
+}
+
+# ============================================================================
+# Knative Resources Collection
+# ============================================================================
+
+function gather_knative_resources() {
+    log_info "Collecting Knative resources..."
+
+    local knative_dir="$orchestrator_dir/knative"
+    ensure_directory "$knative_dir"
+
+    # KnativeServing CR (cluster-scoped, typically in knative-serving namespace)
+    if $KUBECTL_CMD get crd knativeservings.operator.knative.dev >/dev/null 2>&1; then
+        safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces" \
+            "$knative_dir/knative-serving-list.txt" "KnativeServing CRs"
+        safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o yaml" \
+            "$knative_dir/knative-serving.yaml" "KnativeServing CR details"
+        
+        # Check knative-serving namespace for resources
+        if $KUBECTL_CMD get namespace knative-serving >/dev/null 2>&1; then
+            orchestrator_detected=true
+            local serving_dir="$knative_dir/knative-serving"
+            ensure_directory "$serving_dir"
+            
+            safe_exec "$KUBECTL_CMD -n knative-serving get deployments" "$serving_dir/deployments.txt" "Knative Serving deployments"
+            safe_exec "$KUBECTL_CMD -n knative-serving get pods" "$serving_dir/pods.txt" "Knative Serving pods"
+            safe_exec "$KUBECTL_CMD -n knative-serving get services" "$serving_dir/services.txt" "Knative Serving services"
+        fi
+    else
+        log_debug "\tKnativeServing CRD not found"
+        echo "KnativeServing CRD not found" > "$knative_dir/knative-serving-not-installed.txt"
+    fi
+
+    # KnativeEventing CR
+    if $KUBECTL_CMD get crd knativeeventings.operator.knative.dev >/dev/null 2>&1; then
+        safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces" \
+            "$knative_dir/knative-eventing-list.txt" "KnativeEventing CRs"
+        safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o yaml" \
+            "$knative_dir/knative-eventing.yaml" "KnativeEventing CR details"
+        
+        # Check knative-eventing namespace for resources
+        if $KUBECTL_CMD get namespace knative-eventing >/dev/null 2>&1; then
+            orchestrator_detected=true
+            local eventing_dir="$knative_dir/knative-eventing"
+            ensure_directory "$eventing_dir"
+            
+            safe_exec "$KUBECTL_CMD -n knative-eventing get deployments" "$eventing_dir/deployments.txt" "Knative Eventing deployments"
+            safe_exec "$KUBECTL_CMD -n knative-eventing get pods" "$eventing_dir/pods.txt" "Knative Eventing pods"
+            safe_exec "$KUBECTL_CMD -n knative-eventing get services" "$eventing_dir/services.txt" "Knative Eventing services"
+        fi
+    else
+        log_debug "\tKnativeEventing CRD not found"
+        echo "KnativeEventing CRD not found" > "$knative_dir/knative-eventing-not-installed.txt"
+    fi
+
+    # KnativeKafka CR (optional)
+    if $KUBECTL_CMD get crd knativekafkas.operator.serverless.openshift.io >/dev/null 2>&1; then
+        safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces" \
+            "$knative_dir/knative-kafka-list.txt" "KnativeKafka CRs"
+        safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces -o yaml" \
+            "$knative_dir/knative-kafka.yaml" "KnativeKafka CR details"
+    fi
+}
+
+# ============================================================================
+# Orchestrator Version Summary
+# ============================================================================
+
+function generate_orchestrator_summary() {
+    log_info "Generating Orchestrator components summary..."
+
+    local summary_file="$orchestrator_dir/summary.txt"
+    
+    {
+        echo "=============================================="
+        echo "RHDH Orchestrator Components Summary"
+        echo "Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        echo "=============================================="
+        echo ""
+
+        echo "=== OpenShift Serverless Operator ==="
+        if $KUBECTL_CMD get csv -n openshift-serverless 2>/dev/null | grep -i serverless; then
+            $KUBECTL_CMD get csv -n openshift-serverless -o custom-columns='NAME:.metadata.name,VERSION:.spec.version,PHASE:.status.phase' 2>/dev/null | grep -i serverless || echo "Not found"
+        else
+            echo "Not installed"
+        fi
+        echo ""
+
+        echo "=== OpenShift Serverless Logic Operator ==="
+        if $KUBECTL_CMD get csv -n openshift-serverless-logic 2>/dev/null | grep -i logic; then
+            $KUBECTL_CMD get csv -n openshift-serverless-logic -o custom-columns='NAME:.metadata.name,VERSION:.spec.version,PHASE:.status.phase' 2>/dev/null | grep -i logic || echo "Not found"
+        else
+            echo "Not installed"
+        fi
+        echo ""
+
+        echo "=== SonataFlowPlatform CRs ==="
+        if $KUBECTL_CMD get crd sonataflowplatforms.sonataflow.org >/dev/null 2>&1; then
+            $KUBECTL_CMD get sonataflowplatforms.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlowPlatform CRs found"
+        else
+            echo "SonataFlowPlatform CRD not installed"
+        fi
+        echo ""
+
+        echo "=== SonataFlow Workflows ==="
+        if $KUBECTL_CMD get crd sonataflows.sonataflow.org >/dev/null 2>&1; then
+            $KUBECTL_CMD get sonataflows.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlow workflows found"
+        else
+            echo "SonataFlow CRD not installed"
+        fi
+        echo ""
+
+        echo "=== Knative Serving ==="
+        if $KUBECTL_CMD get crd knativeservings.operator.knative.dev >/dev/null 2>&1; then
+            $KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found"
+        else
+            echo "KnativeServing CRD not installed"
+        fi
+        echo ""
+
+        echo "=== Knative Eventing ==="
+        if $KUBECTL_CMD get crd knativeeventings.operator.knative.dev >/dev/null 2>&1; then
+            $KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found"
+        else
+            echo "KnativeEventing CRD not installed"
+        fi
+        echo ""
+
+        echo "=============================================="
+        if [[ "$orchestrator_detected" == "true" ]]; then
+            echo "Orchestrator components detected: YES"
+        else
+            echo "Orchestrator components detected: NO"
+        fi
+        echo "=============================================="
+
+    } > "$summary_file"
+
+    log_info "\tSummary written to: $summary_file"
+}
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+gather_serverless_operators
+gather_orchestrator_crds
+gather_sonataflow_platforms
+gather_knative_resources
+generate_orchestrator_summary
+
+if [[ "$orchestrator_detected" == "true" ]]; then
+    log_success "... Orchestrator data collection done (Orchestrator components detected)."
+else
+    log_info "... Orchestrator data collection done (no Orchestrator components detected)."
+fi

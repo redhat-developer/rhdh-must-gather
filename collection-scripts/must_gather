@@ -15,6 +15,7 @@ mandatory_scripts=(
   "platform"
   "helm"
   "operator"
+  "orchestrator"
   "route"
   "ingress"
   "namespace-inspect"
@@ -65,6 +66,9 @@ function parse_flags {
         ;;
       --without-operator)
         excluded_scripts+=("operator")
+        ;;
+      --without-orchestrator)
+        excluded_scripts+=("orchestrator")
         ;;
       --without-helm)
         excluded_scripts+=("helm")
@@ -132,6 +136,8 @@ Usage: ./$(basename "$0") [params...]
 
   > You can exclude specific data collection types:
   --without-operator            Skip operator-based RHDH deployment data collection
+  --without-orchestrator        Skip Orchestrator-flavored deployment data collection
+                                (OpenShift Serverless, Serverless Logic, SonataFlowPlatform)
   --without-helm                Skip Helm-based RHDH deployment data collection  
   --without-platform            Skip platform detection and information
   --without-route               Skip OpenShift route collection
