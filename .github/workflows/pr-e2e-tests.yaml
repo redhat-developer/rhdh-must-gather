@@ -58,6 +58,11 @@ jobs:
         if: inputs.run_e2e
         run: make test-e2e FULL_IMAGE_NAME="${{ inputs.image_name }}"
 
+      - name: Display must-gather process logs
+        if: ${{ inputs.run_e2e && (success() || failure()) }}
+        run: |
+          cat rhdh-must-gather-output.k8s.*/must-gather.log || true
+
       - name: Upload must-gather output
         if: ${{ inputs.run_e2e && (success() || failure()) }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
