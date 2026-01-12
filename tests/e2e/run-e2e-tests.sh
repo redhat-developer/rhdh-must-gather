@@ -115,6 +115,24 @@ dump_debug_info() {
         fi
     fi
     
+    # Standalone Helm deployment info
+    if [ -n "${NS_STANDALONE:-}" ]; then
+        log_warn "--- Standalone Helm Deployment (namespace: $NS_STANDALONE) ---"
+        log_warn "--- Pods in namespace $NS_STANDALONE ---"
+        kubectl -n "$NS_STANDALONE" get pods -o wide 2>/dev/null || true
+        
+        log_warn "--- Deployments in namespace $NS_STANDALONE ---"
+        kubectl -n "$NS_STANDALONE" get deployments -o wide 2>/dev/null || true
+        
+        log_warn "--- Events in namespace $NS_STANDALONE ---"
+        kubectl -n "$NS_STANDALONE" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+        
+        if [ -n "${STANDALONE_DEPLOY:-}" ]; then
+            log_warn "--- Standalone Deployment '$STANDALONE_DEPLOY' ---"
+            kubectl -n "$NS_STANDALONE" get deployment "$STANDALONE_DEPLOY" -o yaml 2>/dev/null || true
+        fi
+    fi
+    
     # Operator logs
     log_warn "--- RHDH Operator Deployment Status ---"
     kubectl -n rhdh-operator get deployment rhdh-operator -o wide 2>/dev/null || true
@@ -267,7 +285,7 @@ EOF
     esac
 fi
 
-HELM_RELEASE="my-rhdh-helm"
+HELM_RELEASE="my-helm"
 # Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
 HELM_VERSION_ARGS=()
 if [ -n "$HELM_CHART_VERSION" ]; then
@@ -321,6 +339,73 @@ if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.re
     exit 1
 fi
 
+# Standalone Helm deployment (simulates GitOps/CD tools using helm template + kubectl apply)
+# This tests the Phase 2 detection in gather_helm which finds RHDH deployments not tracked by Helm releases
+log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
+NS_STANDALONE="test-e2e-$TIMESTAMP-standalone"
+kubectl create namespace "$NS_STANDALONE"
+CLEANUP_TASKS+=("kubectl delete namespace $NS_STANDALONE --wait=false")
+
+STANDALONE_RELEASE="my-helm-standalone"
+STANDALONE_VALUES_FILE="$(mktemp)"
+cat > "$STANDALONE_VALUES_FILE" <<EOF
+route:
+  enabled: false
+global:
+  dynamic:
+    # Faster startup by disabling all default dynamic plugins
+    includes: []
+EOF
+
+# Render the Helm chart and apply directly (no Helm release tracking)
+log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
+if [ "$TARGET_BRANCH" != "main" ]; then
+    # Use the same chart version as the native Helm release
+    helm template "$STANDALONE_RELEASE" oci://quay.io/rhdh/chart \
+        --namespace "$NS_STANDALONE" \
+        --values "$STANDALONE_VALUES_FILE" \
+        ${HELM_VERSION_ARGS:+"${HELM_VERSION_ARGS[@]}"} | kubectl apply -n "$NS_STANDALONE" -f -
+else
+    helm template "$STANDALONE_RELEASE" backstage \
+        --repo "https://redhat-developer.github.io/rhdh-chart" \
+        --namespace "$NS_STANDALONE" \
+        --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
+fi
+
+# Wait for the standalone-deployed RHDH pod to be ready (this deployment should run successfully)
+log_info "Waiting for standalone-deployed RHDH pod to be ready..."
+STANDALONE_POD=""
+TIMEOUT=60
+until STANDALONE_POD=$(kubectl -n "$NS_STANDALONE" get pods -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STANDALONE_POD" ]; do
+    sleep 2
+    TIMEOUT=$((TIMEOUT - 2))
+    if [ $TIMEOUT -le 0 ]; then
+        break
+    fi
+done
+if [ -z "$STANDALONE_POD" ]; then
+    log_error "Could not find standalone-deployed RHDH pod in namespace $NS_STANDALONE."
+    dump_debug_info
+    exit 1
+fi
+log_info "Found standalone-deployed pod: $STANDALONE_POD"
+# Wait for the pod to be ready
+if ! kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"$STANDALONE_POD" --timeout=5m; then
+    log_error "Standalone-deployed pod $STANDALONE_POD did not become ready within expected time."
+    dump_debug_info
+    exit 1
+fi
+log_info "Standalone-deployed pod $STANDALONE_POD is ready."
+
+# Get the deployment name for validation later
+STANDALONE_DEPLOY=$(kubectl -n "$NS_STANDALONE" get deployment -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$STANDALONE_DEPLOY" ]; then
+    log_error "Could not find standalone deployment in namespace $NS_STANDALONE."
+    dump_debug_info
+    exit 1
+fi
+log_info "Found standalone deployment: $STANDALONE_DEPLOY"
+
 # Operator
 # Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
 EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
@@ -341,7 +426,7 @@ kubectl create namespace "$NS_STATEFULSET"
 CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
 
 log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
-BACKSTAGE_CR="my-rhdh-op"
+BACKSTAGE_CR="my-op"
 kubectl -n "$NS" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
@@ -350,7 +435,7 @@ metadata:
 EOF
 # Added in 1.9
 log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
-BACKSTAGE_CR_STATEFULSET="my-rhdh-op-statefulset"
+BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
 kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
 kind: Backstage
@@ -563,6 +648,7 @@ fi
 check_dir_not_empty "$OUTPUT_DIR/namespace-inspect" "namespace-inspect directory"
 check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/rhdh-operator" "rhdh-operator in namespace-inspect directory"
 check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/$NS" "test namespace in namespace-inspect directory"
+check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/$NS_STANDALONE" "standalone test namespace in namespace-inspect directory"
 
 check_dir_not_empty "$OUTPUT_DIR/helm" "Helm collection directory"
 check_file_not_empty "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "release info text"
@@ -590,6 +676,55 @@ if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" ];
     fi
 else
     log_info "✓ Correctly missing processes directory (expected - no running pods)"
+fi
+
+# Standalone Helm deployment validation (Phase 2: detected via labels/images, not Helm release tracking)
+log_info ""
+log_info "--- Validating standalone Helm deployment detection ---"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone" "standalone Helm deployments directory"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE" "$NS_STANDALONE namespace in standalone directory"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY" "$STANDALONE_DEPLOY in standalone directory"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/standalone-note.txt" "standalone deployment note"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/helm-metadata.txt" "Helm metadata for standalone deployment"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment.yaml" "deployment YAML for standalone deployment"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment.describe.txt" "deployment description for standalone deployment"
+
+# Verify the standalone deployment is listed in the all-rhdh-releases.txt with (standalone) marker
+check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "(standalone)" "standalone marker in releases list"
+check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$NS_STANDALONE" "standalone namespace in releases list"
+
+# Verify that standalone deployments have the deployment data collected
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment" "deployment data in standalone directory"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/logs-app.txt" "logs for standalone deployment"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/pods" "pod data for standalone deployment"
+
+# Verify process collection from the running standalone deployment
+# Unlike the native Helm deployment (which is in CreateContainerConfigError), the standalone deployment is running
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes" "processes directory for running standalone deployment"
+# Find the pod directory and verify process files exist
+standalone_pod_dirs=$(find "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+if [ "$standalone_pod_dirs" -ge 1 ]; then
+    log_info "✓ Found $standalone_pod_dirs pod process directory(ies) for standalone deployment"
+else
+    log_error "✗ Expected at least 1 pod process directory for standalone deployment, found $standalone_pod_dirs"
+    ((ERRORS++))
+fi
+# Validate process files in each pod directory
+for pod_dir in "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes"/pod=*; do
+    if [ -d "$pod_dir" ]; then
+        pod_name=$(basename "$pod_dir")
+        check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in standalone $pod_name"
+        check_file_contains "$pod_dir/container=backstage-backend.txt" "PID" "process list header in standalone $pod_name"
+        check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in standalone $pod_name"
+    fi
+done
+
+# Verify the standalone deployment is NOT in the native releases directory (it should only be in standalone/)
+if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS_STANDALONE" ]; then
+    log_error "✗ Standalone deployment namespace should NOT be in helm/releases/ (should only be in helm/standalone/)"
+    ((ERRORS++))
+else
+    log_info "✓ Correctly: standalone deployment is not in helm/releases/ directory"
 fi
 
 check_dir_not_empty "$OUTPUT_DIR/operator" "Operator collection directory"

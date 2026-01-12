@@ -2,6 +2,12 @@
 
 # Helm Data Collection Script
 # Collects Helm-specific information for RHDH deployments
+#
+# Supports two deployment scenarios:
+# 1. Native Helm deployments (helm install/upgrade) - detected via 'helm list'
+# 2. Standalone Helm deployments (helm template + kubectl apply) - detected via workload labels/annotations
+#    These are deployments where the Helm chart was rendered client-side and applied directly,
+#    without creating Helm release secrets. Common with CD tools or manual deployments.
 
 set -euo pipefail
 
@@ -14,6 +20,18 @@ log_info "Starting Helm data collection..."
 helm_dir="$BASE_COLLECTION_PATH/helm"
 ensure_directory "$helm_dir"
 
+# Patterns to identify RHDH-related resources
+RHDH_PATTERN="backstage|rhdh|developer-hub"
+# Known RHDH container image registries/repositories
+# Note: In disconnected environments with mirrored images, the image pattern won't match.
+# Detection will still work via Helm labels (helm.sh/chart, app.kubernetes.io/name, etc.)
+# which are set by 'helm template' regardless of image registry.
+RHDH_IMAGE_PATTERN="quay.io/rhdh|registry.redhat.io/rhdh|ghcr.io/backstage/backstage"
+
+# Track namespaces we've already processed to avoid duplicates
+declare -A processed_namespaces
+declare -A processed_deployments
+
 # Try to find releases with backstage/rhdh patterns in specified namespaces
 namespace_args=$(get_namespace_args)
 if [[ -n "${RHDH_TARGET_NAMESPACES:-}" ]]; then
@@ -22,18 +40,23 @@ else
     log_info "Searching for RHDH-related Helm releases in all namespaces..."
 fi
 
-helm list $namespace_args | grep -E 'REVISION|backstage|rhdh|developer-hub' > "$helm_dir/all-rhdh-releases.txt"
-helm list $namespace_args -o json | jq -r '.[] | select(.chart | test("backstage|rhdh|developer-hub"; "i"))' > "$helm_dir/all-rhdh-releases.json"
+# ============================================================================
+# Phase 1: Detect native Helm releases (helm install/upgrade)
+# ============================================================================
+log_info "Phase 1: Detecting native Helm releases..."
 
-releases=$(jq -r '"\(.namespace)/\(.name)"' < "$helm_dir/all-rhdh-releases.json" || echo "")
-release_namespaces=$(jq -r '"\(.namespace)"' < "$helm_dir/all-rhdh-releases.json" || echo "")
+# shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
+helm list $namespace_args | grep -E 'REVISION|backstage|rhdh|developer-hub' > "$helm_dir/all-rhdh-releases.txt" || true
+# shellcheck disable=SC2086
+helm list $namespace_args -o json | jq -r '.[] | select(.chart | test("backstage|rhdh|developer-hub"; "i"))' > "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "" > "$helm_dir/all-rhdh-releases.json"
+
+releases=$(jq -r '"\(.namespace)/\(.name)"' < "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "")
+release_namespaces=$(jq -r '"\(.namespace)"' < "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "")
 release_namespaces=$(echo "$release_namespaces" | sort | uniq)
 rm -rf "$helm_dir/all-rhdh-releases.json"
 
 if [[ -z "$releases" ]]; then
-    log_warn "No RHDH-related Helm releases found"
-    echo "No RHDH-related Helm releases found" > "$helm_dir/no-releases.txt"
-    exit 0
+    log_info "No native Helm releases found, will check for standalone Helm deployments..."
 fi
 
 log_debug "release_namespaces: $release_namespaces"
@@ -53,9 +76,10 @@ for release_ns in $release_namespaces; do
   ensure_directory "$release_ns_dir"
 
   collect_namespace_data "$release_ns" "$release_ns_dir"
+  processed_namespaces["$release_ns"]=1
 done
 
-# Process each release
+# Process each native Helm release
 for release_info in $releases; do
     if [[ -z "$release_info" ]]; then
       continue
@@ -116,10 +140,222 @@ for release_info in $releases; do
         fi
     fi
 
-    # Collect app-specific info
+    # Collect app-specific info and track processed deployments
     deploy=$(yq -r 'select(.kind=="Deployment") | .metadata.name' < "$release_dir/manifest.yaml" || true)
     statefulset=$(yq -r 'select(.kind=="StatefulSet") | .metadata.name' < "$release_dir/manifest.yaml" || true)
     collect_rhdh_data "$release_ns" "$deploy" "$statefulset" "$release_dir"
+
+    # Track processed deployments to avoid duplicates in Phase 2
+    if [[ -n "$deploy" ]]; then
+        processed_deployments["$release_ns/$deploy"]=1
+    fi
+    if [[ -n "$statefulset" ]]; then
+        processed_deployments["$release_ns/$statefulset"]=1
+    fi
 done
 
-log_success "Helm data collection completed."
+# ============================================================================
+# Phase 2: Detect standalone Helm deployments (helm template + kubectl apply)
+# ============================================================================
+# Some deployments use 'helm template' to render charts and then apply manifests directly
+# using kubectl/oc. This includes manual deployments or CD tools that don't use native Helm releases.
+# In this case, no Helm release secrets exist in the cluster.
+# We detect these by looking for workloads with Helm-generated labels or RHDH-specific patterns.
+
+log_info "Phase 2: Detecting standalone Helm deployments..."
+
+standalone_dir="$helm_dir/standalone"
+
+# Find Deployments that look like RHDH but aren't tracked by native Helm releases
+# Detection criteria:
+# 1. helm.sh/chart label contains backstage/rhdh/developer-hub (set by helm template)
+# 2. app.kubernetes.io/name contains backstage/rhdh/developer-hub
+# 3. Container images from known RHDH registries
+
+# Build label selectors for RHDH detection
+# Note: We can't use regex in label selectors, so we query broadly and filter with jq
+standalone_deployments=""
+standalone_statefulsets=""
+
+# Query all Deployments and filter for RHDH-related ones
+log_debug "Searching for RHDH-related Deployments..."
+# shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
+all_deployments=$($KUBECTL_CMD get deployments $namespace_args -o json 2>/dev/null || echo '{"items":[]}')
+
+# Filter deployments by:
+# - helm.sh/chart label matching RHDH pattern
+# - app.kubernetes.io/name matching RHDH pattern
+# - Container images matching RHDH pattern
+# - app.kubernetes.io/instance matching RHDH pattern (common Helm label)
+standalone_deployments=$(echo "$all_deployments" | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
+  .items[] |
+  select(
+    # Match by helm.sh/chart label
+    (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
+    # Match by app.kubernetes.io/name label
+    (.metadata.labels["app.kubernetes.io/name"] // "" | test($pattern; "i")) or
+    # Match by app.kubernetes.io/instance label
+    (.metadata.labels["app.kubernetes.io/instance"] // "" | test($pattern; "i")) or
+    # Match by container images
+    (.spec.template.spec.containers[]?.image // "" | test($img_pattern; "i")) or
+    # Match by init container images
+    (.spec.template.spec.initContainers[]?.image // "" | test($img_pattern; "i"))
+  ) |
+  "\(.metadata.namespace)/\(.metadata.name)"
+' 2>/dev/null || echo "")
+
+# Query all StatefulSets and filter similarly
+log_debug "Searching for RHDH-related StatefulSets..."
+# shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
+all_statefulsets=$($KUBECTL_CMD get statefulsets $namespace_args -o json 2>/dev/null || echo '{"items":[]}')
+
+standalone_statefulsets=$(echo "$all_statefulsets" | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
+  .items[] |
+  select(
+    (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
+    (.metadata.labels["app.kubernetes.io/name"] // "" | test($pattern; "i")) or
+    (.metadata.labels["app.kubernetes.io/instance"] // "" | test($pattern; "i")) or
+    (.spec.template.spec.containers[]?.image // "" | test($img_pattern; "i")) or
+    (.spec.template.spec.initContainers[]?.image // "" | test($img_pattern; "i"))
+  ) |
+  "\(.metadata.namespace)/\(.metadata.name)"
+' 2>/dev/null || echo "")
+
+# Combine and deduplicate
+standalone_workloads=$(echo -e "${standalone_deployments}\n${standalone_statefulsets}" | grep -v '^$' | sort | uniq || true)
+
+if [[ -z "$standalone_workloads" ]]; then
+    log_debug "No additional RHDH workloads found via standalone deployment detection"
+else
+    log_info "Found potential standalone RHDH deployments, filtering out already-processed ones..."
+
+    standalone_found=false
+    for workload_info in $standalone_workloads; do
+        if [[ -z "$workload_info" ]]; then
+            continue
+        fi
+
+        workload_ns=$(echo "$workload_info" | cut -d'/' -f1)
+        workload_name=$(echo "$workload_info" | cut -d'/' -f2)
+
+        # Skip if already processed in Phase 1
+        if [[ -n "${processed_deployments[$workload_info]:-}" ]]; then
+            log_debug "Skipping $workload_info (already processed as native Helm release)"
+            continue
+        fi
+
+        # Skip if namespace filtering is enabled and it's not in the target list
+        if ! should_include_namespace "$workload_ns"; then
+            log_debug "Skipping standalone workload $workload_name in namespace $workload_ns (not in target list)"
+            continue
+        fi
+
+        standalone_found=true
+        log_info "--> Processing standalone Helm deployment: $workload_name in namespace $workload_ns"
+
+        # Create output directory
+        workload_dir="$standalone_dir/ns=$workload_ns/$workload_name"
+        ensure_directory "$workload_dir"
+
+        # Collect namespace data if not already done
+        if [[ -z "${processed_namespaces[$workload_ns]:-}" ]]; then
+            ns_dir="$standalone_dir/ns=$workload_ns"
+            ensure_directory "$ns_dir"
+            collect_namespace_data "$workload_ns" "$ns_dir"
+            processed_namespaces["$workload_ns"]=1
+        fi
+
+        # Add a note explaining this is a standalone deployment
+        {
+            echo "# Standalone RHDH Helm Deployment"
+            echo "# ================================"
+            echo "# This RHDH instance was detected via workload labels/annotations rather than"
+            echo "# native Helm release tracking. This typically means it was deployed by rendering"
+            echo "# the Helm chart using 'helm template' and applying the manifests directly with"
+            echo "# kubectl/oc apply."
+            echo "#"
+            echo "# As a result, Helm-specific data (values, history, hooks) is not available."
+            echo "# However, we've collected the workload configuration and runtime data."
+            echo "#"
+            echo "# Detection method: Matched labels/images indicating RHDH deployment"
+            echo "# Namespace: $workload_ns"
+            echo "# Workload: $workload_name"
+            echo "# Collected at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo ""
+        } > "$workload_dir/standalone-note.txt"
+
+        # Determine if this is a Deployment or StatefulSet
+        workload_kind=$($KUBECTL_CMD get deployment "$workload_name" -n "$workload_ns" -o name 2>/dev/null || \
+                        $KUBECTL_CMD get statefulset "$workload_name" -n "$workload_ns" -o name 2>/dev/null || echo "")
+
+        # Collect workload YAML and description
+        if [[ "$workload_kind" == *"deployment"* ]]; then
+            safe_exec "$KUBECTL_CMD -n '$workload_ns' get deployment '$workload_name' -o yaml" "$workload_dir/deployment.yaml" "Deployment YAML"
+            safe_exec "$KUBECTL_CMD -n '$workload_ns' describe deployment '$workload_name'" "$workload_dir/deployment.describe.txt" "Deployment description"
+
+            # Extract Helm metadata if available
+            {
+                echo "# Helm Metadata"
+                echo "# ============="
+                $KUBECTL_CMD -n "$workload_ns" get deployment "$workload_name" -o json 2>/dev/null | jq -r '
+                  "Helm Chart: \(.metadata.labels["helm.sh/chart"] // "N/A")",
+                  "App Name: \(.metadata.labels["app.kubernetes.io/name"] // "N/A")",
+                  "App Instance: \(.metadata.labels["app.kubernetes.io/instance"] // "N/A")",
+                  "App Version: \(.metadata.labels["app.kubernetes.io/version"] // "N/A")",
+                  "Managed By: \(.metadata.labels["app.kubernetes.io/managed-by"] // "N/A")"
+                ' 2>/dev/null || echo "Could not extract metadata"
+            } > "$workload_dir/helm-metadata.txt"
+
+            # Collect RHDH-specific data
+            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir"
+        elif [[ "$workload_kind" == *"statefulset"* ]]; then
+            safe_exec "$KUBECTL_CMD -n '$workload_ns' get statefulset '$workload_name' -o yaml" "$workload_dir/statefulset.yaml" "StatefulSet YAML"
+            safe_exec "$KUBECTL_CMD -n '$workload_ns' describe statefulset '$workload_name'" "$workload_dir/statefulset.describe.txt" "StatefulSet description"
+
+            # Extract Helm metadata
+            {
+                echo "# Helm Metadata"
+                echo "# ============="
+                $KUBECTL_CMD -n "$workload_ns" get statefulset "$workload_name" -o json 2>/dev/null | jq -r '
+                  "Helm Chart: \(.metadata.labels["helm.sh/chart"] // "N/A")",
+                  "App Name: \(.metadata.labels["app.kubernetes.io/name"] // "N/A")",
+                  "App Instance: \(.metadata.labels["app.kubernetes.io/instance"] // "N/A")",
+                  "App Version: \(.metadata.labels["app.kubernetes.io/version"] // "N/A")",
+                  "Managed By: \(.metadata.labels["app.kubernetes.io/managed-by"] // "N/A")"
+                ' 2>/dev/null || echo "Could not extract metadata"
+            } > "$workload_dir/helm-metadata.txt"
+
+            # Collect RHDH-specific data (StatefulSet as deployment, no separate DB statefulset)
+            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir"
+        fi
+
+        # Mark as processed
+        processed_deployments["$workload_info"]=1
+    done
+
+    if [[ "$standalone_found" == "true" ]]; then
+        log_info "Standalone Helm deployments were found and collected in: $standalone_dir"
+        # Update the releases file to include standalone deployments
+        {
+            echo ""
+            echo "# Standalone Helm Deployments (detected via labels/images)"
+            echo "# ========================================================="
+            for key in "${!processed_deployments[@]}"; do
+                if [[ -d "$standalone_dir/ns=${key%%/*}" ]]; then
+                    echo "$key (standalone)"
+                fi
+            done
+        } >> "$helm_dir/all-rhdh-releases.txt"
+    fi
+fi
+
+# Final summary
+total_native=$(echo "$releases" | grep -c '/' 2>/dev/null || echo "0")
+total_standalone=$(find "$standalone_dir" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l || echo "0")
+
+if [[ "$total_native" -eq 0 && "$total_standalone" -eq 0 ]]; then
+    log_warn "No RHDH-related Helm releases found (native or standalone)"
+    echo "No RHDH-related Helm releases found (native or standalone)" > "$helm_dir/no-releases.txt"
+fi
+
+log_success "Helm data collection completed. Found: $total_native native release(s), $total_standalone standalone deployment(s)"
