@@ -209,3 +209,4 @@ jobs:
       checkout_repo: ${{ github.event.pull_request.head.repo.full_name }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
       run_e2e: true
+      target_branch: ${{ github.event.pull_request.base.ref }}

@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: true
+      target_branch:
+        description: 'PR target branch (used for RHDH operator branch selection)'
+        required: false
+        type: string
+        default: 'main'
 
 permissions:
   contents: read
@@ -42,7 +47,7 @@ jobs:
         if: inputs.run_e2e
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq skopeo
           # Install yq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
@@ -56,7 +61,7 @@ jobs:
 
       - name: Run E2E tests
         if: inputs.run_e2e
-        run: make test-e2e FULL_IMAGE_NAME="${{ inputs.image_name }}"
+        run: make test-e2e FULL_IMAGE_NAME="${{ inputs.image_name }}" TARGET_BRANCH="${{ inputs.target_branch }}"
 
       - name: Display must-gather process logs
         if: ${{ inputs.run_e2e && (success() || failure()) }}

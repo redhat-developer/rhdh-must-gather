@@ -111,7 +111,12 @@ ifeq ($(LOCAL),true)
 	@./tests/e2e/run-e2e-tests.sh --local
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
-	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" $(if $(OVERLAY),--overlay "$(OVERLAY)")
+	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
+		$(if $(OVERLAY),--overlay "$(OVERLAY)") \
+		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
+		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
+		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
+		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)")
 endif
 
 .PHONY: $(TOOLS_DIR)
@@ -212,6 +217,10 @@ help: ## Display this help.
 	@echo "  LOG_LEVEL			- Log level (default: $(LOG_LEVEL))"
 	@echo "  OPTS				- Additional must-gather options (e.g., --with-heap-dumps --with-secrets)"
 	@echo "  OVERLAY			- Kustomize overlay for deploy-k8s/test-e2e (e.g., \"with-heap-dumps\", \"debug-mode\", or path)"
+	@echo "  TARGET_BRANCH			- Target branch for test-e2e defaults (default: main)"
+	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
+	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
+	@echo "  HELM_VALUES_FILE		- Override Helm values file for test-e2e"
 	@echo "  LOCAL				- Set to 'true' to run test-e2e in local mode (no image required)"
 	@echo "  SCRIPT			- Script name for run-script"
 	@echo "  TOOLS_DIR			- Directory for local tools like yq (default: $(TOOLS_DIR))"

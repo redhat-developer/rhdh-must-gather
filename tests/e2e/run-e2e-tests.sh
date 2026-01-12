@@ -11,15 +11,23 @@
 #   --image <image>     Full image name (required unless --local is used)
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
 #   --overlay <overlay> Overlay to use (pre-built name or path). Only applicable on Kubernetes, ignored on OpenShift and local mode.
+#   --target-branch <branch> Target branch (used for defaults, default: main)
+#   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
+#   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
+#   --helm-values-file <file> Override Helm values file (default: auto-generated from --target-branch)
 #   --help              Show this help message
 #
 # Examples:
 #   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123
 #   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --overlay with-heap-dumps
+#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --target-branch release-1.9
+#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --operator-branch main --helm-chart-version 1.9-20250110-CI
+#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --helm-values-file /path/to/values.yaml
 #   ./tests/e2e/run-e2e-tests.sh --local
 #
 
 set -euo pipefail
+shopt -s extglob
 
 # Colors for output
 RED='\033[0;31m'
@@ -133,6 +141,10 @@ trap cleanup EXIT
 FULL_IMAGE_NAME=""
 OVERLAY=""
 LOCAL_MODE=false
+TARGET_BRANCH="main"
+OPERATOR_BRANCH=""
+HELM_CHART_VERSION=""
+HELM_VALUES_FILE=""
 
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
@@ -147,6 +159,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --overlay)
             OVERLAY="$2"
+            shift 2
+            ;;
+        --target-branch)
+            TARGET_BRANCH="$2"
+            shift 2
+            ;;
+        --operator-branch)
+            OPERATOR_BRANCH="$2"
+            shift 2
+            ;;
+        --helm-chart-version)
+            HELM_CHART_VERSION="$2"
+            shift 2
+            ;;
+        --helm-values-file)
+            HELM_VALUES_FILE="$2"
             shift 2
             ;;
         --help|-h)
@@ -205,8 +233,20 @@ CLEANUP_TASKS+=("kubectl delete namespace $NS --wait=false")
 
 # Helm
 log_info "Deploying Helm release..."
-TEMP_VALUES_FILE="$(mktemp)"
-cat > "$TEMP_VALUES_FILE" <<EOF
+# Use provided values file or generate one based on TARGET_BRANCH
+if [ -n "$HELM_VALUES_FILE" ]; then
+    if [ ! -f "$HELM_VALUES_FILE" ]; then
+        log_error "Helm values file not found: $HELM_VALUES_FILE"
+        exit 1
+    fi
+    log_info "Using provided Helm values file: $HELM_VALUES_FILE"
+    TEMP_VALUES_FILE="$HELM_VALUES_FILE"
+else
+    TEMP_VALUES_FILE="$(mktemp)"
+    # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
+    case "$TARGET_BRANCH" in
+        main|release-1.@(9|[1-9][0-9]))
+            cat > "$TEMP_VALUES_FILE" <<EOF
 route:
   enabled: false
 global:
@@ -218,12 +258,46 @@ upstream:
     # Purposely disable the local database to simulate a misconfigured application (missing external database info)
     enabled: false
 EOF
+            ;;
+        *)
+            # TODO Placeholder for future branches
+            log_error "Unsupported target branch: $TARGET_BRANCH"
+            exit 1
+            ;;
+    esac
+fi
 
 HELM_RELEASE="my-rhdh-helm"
-## TODO: consider specifying a specific version of the Helm chart to test
-helm -n "$NS" install "$HELM_RELEASE" backstage \
-    --repo "https://redhat-developer.github.io/rhdh-chart" \
-    --values "$TEMP_VALUES_FILE"
+# Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
+HELM_VERSION_ARGS=""
+if [ -n "$HELM_CHART_VERSION" ]; then
+    # Use explicitly provided chart version
+    log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
+    HELM_VERSION_ARGS="--version $HELM_CHART_VERSION"
+    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" $HELM_VERSION_ARGS
+elif [ "$TARGET_BRANCH" != "main" ]; then
+    # Extract version from branch name (e.g., release-1.9 -> 1.9)
+    BRANCH_VERSION="${TARGET_BRANCH#release-}"
+    log_info "Looking for Helm chart version matching ${BRANCH_VERSION}-*-CI..."
+    # Use skopeo to list tags and find the latest matching CI tag
+    CHART_VERSION=$(skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
+        jq -r '.Tags[]' | \
+        grep "^${BRANCH_VERSION}-.*-CI$" | \
+        sort -V | \
+        tail -1)
+    if [ -n "$CHART_VERSION" ]; then
+        log_info "Using Helm chart version: $CHART_VERSION"
+        HELM_VERSION_ARGS="--version $CHART_VERSION"
+    else
+        log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
+    fi
+    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" $HELM_VERSION_ARGS
+else
+    # Latest upstream chart
+    helm -n "$NS" install "$HELM_RELEASE" backstage \
+        --repo "https://redhat-developer.github.io/rhdh-chart" \
+        --values "$TEMP_VALUES_FILE"
+fi
 # Wait for the Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)
 log_info "Waiting for Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)..."
 HELM_POD=""
@@ -248,9 +322,10 @@ if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.re
 fi
 
 # Operator
-log_info "Deploying RHDH Operator..."
-OPERATOR_BRANCH="main"
-OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$OPERATOR_BRANCH/dist/rhdh/install.yaml"
+# Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
+EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
+log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
+OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
 kubectl apply -f "$OPERATOR_MANIFEST"
 CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
 log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
