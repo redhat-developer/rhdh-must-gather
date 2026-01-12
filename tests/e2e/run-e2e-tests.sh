@@ -269,12 +269,12 @@ fi
 
 HELM_RELEASE="my-rhdh-helm"
 # Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
-HELM_VERSION_ARGS=""
+HELM_VERSION_ARGS=()
 if [ -n "$HELM_CHART_VERSION" ]; then
     # Use explicitly provided chart version
     log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
-    HELM_VERSION_ARGS="--version $HELM_CHART_VERSION"
-    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" $HELM_VERSION_ARGS
+    HELM_VERSION_ARGS=(--version "$HELM_CHART_VERSION")
+    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
 elif [ "$TARGET_BRANCH" != "main" ]; then
     # Extract version from branch name (e.g., release-1.9 -> 1.9)
     BRANCH_VERSION="${TARGET_BRANCH#release-}"
@@ -287,11 +287,11 @@ elif [ "$TARGET_BRANCH" != "main" ]; then
         tail -1)
     if [ -n "$CHART_VERSION" ]; then
         log_info "Using Helm chart version: $CHART_VERSION"
-        HELM_VERSION_ARGS="--version $CHART_VERSION"
+        HELM_VERSION_ARGS=(--version "$CHART_VERSION")
     else
         log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
     fi
-    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" $HELM_VERSION_ARGS
+    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
 else
     # Latest upstream chart
     helm -n "$NS" install "$HELM_RELEASE" backstage \
