@@ -256,9 +256,61 @@ collect_rhdh_info_from_running_pods() {
   # Running user ID
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- id 2>/dev/null" "$output_dir/app-container-userid.txt" "id inside the main container"
 
+  # Collect relevant environment variables from the container
+  log_info "\tCollecting: environment variables from container"
+  local env_vars_file="$output_dir/env-vars.txt"
+  $KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c '
+    echo "=== RHDH/Backstage Environment Variables ==="
+    echo ""
+    env | grep -E "^(BACKSTAGE_|RHDH_|UPSTREAM_REPO|MIDSTREAM_REPO|NODE_|APP_CONFIG_|LOG_LEVEL|PLUGIN_|NO_PROXY|HTTP_PROXY|HTTPS_PROXY|NPM_CONFIG_|GLOBAL_AGENT_)" | sort || true
+    echo ""
+    echo "=== All Environment Variables ==="
+    echo ""
+    env | sort
+  ' > "$env_vars_file" 2>&1 || true
+
+  # Extract specific env vars for version/metadata collection
+  local backstage_version=""
+  local rhdh_version=""
+  local upstream_repo=""
+  local midstream_repo=""
+
+  # shellcheck disable=SC2016 # Variables are intentionally expanded inside the container, not on the host
+  backstage_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$BACKSTAGE_VERSION"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
+  rhdh_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$RHDH_VERSION"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
+  upstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$UPSTREAM_REPO"' 2>/dev/null || true)
+  # shellcheck disable=SC2016
+  midstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$MIDSTREAM_REPO"' 2>/dev/null || true)
+
   # Build Metadata to extract the RHDH version information
-  safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- cat /opt/app-root/src/backstage.json 2>/dev/null" "$output_dir/backstage.json" "backstage.json"
-  safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- cat /opt/app-root/src/packages/app/src/build-metadata.json 2>/dev/null | jq '.card'" "$output_dir/build-metadata.json" "build metadata"
+  # Primary: Use BACKSTAGE_VERSION env var; Fallback: Read backstage.json file
+  if [[ -n "$backstage_version" ]]; then
+    log_info "\tCollecting: backstage version from BACKSTAGE_VERSION env var"
+    echo "{\"version\": \"$backstage_version\", \"source\": \"BACKSTAGE_VERSION env var\"}" | jq '.' > "$output_dir/backstage.json"
+  else
+    log_debug "BACKSTAGE_VERSION env var not set, falling back to backstage.json file"
+    safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- cat /opt/app-root/src/backstage.json 2>/dev/null" "$output_dir/backstage.json" "backstage.json (fallback)"
+  fi
+
+  # Primary: Use RHDH_VERSION, UPSTREAM_REPO, MIDSTREAM_REPO env vars; Fallback: Read build-metadata.json file
+  if [[ -n "$rhdh_version" || -n "$upstream_repo" || -n "$midstream_repo" ]]; then
+    log_info "\tCollecting: build metadata from environment variables"
+    jq -n \
+      --arg rhdh_version "$rhdh_version" \
+      --arg upstream_repo "$upstream_repo" \
+      --arg midstream_repo "$midstream_repo" \
+      '{
+        rhdh_version: $rhdh_version,
+        upstream_repo: $upstream_repo,
+        midstream_repo: $midstream_repo,
+        source: "environment variables"
+      }' > "$output_dir/build-metadata.json"
+  else
+    log_debug "Build metadata env vars not set, falling back to build-metadata.json file"
+    safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- cat /opt/app-root/src/packages/app/src/build-metadata.json 2>/dev/null | jq '.card'" "$output_dir/build-metadata.json" "build metadata (fallback)"
+  fi
 
   # Node version
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$first_pod' -- node --version 2>/dev/null" "$output_dir/node-version.txt" "Node version"
