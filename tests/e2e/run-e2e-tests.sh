@@ -302,11 +302,6 @@ else
     log_info "Skipping Helm release setup"
 fi
 
-
-# FIXME(asoro): TO REMOVE
-log_error "TEMP: Simulate failure"
-exit 1
-
 # --- Standalone Helm Setup ---
 NS_STANDALONE=""
 STANDALONE_DEPLOY=""
