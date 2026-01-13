@@ -69,7 +69,7 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests (local mode)
-        run: make test-e2e LOCAL=true
+        run: make test-e2e
 
       - name: Upload must-gather output
         if: ${{ success() || failure() }}

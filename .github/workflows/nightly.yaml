@@ -35,7 +35,7 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests
-        run: make test-e2e
+        run: make test-e2e LOCAL=false
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}

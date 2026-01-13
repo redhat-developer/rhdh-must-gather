@@ -103,10 +103,10 @@ test: test-setup ## Run all unit tests
 	@echo "Running BATS unit tests..."
 	@$(BATS_BIN) $(TESTS_OPTIONS) $(TESTS_DIR)/*.bats
 
-LOCAL ?= ## Set to 'true' to run E2E tests in local mode (no image required)
+LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of local mode
 .PHONY: test-e2e
 test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
-ifeq ($(LOCAL),true)
+ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
 	@./tests/e2e/run-e2e-tests.sh --local
 else
@@ -221,14 +221,14 @@ help: ## Display this help.
 	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
 	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
 	@echo "  HELM_VALUES_FILE		- Override Helm values file for test-e2e"
-	@echo "  LOCAL				- Set to 'true' to run test-e2e in local mode (no image required)"
+	@echo "  LOCAL				- Set to 'false' to run test-e2e with container image (default: true, local mode)"
 	@echo "  SCRIPT			- Script name for run-script"
 	@echo "  TOOLS_DIR			- Directory for local tools like yq (default: $(TOOLS_DIR))"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make test                                          # Run all unit tests"
-	@echo "  make test-e2e FULL_IMAGE_NAME=quay.io/org/img:tag  # Run E2E tests against the current cluster you are connected to"
-	@echo "  make test-e2e LOCAL=true                           # Run E2E tests in local mode (no image needed)"
+	@echo "  make test-e2e                                      # Run E2E tests in local mode (default)"
+	@echo "  make test-e2e LOCAL=false FULL_IMAGE_NAME=quay.io/org/img:tag  # Run E2E tests with container image"
 	@echo "  make deploy-k8s OVERLAY=with-heap-dumps            # Run deploy-k8s with heap dump overlay"
 	@echo "  make deploy-k8s OVERLAY=/path/to/my-overlay        # Run deploy-k8s with custom overlay"
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
