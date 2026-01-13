@@ -305,60 +305,76 @@ Usage: ./must_gather [params...]
 ├── platform/                       # Platform and infrastructure information
 │   ├── platform.json               # Structured platform data (platform, underlying, versions)
 │   └── platform.txt                # Human-readable platform summary
-├── helm/                           # Helm deployment data (if RHDH Helm releases found)
-│   ├── all-rhdh-releases.txt       # List of detected RHDH Helm releases with namespaces, revisions, status
-│   └── releases/                   # Per-release data
+├── helm/                           # Helm deployment data (native releases + standalone)
+│   ├── all-rhdh-releases.txt       # List of all detected RHDH deployments (native + standalone)
+│   ├── releases/                   # Native Helm releases (tracked by Helm)
+│   │   └── ns=[namespace]/         # Per-namespace organization
+│   │       ├── _configmaps/        # Namespace-wide ConfigMaps with both formats
+│   │       │   ├── [configmap-name].yaml               # Full ConfigMap YAML
+│   │       │   └── [configmap-name].describe.txt       # kubectl describe output
+│   │       ├── _secrets/           # Namespace-wide Secrets (sanitized)
+│   │       │   ├── [secret-name].yaml                  # Full Secret YAML (sanitized)
+│   │       │   └── [secret-name].describe.txt          # kubectl describe output (data redacted)
+│   │       └── [release-name]/     # Per-release directory
+│   │           ├── values.yaml         # User-provided values
+│   │           ├── all-values.yaml     # All computed values (25KB+ files)
+│   │           ├── manifest.yaml       # Deployed manifest (18KB+ files)
+│   │           ├── hooks.yaml          # Helm hooks
+│   │           ├── history.txt         # Release history
+│   │           ├── history.yaml        # Release history (YAML)
+│   │           ├── status.txt          # Release status (text)
+│   │           ├── status.yaml         # Release status (YAML, 21KB+ files)
+│   │           ├── notes.txt           # Release notes
+│   │           ├── deployment/         # Application deployment info
+│   │           │   ├── deployment.yaml
+│   │           │   ├── deployment.describe.txt
+│   │           │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
+│   │           │   ├── backstage.json              # {"version": "1.39.1"}
+│   │           │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
+│   │           │   ├── node-version.txt            # "v22.16.0"
+│   │           │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
+│   │           │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
+│   │           │   ├── logs-app.txt                # All container logs (2MB+ files)
+│   │           │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
+│   │           │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
+│   │           │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
+│   │           │   │   └── pod=[pod-name]/         # Per-pod directory
+│   │           │   │       └── container=[container-name]/
+│   │           │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
+│   │           │   │           ├── process-info.txt        # Process and memory info
+│   │           │   │           ├── heap-dump.log           # Collection logs
+│   │           │   │           └── pod-spec.yaml           # Pod specification
+│   │           │   ├── processes/      # Process list from running pods (all replicas)
+│   │           │   │   └── pod=[pod-name]/         # Per-pod directory
+│   │           │   │       └── container=[container-name].txt  # Process list per container
+│   │           │   └── pods/           # Pod details and logs
+│   │           │       ├── pods.txt
+│   │           │       ├── pods.yaml
+│   │           │       └── pods.describe.txt
+│   │           └── db-statefulset/     # Database StatefulSet info (if database enabled)
+│   │               ├── db-statefulset.yaml
+│   │               ├── db-statefulset.describe.txt
+│   │               ├── logs-db.txt     # Database logs
+│   │               └── pods/           # Database pod details
+│   │                   ├── pods.txt
+│   │                   ├── pods.yaml
+│   │                   └── pods.describe.txt
+│   └── standalone/                 # Standalone Helm deployments (helm template + kubectl apply)
 │       └── ns=[namespace]/         # Per-namespace organization
-│           ├── _configmaps/        # Namespace-wide ConfigMaps with both formats
-│           │   ├── [configmap-name].yaml               # Full ConfigMap YAML
-│           │   └── [configmap-name].describe.txt       # kubectl describe output
-│           ├── _secrets/           # Namespace-wide Secrets (sanitized)
-│           │   ├── [secret-name].yaml                  # Full Secret YAML (sanitized)
-│           │   └── [secret-name].describe.txt          # kubectl describe output (data redacted)
-│           └── [release-name]/     # Per-release directory
-│               ├── values.yaml         # User-provided values
-│               ├── all-values.yaml     # All computed values (25KB+ files)
-│               ├── manifest.yaml       # Deployed manifest (18KB+ files)
-│               ├── hooks.yaml          # Helm hooks
-│               ├── history.txt         # Release history
-│               ├── history.yaml        # Release history (YAML)
-│               ├── status.txt          # Release status (text)
-│               ├── status.yaml         # Release status (YAML, 21KB+ files)
-│               ├── notes.txt           # Release notes
-│               ├── deployment/         # Application deployment info
-│               │   ├── deployment.yaml
-│               │   ├── deployment.describe.txt
-│               │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
-│               │   ├── backstage.json              # {"version": "1.39.1"}
-│               │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
-│               │   ├── node-version.txt            # "v22.16.0"
-│               │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
-│               │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
-│               │   ├── logs-app.txt                # All container logs (2MB+ files)
-│               │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
-│               │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
-│               │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
-│               │   │   └── pod=[pod-name]/         # Per-pod directory
-│               │   │       └── container=[container-name]/
-│               │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
-│               │   │           ├── process-info.txt        # Process and memory info
-│               │   │           ├── heap-dump.log           # Collection logs
-│               │   │           └── pod-spec.yaml           # Pod specification
-│               │   ├── processes/      # Process list from running pods (all replicas)
-│               │   │   └── pod=[pod-name]/         # Per-pod directory
-│               │   │       └── container=[container-name].txt  # Process list per container
-│               │   └── pods/           # Pod details and logs
-│               │       ├── pods.txt
-│               │       ├── pods.yaml
-│               │       └── pods.describe.txt
-│               └── db-statefulset/     # Database StatefulSet info (if database enabled)
-│                   ├── db-statefulset.yaml
-│                   ├── db-statefulset.describe.txt
-│                   ├── logs-db.txt     # Database logs
-│                   └── pods/           # Database pod details
-│                       ├── pods.txt
-│                       ├── pods.yaml
-│                       └── pods.describe.txt
+│           └── [workload-name]/    # Per-workload directory (Deployment or StatefulSet name)
+│               ├── standalone-note.txt   # Explanation of standalone detection
+│               ├── helm-metadata.txt     # Extracted Helm labels (chart, instance, version)
+│               ├── deployment.yaml       # Deployment YAML (or statefulset.yaml)
+│               ├── deployment.describe.txt
+│               ├── deployment/           # Application deployment info (same as native releases)
+│               │   ├── logs-app.txt
+│               │   ├── pods/
+│               │   └── processes/
+│               └── dependencies/         # Dependent services (e.g., PostgreSQL from subchart)
+│                   └── [dep-name]/       # Per-dependency directory
+│                       ├── statefulset.yaml    # Dependency workload YAML
+│                       ├── statefulset.describe.txt
+│                       └── logs-[pod].txt      # Dependency logs
 ├── orchestrator/                   # Orchestrator-flavored deployment data (if detected)
 │   ├── summary.txt                 # Summary of all detected Orchestrator components and versions
 │   ├── serverless-operators/       # OpenShift Serverless operators information
