@@ -42,90 +42,31 @@ show_help() {
 }
 
 # Dump debug information to help troubleshoot CI failures
+# This function is automatically triggered on non-zero exit via the cleanup trap
+# shellcheck disable=SC2329
 dump_debug_info() {
     log_warn "=== DEBUG INFO START ==="
+    log_warn "Script exiting with error, collecting must-gather for debugging..."
 
-    # Helm deployment info (if namespace exists)
-    if [ -n "${NS_HELM:-}" ]; then
-        log_warn "--- Helm Release Status (namespace: $NS_HELM) ---"
-        helm -n "$NS_HELM" list 2>/dev/null || true
+    # Run must-gather to collect cluster state for debugging
+    local debug_image="quay.io/rhdh-community/rhdh-must-gather:latest"
+    make deploy-k8s \
+        FULL_IMAGE_NAME="$debug_image" \
+        OUTPUT_FILE=./e2e-cluster.mustgather \
+        || log_warn "Failed to collect must-gather for debugging"
 
-        if [ -n "${HELM_RELEASE:-}" ]; then
-            log_warn "--- Helm Release '$HELM_RELEASE' History ---"
-            helm -n "$NS_HELM" history "$HELM_RELEASE" 2>/dev/null || true
-        fi
-
-        log_warn "--- Pods in namespace $NS_HELM ---"
-        kubectl -n "$NS_HELM" get pods -o wide 2>/dev/null || true
-
-        log_warn "--- Events in namespace $NS_HELM ---"
-        kubectl -n "$NS_HELM" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-    fi
-
-    # Standalone Helm deployment info
-    if [ -n "${NS_STANDALONE:-}" ]; then
-        log_warn "--- Standalone Helm Deployment (namespace: $NS_STANDALONE) ---"
-        log_warn "--- Pods in namespace $NS_STANDALONE ---"
-        kubectl -n "$NS_STANDALONE" get pods -o wide 2>/dev/null || true
-
-        log_warn "--- Deployments in namespace $NS_STANDALONE ---"
-        kubectl -n "$NS_STANDALONE" get deployments -o wide 2>/dev/null || true
-
-        log_warn "--- StatefulSets in namespace $NS_STANDALONE ---"
-        kubectl -n "$NS_STANDALONE" get statefulsets -o wide 2>/dev/null || true
-
-        log_warn "--- Events in namespace $NS_STANDALONE ---"
-        kubectl -n "$NS_STANDALONE" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-
-        if [ -n "${STANDALONE_DEPLOY:-}" ]; then
-            log_warn "--- Standalone Deployment '$STANDALONE_DEPLOY' ---"
-            kubectl -n "$NS_STANDALONE" get deployment "$STANDALONE_DEPLOY" -o yaml 2>/dev/null || true
-        fi
-        if [ -n "${STANDALONE_POSTGRES:-}" ]; then
-            log_warn "--- PostgreSQL StatefulSet '$STANDALONE_POSTGRES' ---"
-            kubectl -n "$NS_STANDALONE" get statefulset "$STANDALONE_POSTGRES" -o yaml 2>/dev/null || true
-        fi
-    fi
-
-    # Operator namespace info
-    if [ -n "${NS_OPERATOR:-}" ]; then
-        log_warn "--- Backstage CRs in namespace $NS_OPERATOR ---"
-        kubectl -n "$NS_OPERATOR" get backstage -o wide 2>/dev/null || true
-
-        log_warn "--- Pods in namespace $NS_OPERATOR ---"
-        kubectl -n "$NS_OPERATOR" get pods -o wide 2>/dev/null || true
-
-        log_warn "--- Events in namespace $NS_OPERATOR ---"
-        kubectl -n "$NS_OPERATOR" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-    fi
-
-    # StatefulSet namespace info
-    if [ -n "${NS_STATEFULSET:-}" ]; then
-        log_warn "--- Backstage CRs in namespace $NS_STATEFULSET ---"
-        kubectl -n "$NS_STATEFULSET" get backstage -o wide 2>/dev/null || true
-
-        log_warn "--- Pods in namespace $NS_STATEFULSET ---"
-        kubectl -n "$NS_STATEFULSET" get pods -o wide 2>/dev/null || true
-
-        log_warn "--- Events in namespace $NS_STATEFULSET ---"
-        kubectl -n "$NS_STATEFULSET" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-    fi
-
-    # Operator logs
-    log_warn "--- RHDH Operator Deployment Status ---"
-    kubectl -n rhdh-operator get deployment rhdh-operator -o wide 2>/dev/null || true
-    log_warn "--- RHDH Operator Pods ---"
-    kubectl -n rhdh-operator get pods -o wide 2>/dev/null || true
-    log_warn "--- RHDH Operator Logs (last 100 lines) ---"
-    kubectl -n rhdh-operator logs -l app.kubernetes.io/name=rhdh-operator --tail=100 2>/dev/null || true
-
-    log_warn "=== DEBUG INFO END ==="
+    log_warn "=== DEBUG INFO END : ./e2e-cluster.mustgather.tar.gz ==="
 }
 
 # Cleanup function to handle multiple cleanup tasks
 CLEANUP_TASKS=()
 # shellcheck disable=SC2329
 cleanup() {
+    local exit_code=$?
+    # Run dump_debug_info if exiting with error (before cleanup destroys the test resources)
+    if [ "$exit_code" -ne 0 ]; then
+        dump_debug_info
+    fi
     for cmd in "${CLEANUP_TASKS[@]}"; do
         log_info "Cleanup: $cmd"
         eval "$cmd" || true
@@ -349,13 +290,11 @@ EOF
     done
     if [ -z "$HELM_POD" ]; then
         log_error "Could not find Helm-deployed RHDH pod in namespace $NS_HELM."
-        dump_debug_info
         exit 1
     fi
     if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS_HELM" --timeout=5m 2>/dev/null; then
         POD_REASON=$(kubectl -n "$NS_HELM" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
         log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time."
-        dump_debug_info
         exit 1
     fi
     log_info "Helm release '$HELM_RELEASE' deployed successfully in namespace $NS_HELM"
@@ -413,13 +352,11 @@ EOF
     done
     if [ -z "$STANDALONE_POD" ]; then
         log_error "Could not find standalone-deployed RHDH pod in namespace $NS_STANDALONE."
-        dump_debug_info
         exit 1
     fi
     log_info "Found standalone-deployed pod: $STANDALONE_POD"
     if ! kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"$STANDALONE_POD" --timeout=5m; then
         log_error "Standalone-deployed pod $STANDALONE_POD did not reach Running state."
-        dump_debug_info
         exit 1
     fi
     log_info "Standalone-deployed pod $STANDALONE_POD is running."
@@ -428,7 +365,6 @@ EOF
     STANDALONE_DEPLOY=$(kubectl -n "$NS_STANDALONE" get deployment -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
     if [ -z "$STANDALONE_DEPLOY" ]; then
         log_error "Could not find standalone deployment in namespace $NS_STANDALONE."
-        dump_debug_info
         exit 1
     fi
 
@@ -459,7 +395,6 @@ if [ "$SKIP_OPERATOR" = false ]; then
     log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
     if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
         log_error "Timed out waiting for rhdh-operator deployment to be available."
-        dump_debug_info
         exit 1
     fi
     log_info "rhdh-operator deployment is now available."
@@ -508,7 +443,6 @@ EOF
         TIMEOUT=$((TIMEOUT - 2))
         if [ $TIMEOUT -le 0 ]; then
             log_error "Timed out waiting for 2 Backstage pods for CR $BACKSTAGE_CR to appear."
-            dump_debug_info
             exit 1
         fi
     done
@@ -516,7 +450,6 @@ EOF
     log_info "Found Backstage pods: $OPERATOR_PODS, waiting for them to be running..."
     if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --timeout=3m; then
         log_error "Backstage pods for CR $BACKSTAGE_CR did not reach Running state."
-        dump_debug_info
         exit 1
     fi
     log_info "Backstage pods for CR $BACKSTAGE_CR are now running."
@@ -529,14 +462,12 @@ EOF
         TIMEOUT=$((TIMEOUT - 2))
         if [ $TIMEOUT -le 0 ]; then
             log_error "Timed out waiting for Backstage pod for CR $BACKSTAGE_CR_STATEFULSET to appear."
-            dump_debug_info
             exit 1
         fi
     done
     log_info "Found Backstage pod: $STATEFULSET_POD, waiting for it to be running..."
     if ! kubectl -n "$NS_STATEFULSET" wait --for=jsonpath='{.status.phase}'=Running pod/"$STATEFULSET_POD" --timeout=3m; then
         log_error "Backstage pod $STATEFULSET_POD did not reach Running state."
-        dump_debug_info
         exit 1
     fi
     log_info "Backstage pod $STATEFULSET_POD is now running."

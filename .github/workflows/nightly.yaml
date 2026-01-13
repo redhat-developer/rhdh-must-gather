@@ -42,6 +42,14 @@ jobs:
         run: |
           cat rhdh-must-gather-output.k8s.*/must-gather.log || true
 
+      - name: Upload E2E must-gather output in case of failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: e2e-must-gather-output-nightly
+          path: e2e-cluster.mustgather.tar.gz
+          retention-days: 7
+
       - name: Upload must-gather output
         if: ${{ success() || failure() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

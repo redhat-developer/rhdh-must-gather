@@ -12,10 +12,12 @@ FULL_IMAGE_NAME ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 LOG_LEVEL ?= info
 OPTS ?= ## Additional options to pass to must-gather (e.g., --with-heap-dumps --with-secrets)
 OVERLAY ?= ## Overlay to use for deploy-k8s (e.g., "with-heap-dumps", "debug-mode", or path to custom overlay)
+OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
 CONTAINER_TOOL ?= podman
 BUILD_ARGS ?=
 LABELS ?=
 TOOLS_DIR ?= ./bin
+BASE_COLLECTION_PATH ?= ./out
 
 # Test configuration
 BATS_VERSION := 1.13.0
@@ -53,7 +55,7 @@ run-local: local-output local-setup ## Test the script locally (requires jq, kub
 	fi
 	@echo "Running local test (requires cluster access)..."
 	PATH="$(abspath $(TOOLS_DIR)):$$PATH" \
-		BASE_COLLECTION_PATH=./out \
+		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
 		./collection-scripts/must_gather $(OPTS)
@@ -172,7 +174,7 @@ deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Kusto
 		echo "Error: kubectl command not found. Please install kubectl."; \
 		exit 1; \
 	fi
-	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(OVERLAY),--overlay "$(OVERLAY)") $(if $(OPTS),--opts "$(OPTS)")
+	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(OVERLAY),--overlay "$(OVERLAY)") $(if $(OPTS),--opts "$(OPTS)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)")
 
 
 ##@ Cleanup
@@ -217,6 +219,7 @@ help: ## Display this help.
 	@echo "  LOG_LEVEL			- Log level (default: $(LOG_LEVEL))"
 	@echo "  OPTS				- Additional must-gather options (e.g., --with-heap-dumps --with-secrets)"
 	@echo "  OVERLAY			- Kustomize overlay for deploy-k8s/test-e2e (e.g., \"with-heap-dumps\", \"debug-mode\", or path)"
+	@echo "  OUTPUT_FILE			- Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)"
 	@echo "  TARGET_BRANCH			- Target branch for test-e2e defaults (default: main)"
 	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
 	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
