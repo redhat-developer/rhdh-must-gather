@@ -187,8 +187,16 @@ all_deployments=$($KUBECTL_CMD get deployments $namespace_args -o json 2>/dev/nu
 # - app.kubernetes.io/name matching RHDH pattern
 # - Container images matching RHDH pattern
 # - app.kubernetes.io/instance matching RHDH pattern (common Helm label)
+# Exclude:
+# - Operator-managed resources (have rhdh.redhat.com/* labels) - collected by gather_operator
+# - The operator deployment itself (app.kubernetes.io/name=rhdh-operator)
 standalone_deployments=$(echo "$all_deployments" | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
   .items[] |
+  # Exclude operator-managed resources (collected by gather_operator)
+  select(
+    (.metadata.labels["rhdh.redhat.com/app"] // null) == null and
+    (.metadata.labels["app.kubernetes.io/name"] // "") != "rhdh-operator"
+  ) |
   select(
     # Match by helm.sh/chart label
     (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
@@ -209,8 +217,14 @@ log_debug "Searching for RHDH-related StatefulSets..."
 # shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
 all_statefulsets=$($KUBECTL_CMD get statefulsets $namespace_args -o json 2>/dev/null || echo '{"items":[]}')
 
+# Exclude operator-managed resources (same as Deployments)
 standalone_statefulsets=$(echo "$all_statefulsets" | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
   .items[] |
+  # Exclude operator-managed resources (collected by gather_operator)
+  select(
+    (.metadata.labels["rhdh.redhat.com/app"] // null) == null and
+    (.metadata.labels["app.kubernetes.io/name"] // "") != "rhdh-operator"
+  ) |
   select(
     (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
     (.metadata.labels["app.kubernetes.io/name"] // "" | test($pattern; "i")) or
