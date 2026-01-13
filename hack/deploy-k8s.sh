@@ -11,6 +11,7 @@
 #                       - A pre-built overlay name (e.g., "with-heap-dumps", "debug-mode")
 #                       - A full/relative path to a user-defined overlay directory
 #   --opts <options>    Additional options to pass to the gather script (quote multiple options)
+#   --output <file>     Output file path (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
 #   --help              Show this help message
 #
 # Examples:
@@ -19,6 +20,7 @@
 #   ./hack/deploy-k8s.sh --overlay with-heap-dumps
 #   ./hack/deploy-k8s.sh --overlay debug-mode --opts "--namespaces my-ns"
 #   ./hack/deploy-k8s.sh --overlay /path/to/my-overlay
+#   ./hack/deploy-k8s.sh --output ./debug-mustgather.tar.gz
 #   ./hack/deploy-k8s.sh --image myimage:tag --overlay with-heap-dumps --opts "--with-secrets --namespaces my-ns"
 #
 
@@ -33,6 +35,7 @@ DEFAULT_IMAGE="quay.io/rhdh-community/rhdh-must-gather:latest"
 IMAGE="${DEFAULT_IMAGE}"
 OVERLAY=""
 OPTS_STRING=""
+OUTPUT_FILE=""
 
 # Parse named arguments
 show_help() {
@@ -52,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --opts)
             OPTS_STRING="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT_FILE="$2"
             shift 2
             ;;
         --help|-h)
@@ -96,10 +103,14 @@ if [[ -n "${OVERLAY}" ]]; then
     fi
 fi
 
-# Generate unique namespace
+# Generate unique namespace and output file (if not overridden)
 TIMESTAMP=$(date +%s)
 NAMESPACE="rhdh-must-gather-${TIMESTAMP}"
-OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar.gz"
+if [[ -z "${OUTPUT_FILE}" ]]; then
+    OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar.gz"
+elif [[ "${OUTPUT_FILE}" != *.tar.gz ]]; then
+    OUTPUT_FILE="${OUTPUT_FILE}.tar.gz"
+fi
 
 # Create temporary overlay directory
 TMP_OVERLAY=$(mktemp -d)

@@ -69,7 +69,15 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests (local mode)
-        run: make test-e2e LOCAL=true
+        run: make test-e2e
+
+      - name: Upload E2E must-gather output in case of failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: e2e-must-gather-output-pr-${{ github.event.pull_request.number }}
+          path: e2e-cluster.mustgather.tar.gz
+          retention-days: 7
 
       - name: Upload must-gather output
         if: ${{ success() || failure() }}
