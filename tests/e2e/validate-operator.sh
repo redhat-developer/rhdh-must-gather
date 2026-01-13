@@ -192,8 +192,8 @@ for spec in "${CR_SPECS[@]}"; do
         # Validate processes (if pods are running)
         if [ -d "$workload_dir/processes" ]; then
             process_pod_count=$(find "$workload_dir/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
-            if [ "$process_pod_count" -ge 1 ]; then
-                log_info "✓ Found $process_pod_count pod(s) with process information"
+            if [ "$process_pod_count" -ge "$cr_replicas" ]; then
+                log_info "✓ Found $process_pod_count pod(s) with process information (expected: $cr_replicas)"
                 # Validate process files in each pod
                 for pod_dir in "$workload_dir/processes"/pod=*; do
                     if [ -d "$pod_dir" ]; then
@@ -201,6 +201,8 @@ for spec in "${CR_SPECS[@]}"; do
                         check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in $pod_name"
                     fi
                 done
+            elif [ "$process_pod_count" -ge 1 ]; then
+                log_warn "○ Found $process_pod_count pod(s) with process information, expected $cr_replicas (some pods may not be running)"
             else
                 log_info "○ No pod process directories found (pods may not be running)"
             fi

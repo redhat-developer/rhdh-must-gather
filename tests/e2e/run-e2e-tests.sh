@@ -474,16 +474,21 @@ if [ "$SKIP_OPERATOR" = false ]; then
     CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
     ALL_NAMESPACES+=("$NS_OPERATOR" "$NS_STATEFULSET")
 
-    log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
+    log_info "Deploying Backstage CR (kind: Deployment in v1alpha4) with 2 replicas..."
     BACKSTAGE_CR="my-op"
     kubectl -n "$NS_OPERATOR" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
+spec:
+  deployment:
+    patch:
+      spec:
+        replicas: 2
 EOF
 
-    log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
+    log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
     kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
@@ -493,31 +498,28 @@ metadata:
 spec:
   deployment:
     kind: StatefulSet
-    patch:
-      spec:
-        replicas: 2
 EOF
 
     # Wait for the Backstage pods to be running (not necessarily Ready - we just need them to exist for must-gather)
-    log_info "Waiting for Backstage pod for CR $BACKSTAGE_CR to be running..."
-    OPERATOR_POD=""
+    log_info "Waiting for 2 Backstage pods for CR $BACKSTAGE_CR to be running..."
     TIMEOUT=300
-    until OPERATOR_POD=$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$OPERATOR_POD" ]; do
+    until [ "$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)" -ge 2 ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
         if [ $TIMEOUT -le 0 ]; then
-            log_error "Timed out waiting for Backstage pod for CR $BACKSTAGE_CR to appear."
+            log_error "Timed out waiting for 2 Backstage pods for CR $BACKSTAGE_CR to appear."
             dump_debug_info
             exit 1
         fi
     done
-    log_info "Found Backstage pod: $OPERATOR_POD, waiting for it to be running..."
-    if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pod/"$OPERATOR_POD" --timeout=3m; then
-        log_error "Backstage pod $OPERATOR_POD did not reach Running state."
+    OPERATOR_PODS=$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[*].metadata.name}')
+    log_info "Found Backstage pods: $OPERATOR_PODS, waiting for them to be running..."
+    if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --timeout=3m; then
+        log_error "Backstage pods for CR $BACKSTAGE_CR did not reach Running state."
         dump_debug_info
         exit 1
     fi
-    log_info "Backstage pod $OPERATOR_POD is now running."
+    log_info "Backstage pods for CR $BACKSTAGE_CR are now running."
 
     log_info "Waiting for Backstage pods for CR $BACKSTAGE_CR_STATEFULSET to be running..."
     STATEFULSET_POD=""
@@ -669,8 +671,8 @@ if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
     log_info ""
     log_info "Running Operator validation..."
     if ! "$SCRIPT_DIR/validate-operator.sh" --validate --output-dir "$OUTPUT_DIR" \
-        --cr "$NS_OPERATOR:$BACKSTAGE_CR:1" \
-        --cr "$NS_STATEFULSET:$BACKSTAGE_CR_STATEFULSET:2"; then
+        --cr "$NS_OPERATOR:$BACKSTAGE_CR:2" \
+        --cr "$NS_STATEFULSET:$BACKSTAGE_CR_STATEFULSET:1"; then
         log_error "Operator validation failed!"
         ((VALIDATION_FAILURES++))
     fi
