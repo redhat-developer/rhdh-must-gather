@@ -15,121 +15,68 @@
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
 #   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
 #   --helm-values-file <file> Override Helm values file (default: auto-generated from --target-branch)
+#   --skip-helm         Skip Helm release test
+#   --skip-helm-standalone Skip standalone Helm deployment test
+#   --skip-operator     Skip Operator test
 #   --help              Show this help message
 #
 # Examples:
 #   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123
-#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --overlay with-heap-dumps
-#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --target-branch release-1.9
-#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --operator-branch main --helm-chart-version 1.9-20250110-CI
-#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --helm-values-file /path/to/values.yaml
+#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --skip-operator
+#   ./tests/e2e/run-e2e-tests.sh --image quay.io/rhdh-community/rhdh-must-gather:pr-123 --skip-helm --skip-helm-standalone
 #   ./tests/e2e/run-e2e-tests.sh --local
 #
 
 set -euo pipefail
 shopt -s extglob
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Get script directory for sourcing lib and calling test scripts
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# shellcheck source=tests/e2e/lib/test-utils.sh
+source "$SCRIPT_DIR/lib/test-utils.sh"
 
 show_help() {
     sed -n '2,/^$/p' "$0" | sed 's/^#//; s/^ //; /^$/d'
     exit 0
 }
 
-# Detect if we're running on an OpenShift cluster
-is_openshift() {
-    # Check if the cluster has OpenShift-specific API resources
-    kubectl api-resources --api-group=config.openshift.io 2>/dev/null | grep -q clusterversion
-}
-
 # Dump debug information to help troubleshoot CI failures
 dump_debug_info() {
     log_warn "=== DEBUG INFO START ==="
-    
+
     # Helm deployment info (if namespace exists)
-    if [ -n "${NS:-}" ]; then
-        log_warn "--- Helm Release Status (namespace: $NS) ---"
-        helm -n "$NS" list 2>/dev/null || true
-        
+    if [ -n "${NS_HELM:-}" ]; then
+        log_warn "--- Helm Release Status (namespace: $NS_HELM) ---"
+        helm -n "$NS_HELM" list 2>/dev/null || true
+
         if [ -n "${HELM_RELEASE:-}" ]; then
             log_warn "--- Helm Release '$HELM_RELEASE' History ---"
-            helm -n "$NS" history "$HELM_RELEASE" 2>/dev/null || true
+            helm -n "$NS_HELM" history "$HELM_RELEASE" 2>/dev/null || true
         fi
-        
-        log_warn "--- Pods in namespace $NS ---"
-        kubectl -n "$NS" get pods -o wide 2>/dev/null || true
-        
-        log_warn "--- Events in namespace $NS ---"
-        kubectl -n "$NS" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-        
-        # Helm pod logs
-        if [ -n "${HELM_POD:-}" ]; then
-            log_warn "--- Helm Pod '$HELM_POD' Description ---"
-            kubectl -n "$NS" describe pod "$HELM_POD" 2>/dev/null || true
-            log_warn "--- Helm Pod '$HELM_POD' Logs ---"
-            kubectl -n "$NS" logs "$HELM_POD" --all-containers=true 2>/dev/null | tail -100 || true
-        fi
-        
-        # Backstage CR info
-        if [ -n "${BACKSTAGE_CR:-}" ]; then
-            log_warn "--- Backstage CR '$BACKSTAGE_CR' in namespace $NS ---"
-            kubectl -n "$NS" get backstage "$BACKSTAGE_CR" -o yaml 2>/dev/null || true
-            log_warn "--- Backstage CR '$BACKSTAGE_CR' Description ---"
-            kubectl -n "$NS" describe backstage "$BACKSTAGE_CR" 2>/dev/null || true
-            log_warn "--- Backstage Deployment Pods in namespace $NS ---"
-            kubectl -n "$NS" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o wide 2>/dev/null || true
-            log_warn "--- Backstage Deployment Pod Logs (if any) ---"
-            kubectl -n "$NS" logs -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --all-containers=true --tail=100 2>/dev/null || true
-        fi
+
+        log_warn "--- Pods in namespace $NS_HELM ---"
+        kubectl -n "$NS_HELM" get pods -o wide 2>/dev/null || true
+
+        log_warn "--- Events in namespace $NS_HELM ---"
+        kubectl -n "$NS_HELM" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
     fi
-    
-    # StatefulSet namespace info
-    if [ -n "${NS_STATEFULSET:-}" ]; then
-        log_warn "--- Pods in namespace $NS_STATEFULSET ---"
-        kubectl -n "$NS_STATEFULSET" get pods -o wide 2>/dev/null || true
-        
-        log_warn "--- Events in namespace $NS_STATEFULSET ---"
-        kubectl -n "$NS_STATEFULSET" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-        
-        if [ -n "${BACKSTAGE_CR_STATEFULSET:-}" ]; then
-            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' in namespace $NS_STATEFULSET ---"
-            kubectl -n "$NS_STATEFULSET" get backstage "$BACKSTAGE_CR_STATEFULSET" -o yaml 2>/dev/null || true
-            log_warn "--- Backstage CR '$BACKSTAGE_CR_STATEFULSET' Description ---"
-            kubectl -n "$NS_STATEFULSET" describe backstage "$BACKSTAGE_CR_STATEFULSET" 2>/dev/null || true
-        fi
-    fi
-    
+
     # Standalone Helm deployment info
     if [ -n "${NS_STANDALONE:-}" ]; then
         log_warn "--- Standalone Helm Deployment (namespace: $NS_STANDALONE) ---"
         log_warn "--- Pods in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get pods -o wide 2>/dev/null || true
-        
+
         log_warn "--- Deployments in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get deployments -o wide 2>/dev/null || true
-        
+
         log_warn "--- StatefulSets in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get statefulsets -o wide 2>/dev/null || true
-        
+
         log_warn "--- Events in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-        
+
         if [ -n "${STANDALONE_DEPLOY:-}" ]; then
             log_warn "--- Standalone Deployment '$STANDALONE_DEPLOY' ---"
             kubectl -n "$NS_STANDALONE" get deployment "$STANDALONE_DEPLOY" -o yaml 2>/dev/null || true
@@ -139,7 +86,31 @@ dump_debug_info() {
             kubectl -n "$NS_STANDALONE" get statefulset "$STANDALONE_POSTGRES" -o yaml 2>/dev/null || true
         fi
     fi
-    
+
+    # Operator namespace info
+    if [ -n "${NS_OPERATOR:-}" ]; then
+        log_warn "--- Backstage CRs in namespace $NS_OPERATOR ---"
+        kubectl -n "$NS_OPERATOR" get backstage -o wide 2>/dev/null || true
+
+        log_warn "--- Pods in namespace $NS_OPERATOR ---"
+        kubectl -n "$NS_OPERATOR" get pods -o wide 2>/dev/null || true
+
+        log_warn "--- Events in namespace $NS_OPERATOR ---"
+        kubectl -n "$NS_OPERATOR" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+    fi
+
+    # StatefulSet namespace info
+    if [ -n "${NS_STATEFULSET:-}" ]; then
+        log_warn "--- Backstage CRs in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get backstage -o wide 2>/dev/null || true
+
+        log_warn "--- Pods in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get pods -o wide 2>/dev/null || true
+
+        log_warn "--- Events in namespace $NS_STATEFULSET ---"
+        kubectl -n "$NS_STATEFULSET" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+    fi
+
     # Operator logs
     log_warn "--- RHDH Operator Deployment Status ---"
     kubectl -n rhdh-operator get deployment rhdh-operator -o wide 2>/dev/null || true
@@ -147,7 +118,7 @@ dump_debug_info() {
     kubectl -n rhdh-operator get pods -o wide 2>/dev/null || true
     log_warn "--- RHDH Operator Logs (last 100 lines) ---"
     kubectl -n rhdh-operator logs -l app.kubernetes.io/name=rhdh-operator --tail=100 2>/dev/null || true
-    
+
     log_warn "=== DEBUG INFO END ==="
 }
 
@@ -170,6 +141,9 @@ TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
 HELM_CHART_VERSION=""
 HELM_VALUES_FILE=""
+SKIP_HELM=false
+SKIP_HELM_STANDALONE=false
+SKIP_OPERATOR=false
 
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
@@ -201,6 +175,18 @@ while [[ $# -gt 0 ]]; do
         --helm-values-file)
             HELM_VALUES_FILE="$2"
             shift 2
+            ;;
+        --skip-helm)
+            SKIP_HELM=true
+            shift
+            ;;
+        --skip-helm-standalone)
+            SKIP_HELM_STANDALONE=true
+            shift
+            ;;
+        --skip-operator)
+            SKIP_OPERATOR=true
+            shift
             ;;
         --help|-h)
             show_help
@@ -242,36 +228,65 @@ else
     log_info "Image tag: $IMAGE_TAG"
 fi
 
+# Log skip options
+if [ "$SKIP_HELM" = true ]; then
+    log_info "Skipping Helm release test (--skip-helm)"
+fi
+if [ "$SKIP_HELM_STANDALONE" = true ]; then
+    log_info "Skipping standalone Helm deployment test (--skip-helm-standalone)"
+fi
+if [ "$SKIP_OPERATOR" = true ]; then
+    log_info "Skipping Operator test (--skip-operator)"
+fi
+
 # Ensure we're in the project root
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 log_info "Working directory: $PROJECT_ROOT"
 
-# Deploy some instances of RHDH
-log_info "Deploying RHDH instances..."
-TIMESTAMP=$(date +%s)
-NS="test-e2e-$TIMESTAMP"
-kubectl create namespace "$NS"
-CLEANUP_TASKS+=("kubectl delete namespace $NS --wait=false")
+# Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
+EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
 
-# Helm
-log_info "Deploying Helm release..."
-# Use provided values file or generate one based on TARGET_BRANCH
-if [ -n "$HELM_VALUES_FILE" ]; then
-    if [ ! -f "$HELM_VALUES_FILE" ]; then
-        log_error "Helm values file not found: $HELM_VALUES_FILE"
-        exit 1
-    fi
-    log_info "Using provided Helm values file: $HELM_VALUES_FILE"
-    TEMP_VALUES_FILE="$HELM_VALUES_FILE"
-else
-    TEMP_VALUES_FILE="$(mktemp)"
-    # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
-    case "$TARGET_BRANCH" in
-        main|release-1.@(9|[1-9][0-9]))
-            cat > "$TEMP_VALUES_FILE" <<EOF
+# Generate timestamp for namespace naming
+TIMESTAMP=$(date +%s)
+
+# Track namespaces for common validation
+ALL_NAMESPACES=()
+
+# ============================================================================
+# SETUP PHASE: Deploy RHDH instances
+# ============================================================================
+log_info ""
+log_info "=========================================="
+log_info "Setting up RHDH instances for testing"
+log_info "=========================================="
+
+# --- Helm Release Setup ---
+NS_HELM=""
+HELM_RELEASE=""
+if [ "$SKIP_HELM" = false ]; then
+    NS_HELM="test-e2e-helm-$TIMESTAMP"
+    log_info "Creating namespace: $NS_HELM"
+    kubectl create namespace "$NS_HELM"
+    CLEANUP_TASKS+=("kubectl delete namespace $NS_HELM --wait=false")
+    ALL_NAMESPACES+=("$NS_HELM")
+
+    log_info "Deploying Helm release..."
+    # Use provided values file or generate one based on TARGET_BRANCH
+    if [ -n "$HELM_VALUES_FILE" ]; then
+        if [ ! -f "$HELM_VALUES_FILE" ]; then
+            log_error "Helm values file not found: $HELM_VALUES_FILE"
+            exit 1
+        fi
+        log_info "Using provided Helm values file: $HELM_VALUES_FILE"
+        TEMP_VALUES_FILE="$HELM_VALUES_FILE"
+    else
+        TEMP_VALUES_FILE="$(mktemp)"
+        # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
+        case "$TARGET_BRANCH" in
+            main|release-1.@(9|[1-9][0-9]))
+                cat > "$TEMP_VALUES_FILE" <<EOF
 route:
   enabled: false
 global:
@@ -283,79 +298,86 @@ upstream:
     # Purposely disable the local database to simulate a misconfigured application (missing external database info)
     enabled: false
 EOF
-            ;;
-        *)
-            # TODO Placeholder for future branches
-            log_error "Unsupported target branch: $TARGET_BRANCH"
-            exit 1
-            ;;
-    esac
-fi
+                ;;
+            *)
+                log_error "Unsupported target branch: $TARGET_BRANCH"
+                exit 1
+                ;;
+        esac
+    fi
 
-HELM_RELEASE="my-helm"
-# Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
-HELM_VERSION_ARGS=()
-if [ -n "$HELM_CHART_VERSION" ]; then
-    # Use explicitly provided chart version
-    log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
-    HELM_VERSION_ARGS=(--version "$HELM_CHART_VERSION")
-    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
-elif [ "$TARGET_BRANCH" != "main" ]; then
-    # Extract version from branch name (e.g., release-1.9 -> 1.9)
-    BRANCH_VERSION="${TARGET_BRANCH#release-}"
-    log_info "Looking for Helm chart version matching ${BRANCH_VERSION}-*-CI..."
-    # Use skopeo to list tags and find the latest matching CI tag
-    CHART_VERSION=$(skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
-        jq -r '.Tags[]' | \
-        grep "^${BRANCH_VERSION}-.*-CI$" | \
-        sort -V | \
-        tail -1)
-    if [ -n "$CHART_VERSION" ]; then
-        log_info "Using Helm chart version: $CHART_VERSION"
-        HELM_VERSION_ARGS=(--version "$CHART_VERSION")
+    HELM_RELEASE="my-helm"
+    HELM_VERSION_ARGS=()
+    # Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
+    if [ -n "$HELM_CHART_VERSION" ]; then
+        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
+        HELM_VERSION_ARGS=(--version "$HELM_CHART_VERSION")
+        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
+    elif [ "$TARGET_BRANCH" != "main" ]; then
+        # Extract version from branch name (e.g., release-1.9 -> 1.9)
+        BRANCH_VERSION="${TARGET_BRANCH#release-}"
+        log_info "Looking for Helm chart version matching ${BRANCH_VERSION}-*-CI..."
+        CHART_VERSION=$(skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
+            jq -r '.Tags[]' | \
+            grep "^${BRANCH_VERSION}-.*-CI$" | \
+            sort -V | \
+            tail -1)
+        if [ -n "$CHART_VERSION" ]; then
+            log_info "Using Helm chart version: $CHART_VERSION"
+            HELM_VERSION_ARGS=(--version "$CHART_VERSION")
+        else
+            log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
+        fi
+        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
     else
-        log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
+        # Latest upstream chart
+        helm -n "$NS_HELM" install "$HELM_RELEASE" backstage \
+            --repo "https://redhat-developer.github.io/rhdh-chart" \
+            --values "$TEMP_VALUES_FILE"
     fi
-    helm -n "$NS" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
+
+    # Wait for the Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)
+    log_info "Waiting for Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)..."
+    HELM_POD=""
+    TIMEOUT=60
+    until HELM_POD=$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$HELM_POD" ]; do
+        sleep 2
+        TIMEOUT=$((TIMEOUT - 2))
+        if [ $TIMEOUT -le 0 ]; then
+            break
+        fi
+    done
+    if [ -z "$HELM_POD" ]; then
+        log_error "Could not find Helm-deployed RHDH pod in namespace $NS_HELM."
+        dump_debug_info
+        exit 1
+    fi
+    if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS_HELM" --timeout=5m 2>/dev/null; then
+        POD_REASON=$(kubectl -n "$NS_HELM" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
+        log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "Helm release '$HELM_RELEASE' deployed successfully in namespace $NS_HELM"
 else
-    # Latest upstream chart
-    helm -n "$NS" install "$HELM_RELEASE" backstage \
-        --repo "https://redhat-developer.github.io/rhdh-chart" \
-        --values "$TEMP_VALUES_FILE"
-fi
-# Wait for the Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)
-log_info "Waiting for Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)..."
-HELM_POD=""
-TIMEOUT=60
-until HELM_POD=$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$HELM_POD" ]; do
-    sleep 2
-    TIMEOUT=$((TIMEOUT - 2))
-    if [ $TIMEOUT -le 0 ]; then
-        break
-    fi
-done
-if [ -z "$HELM_POD" ]; then
-    log_error "Could not find Helm-deployed RHDH pod in namespace $NS."
-    dump_debug_info
-    exit 1
-fi
-if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS" --timeout=5m 2>/dev/null; then
-    POD_REASON=$(kubectl -n "$NS" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
-    log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time. Test may not be operating under expected conditions."
-    dump_debug_info
-    exit 1
+    log_info "Skipping Helm release setup"
 fi
 
-# Standalone Helm deployment (simulates GitOps/CD tools using helm template + kubectl apply)
-# This tests the Phase 2 detection in gather_helm which finds RHDH deployments not tracked by Helm releases
-log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
-NS_STANDALONE="test-e2e-$TIMESTAMP-standalone"
-kubectl create namespace "$NS_STANDALONE"
-CLEANUP_TASKS+=("kubectl delete namespace $NS_STANDALONE --wait=false")
+# --- Standalone Helm Setup ---
+NS_STANDALONE=""
+STANDALONE_DEPLOY=""
+STANDALONE_POSTGRES=""
+if [ "$SKIP_HELM_STANDALONE" = false ]; then
+    NS_STANDALONE="test-e2e-standalone-$TIMESTAMP"
+    log_info "Creating namespace: $NS_STANDALONE"
+    kubectl create namespace "$NS_STANDALONE"
+    CLEANUP_TASKS+=("kubectl delete namespace $NS_STANDALONE --wait=false")
+    ALL_NAMESPACES+=("$NS_STANDALONE")
 
-STANDALONE_RELEASE="my-helm-standalone"
-STANDALONE_VALUES_FILE="$(mktemp)"
-cat > "$STANDALONE_VALUES_FILE" <<EOF
+    log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
+    STANDALONE_RELEASE="my-helm-standalone"
+    STANDALONE_VALUES_FILE="$(mktemp)"
+    cat > "$STANDALONE_VALUES_FILE" <<EOF
 route:
   enabled: false
 global:
@@ -364,96 +386,106 @@ global:
     includes: []
 EOF
 
-# Render the Helm chart and apply directly (no Helm release tracking)
-log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
-if [ "$TARGET_BRANCH" != "main" ]; then
-    # Use the same chart version as the native Helm release
-    helm template "$STANDALONE_RELEASE" oci://quay.io/rhdh/chart \
-        --namespace "$NS_STANDALONE" \
-        --values "$STANDALONE_VALUES_FILE" \
-        ${HELM_VERSION_ARGS:+"${HELM_VERSION_ARGS[@]}"} | kubectl apply -n "$NS_STANDALONE" -f -
-else
-    helm template "$STANDALONE_RELEASE" backstage \
-        --repo "https://redhat-developer.github.io/rhdh-chart" \
-        --namespace "$NS_STANDALONE" \
-        --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
-fi
-
-# Wait for the standalone-deployed RHDH pod to be ready (this deployment should run successfully)
-log_info "Waiting for standalone-deployed RHDH pod to be ready..."
-STANDALONE_POD=""
-TIMEOUT=60
-until STANDALONE_POD=$(kubectl -n "$NS_STANDALONE" get pods -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STANDALONE_POD" ]; do
-    sleep 2
-    TIMEOUT=$((TIMEOUT - 2))
-    if [ $TIMEOUT -le 0 ]; then
-        break
+    # Render the Helm chart and apply directly (no Helm release tracking)
+    log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
+    if [ "$TARGET_BRANCH" != "main" ]; then
+        helm template "$STANDALONE_RELEASE" oci://quay.io/rhdh/chart \
+            --namespace "$NS_STANDALONE" \
+            --values "$STANDALONE_VALUES_FILE" \
+            ${HELM_VERSION_ARGS:+"${HELM_VERSION_ARGS[@]}"} | kubectl apply -n "$NS_STANDALONE" -f -
+    else
+        helm template "$STANDALONE_RELEASE" backstage \
+            --repo "https://redhat-developer.github.io/rhdh-chart" \
+            --namespace "$NS_STANDALONE" \
+            --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
     fi
-done
-if [ -z "$STANDALONE_POD" ]; then
-    log_error "Could not find standalone-deployed RHDH pod in namespace $NS_STANDALONE."
-    dump_debug_info
-    exit 1
-fi
-log_info "Found standalone-deployed pod: $STANDALONE_POD"
-# Wait for the pod to be ready
-if ! kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"$STANDALONE_POD" --timeout=5m; then
-    log_error "Standalone-deployed pod $STANDALONE_POD did not become ready within expected time."
-    dump_debug_info
-    exit 1
-fi
-log_info "Standalone-deployed pod $STANDALONE_POD is ready."
 
-# Get the deployment name for validation later
-STANDALONE_DEPLOY=$(kubectl -n "$NS_STANDALONE" get deployment -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-if [ -z "$STANDALONE_DEPLOY" ]; then
-    log_error "Could not find standalone deployment in namespace $NS_STANDALONE."
-    dump_debug_info
-    exit 1
-fi
+    # Wait for the standalone-deployed RHDH pod to be ready
+    log_info "Waiting for standalone-deployed RHDH pod to be ready..."
+    STANDALONE_POD=""
+    TIMEOUT=60
+    until STANDALONE_POD=$(kubectl -n "$NS_STANDALONE" get pods -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STANDALONE_POD" ]; do
+        sleep 2
+        TIMEOUT=$((TIMEOUT - 2))
+        if [ $TIMEOUT -le 0 ]; then
+            break
+        fi
+    done
+    if [ -z "$STANDALONE_POD" ]; then
+        log_error "Could not find standalone-deployed RHDH pod in namespace $NS_STANDALONE."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "Found standalone-deployed pod: $STANDALONE_POD"
+    if ! kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"$STANDALONE_POD" --timeout=5m; then
+        log_error "Standalone-deployed pod $STANDALONE_POD did not become ready within expected time."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "Standalone-deployed pod $STANDALONE_POD is ready."
 
-# Get the PostgreSQL StatefulSet name (dependent service from subchart)
-STANDALONE_POSTGRES=$(kubectl -n "$NS_STANDALONE" get statefulset -l "app.kubernetes.io/managed-by=Helm,app.kubernetes.io/instance=$STANDALONE_RELEASE,app.kubernetes.io/name=postgresql" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-if [ -z "$STANDALONE_POSTGRES" ]; then
-    log_warn "Could not find PostgreSQL StatefulSet in namespace $NS_STANDALONE (may not be part of this chart version)"
+    # Get the deployment name
+    STANDALONE_DEPLOY=$(kubectl -n "$NS_STANDALONE" get deployment -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$STANDALONE_DEPLOY" ]; then
+        log_error "Could not find standalone deployment in namespace $NS_STANDALONE."
+        dump_debug_info
+        exit 1
+    fi
+
+    # Get the PostgreSQL StatefulSet name (dependent service from subchart)
+    STANDALONE_POSTGRES=$(kubectl -n "$NS_STANDALONE" get statefulset -l "app.kubernetes.io/managed-by=Helm,app.kubernetes.io/instance=$STANDALONE_RELEASE,app.kubernetes.io/name=postgresql" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$STANDALONE_POSTGRES" ]; then
+        log_warn "Could not find PostgreSQL StatefulSet in namespace $NS_STANDALONE (may not be part of this chart version)"
+    else
+        log_info "Found PostgreSQL StatefulSet: $STANDALONE_POSTGRES"
+        kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
+    fi
+    log_info "Standalone deployment '$STANDALONE_DEPLOY' deployed successfully in namespace $NS_STANDALONE"
 else
-    log_info "Found PostgreSQL StatefulSet: $STANDALONE_POSTGRES"
-    # Wait for PostgreSQL to be ready
-    kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
+    log_info "Skipping standalone Helm deployment setup"
 fi
-log_info "Found standalone deployment: $STANDALONE_DEPLOY"
 
-# Operator
-# Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
-EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
-log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
-OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
-kubectl apply -f "$OPERATOR_MANIFEST"
-CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
-log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
-if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
-    log_error "Timed out waiting for rhdh-operator deployment to be available."
-    dump_debug_info
-    exit 1
-fi
-log_info "rhdh-operator deployment is now available."
+# --- Operator Setup ---
+NS_OPERATOR=""
+NS_STATEFULSET=""
+BACKSTAGE_CR=""
+BACKSTAGE_CR_STATEFULSET=""
+if [ "$SKIP_OPERATOR" = false ]; then
+    log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
+    OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
+    kubectl apply -f "$OPERATOR_MANIFEST"
+    CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
 
-NS_STATEFULSET="test-e2e-$TIMESTAMP-2"
-kubectl create namespace "$NS_STATEFULSET"
-CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
+    log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
+    if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
+        log_error "Timed out waiting for rhdh-operator deployment to be available."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "rhdh-operator deployment is now available."
+    ALL_NAMESPACES+=("rhdh-operator")
 
-log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
-BACKSTAGE_CR="my-op"
-kubectl -n "$NS" apply -f - <<EOF
+    # Create namespaces for Backstage CRs
+    NS_OPERATOR="test-e2e-operator-$TIMESTAMP"
+    NS_STATEFULSET="test-e2e-sts-$TIMESTAMP"
+    kubectl create namespace "$NS_OPERATOR"
+    kubectl create namespace "$NS_STATEFULSET"
+    CLEANUP_TASKS+=("kubectl delete namespace $NS_OPERATOR --wait=false")
+    CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
+    ALL_NAMESPACES+=("$NS_OPERATOR" "$NS_STATEFULSET")
+
+    log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
+    BACKSTAGE_CR="my-op"
+    kubectl -n "$NS_OPERATOR" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
 EOF
-# Added in 1.9
-log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
-BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
+
+    log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5) with 2 replicas..."
+    BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
+    kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
 kind: Backstage
 metadata:
@@ -466,25 +498,34 @@ spec:
         replicas: 2
 EOF
 
-# wait until the Backstage CR is reconciled
-log_info "Waiting for Backstage CR $BACKSTAGE_CR to be reconciled..."
-if ! kubectl -n "$NS" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR --timeout=5m; then
-    log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR to be reconciled."
-    dump_debug_info
-    exit 1
-fi
-log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
+    # Wait for the Backstage CRs to be reconciled
+    log_info "Waiting for Backstage CR $BACKSTAGE_CR to be reconciled..."
+    if ! kubectl -n "$NS_OPERATOR" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR --timeout=5m; then
+        log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR to be reconciled."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
 
-# wait until the Backstage CR is reconciled
-log_info "Waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled..."
-if ! kubectl -n "$NS_STATEFULSET" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR_STATEFULSET --timeout=5m; then
-    log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled."
-    dump_debug_info
-    exit 1
+    log_info "Waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled..."
+    if ! kubectl -n "$NS_STATEFULSET" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR_STATEFULSET --timeout=5m; then
+        log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled."
+        dump_debug_info
+        exit 1
+    fi
+    log_info "Backstage CR $BACKSTAGE_CR_STATEFULSET is now ready and deployed."
+else
+    log_info "Skipping Operator setup"
 fi
-log_info "Backstage CR $BACKSTAGE_CR_STATEFULSET is now ready and deployed."
 
-# Detect cluster type and run the appropriate deployment
+# ============================================================================
+# RUN MUST-GATHER
+# ============================================================================
+log_info ""
+log_info "=========================================="
+log_info "Running must-gather"
+log_info "=========================================="
+
 if [ "$LOCAL_MODE" = true ]; then
     log_info "Running in local mode"
     if [ -n "$OVERLAY" ]; then
@@ -548,282 +589,67 @@ else
     tar xzf "$OUTPUT_TARBALL" -C "$OUTPUT_DIR"
 fi
 
-# Validation checks
-ERRORS=0
-
-check_file_exists() {
-    local file="$1"
-    local description="$2"
-    if [ -f "$file" ]; then
-        log_info "✓ Found $description: $file"
-    else
-        log_error "✗ Missing $description: $file"
-        ((ERRORS++))
-    fi
-}
-
-check_dir_exists() {
-    local dir="$1"
-    local description="$2"
-    if [ -d "$dir" ]; then
-        log_info "✓ Found $description: $dir"
-    else
-        log_error "✗ Missing $description: $dir"
-        ((ERRORS++))
-    fi
-}
-
-check_file_not_empty() {
-    local file="$1"
-    local description="$2"
-    check_file_exists "$file" "$description"
-    if [ -s "$file" ]; then
-        log_info "✓ Found non-empty $description: $file"
-    else
-        log_error "✗ $description is empty: $file"
-        ((ERRORS++))
-    fi
-}
-
-check_file_valid_json() {
-    local file="$1"
-    local description="$2"
-    check_file_exists "$file" "$description"
-    if ! jq . "$file" >/dev/null 2>&1; then
-        log_error "✗ $description is not valid JSON: $file"
-        ((ERRORS++))
-    fi
-}
-
-check_dir_not_empty() {
-    local dir="$1"
-    local description="$2"
-    check_dir_exists "$dir" "$description"
-    if [ -n "$(ls -A "$dir")" ]; then
-        log_info "✓ Found non-empty $description: $dir"
-    else
-        log_error "✗ $description is empty"
-        ((ERRORS++))
-    fi
-}
-
-check_file_contains() {
-    local file="$1"
-    local content="$2"
-    local description="$3"
-    check_file_exists "$file" "$description"
-    if grep -q "$content" "$file"; then
-        log_info "✓ Found $content in $file"
-    else
-        log_error "✗ $description does not contain '$content': $file"
-        ((ERRORS++))
-    fi
-}
-
+# ============================================================================
+# VALIDATION PHASE: Run validation scripts
+# ============================================================================
 log_info ""
 log_info "=========================================="
-log_info "Validating must-gather output structure"
+log_info "Running validation checks"
 log_info "=========================================="
 
-# Check required files
-if [ "$LOCAL_MODE" = true ]; then
-    log_info "○ Skipping must-gather.log check in local mode (logs go to console)"
-else
-    check_file_not_empty "$OUTPUT_DIR/must-gather.log" "must-gather container logs"
-fi
+VALIDATION_FAILURES=0
 
-check_file_not_empty "$OUTPUT_DIR/version" "version file"
-
-check_file_not_empty "$OUTPUT_DIR/sanitization-report.txt" "sanitization report"
-
-check_file_not_empty "$OUTPUT_DIR/platform/platform.txt" "platform information file (text)"
-check_file_not_empty "$OUTPUT_DIR/platform/platform.json" "platform information file (JSON)"
-check_file_valid_json "$OUTPUT_DIR/platform/platform.json" "platform information file (JSON)"
-PLT=$(jq -r '.platform' "$OUTPUT_DIR/platform/platform.json")
-if [ -z "$PLT" ]; then
-    log_error "✗ platform is empty in platform information file (JSON): $OUTPUT_DIR/platform/platform.json"
-    ((ERRORS++))
-fi
-UNDERLYING_PLT=$(jq -r '.underlying' "$OUTPUT_DIR/platform/platform.json")
-if [ -z "$UNDERLYING_PLT" ]; then
-    log_error "✗ 'underlying' is empty in platform information file (JSON): $OUTPUT_DIR/platform/platform.json"
-    ((ERRORS++))
-fi
-K8S_VER=$(jq -r '.k8sVersion' "$OUTPUT_DIR/platform/platform.json")
-if [ -z "$K8S_VER" ]; then
-    log_error "✗ 'k8sVersion' is empty in platform information file (JSON): $OUTPUT_DIR/platform/platform.json"
-    ((ERRORS++))
-fi
-if is_openshift; then
-    OCP_VER=$(jq -r '.ocpVersion' "$OUTPUT_DIR/platform/platform.json")
-    if [ -z "$OCP_VER" ]; then
-        log_error "✗ 'ocpVersion' is empty in platform information file (JSON): $OUTPUT_DIR/platform/platform.json"
-        ((ERRORS++))
+# Common validations (always run if any test is enabled)
+if [ ${#ALL_NAMESPACES[@]} -gt 0 ]; then
+    log_info ""
+    log_info "Running common validations..."
+    COMMON_ARGS=("$OUTPUT_DIR")
+    if [ "$LOCAL_MODE" = true ]; then
+        COMMON_ARGS+=(--local)
+    fi
+    # Join namespaces with comma
+    NS_LIST=$(IFS=,; echo "${ALL_NAMESPACES[*]}")
+    COMMON_ARGS+=(--namespaces "$NS_LIST")
+    if ! "$SCRIPT_DIR/validate-common.sh" "${COMMON_ARGS[@]}"; then
+        log_error "Common validation failed!"
+        ((VALIDATION_FAILURES++))
     fi
 fi
 
-check_dir_not_empty "$OUTPUT_DIR/namespace-inspect" "namespace-inspect directory"
-check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/rhdh-operator" "rhdh-operator in namespace-inspect directory"
-check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/$NS" "test namespace in namespace-inspect directory"
-check_dir_not_empty "$OUTPUT_DIR/namespace-inspect/namespaces/$NS_STANDALONE" "standalone test namespace in namespace-inspect directory"
-
-check_dir_not_empty "$OUTPUT_DIR/helm" "Helm collection directory"
-check_file_not_empty "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "release info text"
-check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$HELM_RELEASE" "$HELM_RELEASE is listed in the Helm releases list"
-check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$NS" "$NS is displayed in the Helm releases list"
-
-check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS" "$NS namespace in Helm collection directory"
-check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/_configmaps" "$NS namespace configmaps in Helm collection directory"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/values.yaml" "values.yaml"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/all-values.yaml" "all-values.yaml"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/manifest.yaml" "manifest.yaml"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/hooks.yaml" "hooks.yaml"
-check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment" "all deployment data in Helm collection directory"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/logs-app.txt" "values.yaml"
-check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/pods" "all pod data in Helm collection directory"
-# Processes are only collected from running pods; the Helm deployment is intentionally misconfigured (CreateContainerConfigError)
-# so the processes directory should NOT exist (or be empty if created)
-if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" ]; then
-    # If processes dir exists, it should be empty (no running pods to collect from)
-    if [ -n "$(ls -A "$OUTPUT_DIR/helm/releases/ns=$NS/$HELM_RELEASE/deployment/processes" 2>/dev/null)" ]; then
-        log_error "✗ Unexpectedly found process data in processes directory (expected empty - no running pods)"
-        ((ERRORS++))
-    else
-        log_info "✓ Correctly found empty processes directory (no running pods)"
+# Helm validation
+if [ "$SKIP_HELM" = false ] && [ -n "$NS_HELM" ]; then
+    log_info ""
+    log_info "Running Helm validation..."
+    if ! "$SCRIPT_DIR/validate-helm.sh" --validate --output-dir "$OUTPUT_DIR" --namespace "$NS_HELM" --release "$HELM_RELEASE"; then
+        log_error "Helm validation failed!"
+        ((VALIDATION_FAILURES++))
     fi
-else
-    log_info "✓ Correctly missing processes directory (expected - no running pods)"
 fi
 
-# Standalone Helm deployment validation (Phase 2: detected via labels/images, not Helm release tracking)
-log_info ""
-log_info "--- Validating standalone Helm deployment detection ---"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone" "standalone Helm deployments directory"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE" "$NS_STANDALONE namespace in standalone directory"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY" "$STANDALONE_DEPLOY in standalone directory"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/standalone-note.txt" "standalone deployment note"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/helm-metadata.txt" "Helm metadata for standalone deployment"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment.yaml" "deployment YAML for standalone deployment"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment.describe.txt" "deployment description for standalone deployment"
-
-# Verify the standalone deployment is listed in the all-rhdh-releases.txt with (standalone) marker
-check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "(standalone)" "standalone marker in releases list"
-check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$NS_STANDALONE" "standalone namespace in releases list"
-
-# Verify that standalone deployments have the deployment data collected
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment" "deployment data in standalone directory"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/logs-app.txt" "logs for standalone deployment"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/pods" "pod data for standalone deployment"
-
-# Verify process collection from the running standalone deployment
-# Unlike the native Helm deployment (which is in CreateContainerConfigError), the standalone deployment is running
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes" "processes directory for running standalone deployment"
-# Find the pod directory and verify process files exist
-standalone_pod_dirs=$(find "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
-if [ "$standalone_pod_dirs" -ge 1 ]; then
-    log_info "✓ Found $standalone_pod_dirs pod process directory(ies) for standalone deployment"
-else
-    log_error "✗ Expected at least 1 pod process directory for standalone deployment, found $standalone_pod_dirs"
-    ((ERRORS++))
-fi
-# Validate process files in each pod directory
-for pod_dir in "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/deployment/processes"/pod=*; do
-    if [ -d "$pod_dir" ]; then
-        pod_name=$(basename "$pod_dir")
-        check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in standalone $pod_name"
-        check_file_contains "$pod_dir/container=backstage-backend.txt" "PID" "process list header in standalone $pod_name"
-        check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in standalone $pod_name"
+# Standalone Helm validation
+if [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
+    log_info ""
+    log_info "Running standalone Helm validation..."
+    STANDALONE_VALIDATE_ARGS=(--validate --output-dir "$OUTPUT_DIR" --namespace "$NS_STANDALONE" --deployment "$STANDALONE_DEPLOY")
+    if [ -n "$STANDALONE_POSTGRES" ]; then
+        STANDALONE_VALIDATE_ARGS+=(--postgres "$STANDALONE_POSTGRES")
     fi
-done
-
-# Verify dependent services (PostgreSQL) are collected for standalone deployments
-log_info ""
-log_info "--- Validating dependent services collection for standalone deployment ---"
-if [ -n "$STANDALONE_POSTGRES" ]; then
-    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies" "dependencies directory for standalone deployment"
-    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES" "PostgreSQL dependency in standalone deployment"
-    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES/statefulset.yaml" "PostgreSQL StatefulSet YAML"
-    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES/statefulset.describe.txt" "PostgreSQL StatefulSet description"
-    # Verify PostgreSQL logs are collected
-    postgres_log_files=$(find "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES" -name 'logs-*.txt' 2>/dev/null | wc -l)
-    if [ "$postgres_log_files" -ge 1 ]; then
-        log_info "✓ Found $postgres_log_files PostgreSQL log file(s)"
-    else
-        log_error "✗ Expected at least 1 PostgreSQL log file, found $postgres_log_files"
-        ((ERRORS++))
+    if ! "$SCRIPT_DIR/validate-helm-standalone.sh" "${STANDALONE_VALIDATE_ARGS[@]}"; then
+        log_error "Standalone Helm validation failed!"
+        ((VALIDATION_FAILURES++))
     fi
-else
-    log_warn "○ Skipping dependent services validation (PostgreSQL not found in this chart version)"
 fi
 
-# Verify the standalone deployment is NOT in the native releases directory (it should only be in standalone/)
-if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS_STANDALONE" ]; then
-    log_error "✗ Standalone deployment namespace should NOT be in helm/releases/ (should only be in helm/standalone/)"
-    ((ERRORS++))
-else
-    log_info "✓ Correctly: standalone deployment is not in helm/releases/ directory"
-fi
-
-check_dir_not_empty "$OUTPUT_DIR/operator" "Operator collection directory"
-check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator" "rhdh-operator namespace in Operator collection directory"
-check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator/configs" "rhdh-operator configmaps in Operator collection directory"
-check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator/deployments" "rhdh-operator deployments in Operator collection directory"
-check_file_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator/logs.txt" "logs.txt"
-check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator/configs" "rhdh-operator configmaps in Operator collection directory"
-check_dir_not_empty "$OUTPUT_DIR/operator/ns=rhdh-operator/deployments" "rhdh-operator deployments in Operator collection directory"
-
-check_dir_not_empty "$OUTPUT_DIR/operator/crds" "CRDs in Operator collection directory"
-check_file_contains "$OUTPUT_DIR/operator/crds/all-crds.txt" "backstages.rhdh.redhat.com" "Backstage CRD is listed in the All CRDs list"
-check_file_not_empty "$OUTPUT_DIR/operator/crds/backstages.rhdh.redhat.com.describe.txt" "Backstage CRD in Operator collection directory"
-check_file_not_empty "$OUTPUT_DIR/operator/crds/backstages.rhdh.redhat.com.yaml" "Backstage CRD definition in Operator collection directory"
-
-check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs" "Backstage CRs in Operator collection directory"
-check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "All Backstage CRs in Operator collection directory"
-check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR" "Backstage CR is listed in the All CRDs list"
-check_file_contains "$OUTPUT_DIR/operator/backstage-crs/all-backstage-crs.txt" "$BACKSTAGE_CR_STATEFULSET" "Backstage CR (kind: StatefulSet) is listed in the All CRDs list"
-cr=$BACKSTAGE_CR
-expected_replicas=1
-for ns in "$NS" "$NS_STATEFULSET"; do
-    if [ "$ns" == "$NS_STATEFULSET" ]; then
-        cr=$BACKSTAGE_CR_STATEFULSET
-        expected_replicas=2
+# Operator validation
+if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
+    log_info ""
+    log_info "Running Operator validation..."
+    if ! "$SCRIPT_DIR/validate-operator.sh" --validate --output-dir "$OUTPUT_DIR" \
+        --cr "$NS_OPERATOR:$BACKSTAGE_CR:1" \
+        --cr "$NS_STATEFULSET:$BACKSTAGE_CR_STATEFULSET:2"; then
+        log_error "Operator validation failed!"
+        ((VALIDATION_FAILURES++))
     fi
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns" "$ns namespace in Backstage CRs in Operator collection directory"
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/_configmaps" "$ns namespace configmaps in Backstage CRs in Operator collection directory"
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr" "$cr in Backstage CRs in Operator collection directory"
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment" "all deployment data in $cr in Backstage CRs in Operator collection directory"
-    check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/logs-app.txt" "Backstage CR Deployment logs in Operator collection directory"
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/pods" "all pod data in $cr in Backstage CRs in Operator collection directory"
-    # Process list collection (from running pods) - now organized by pod
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" "processes directory in $cr deployment"
-    # Verify process collection from each pod (organized in per-pod subdirectories)
-    pod_dirs=$(find "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
-    if [ "$pod_dirs" -eq "$expected_replicas" ]; then
-        log_info "✓ Found $pod_dirs pod process directories (expected: $expected_replicas replicas)"
-    else
-        log_error "✗ Expected $expected_replicas pod process directories, found $pod_dirs"
-        ((ERRORS++))
-    fi
-    # Validate process files in each pod directory
-    for pod_dir in "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/deployment/processes"/pod=*; do
-        if [ -d "$pod_dir" ]; then
-            pod_name=$(basename "$pod_dir")
-            check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in $pod_name"
-            check_file_contains "$pod_dir/container=backstage-backend.txt" "PID" "process list header in $pod_name"
-            check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in $pod_name"
-        fi
-    done
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset" "all deployment data in $cr in Backstage CRs in Operator collection directory"
-    check_file_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/logs-db.txt" "Backstage CR DB StatefulSet logs in Operator collection directory"
-    check_dir_not_empty "$OUTPUT_DIR/operator/backstage-crs/ns=$ns/$cr/db-statefulset/pods" "all DB StatefulSet pods data in $cr in Backstage CRs in Operator collection directory"
-done
-
-## Optional (depending on the flags used)
-if [ -d "$OUTPUT_DIR/cluster-info" ]; then
-    log_info "✓ Found cluster info data directory"
-    check_dir_not_empty "$OUTPUT_DIR/cluster-info" "cluster info data directory"
-else
-    log_warn "○ Cluster info not present (expected - collection is opt-in)"
 fi
 
 log_info ""
@@ -831,10 +657,10 @@ log_info "=========================================="
 log_info "E2E Test Summary"
 log_info "=========================================="
 
-if [ $ERRORS -eq 0 ]; then
+if [ $VALIDATION_FAILURES -eq 0 ]; then
     log_info "All validation checks passed!"
     exit 0
 else
-    log_error "$ERRORS validation check(s) failed!"
+    log_error "$VALIDATION_FAILURES validation suite(s) failed!"
     exit 1
 fi
