@@ -124,12 +124,19 @@ dump_debug_info() {
         log_warn "--- Deployments in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get deployments -o wide 2>/dev/null || true
         
+        log_warn "--- StatefulSets in namespace $NS_STANDALONE ---"
+        kubectl -n "$NS_STANDALONE" get statefulsets -o wide 2>/dev/null || true
+        
         log_warn "--- Events in namespace $NS_STANDALONE ---"
         kubectl -n "$NS_STANDALONE" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
         
         if [ -n "${STANDALONE_DEPLOY:-}" ]; then
             log_warn "--- Standalone Deployment '$STANDALONE_DEPLOY' ---"
             kubectl -n "$NS_STANDALONE" get deployment "$STANDALONE_DEPLOY" -o yaml 2>/dev/null || true
+        fi
+        if [ -n "${STANDALONE_POSTGRES:-}" ]; then
+            log_warn "--- PostgreSQL StatefulSet '$STANDALONE_POSTGRES' ---"
+            kubectl -n "$NS_STANDALONE" get statefulset "$STANDALONE_POSTGRES" -o yaml 2>/dev/null || true
         fi
     fi
     
@@ -403,6 +410,16 @@ if [ -z "$STANDALONE_DEPLOY" ]; then
     log_error "Could not find standalone deployment in namespace $NS_STANDALONE."
     dump_debug_info
     exit 1
+fi
+
+# Get the PostgreSQL StatefulSet name (dependent service from subchart)
+STANDALONE_POSTGRES=$(kubectl -n "$NS_STANDALONE" get statefulset -l "app.kubernetes.io/managed-by=Helm,app.kubernetes.io/instance=$STANDALONE_RELEASE,app.kubernetes.io/name=postgresql" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+if [ -z "$STANDALONE_POSTGRES" ]; then
+    log_warn "Could not find PostgreSQL StatefulSet in namespace $NS_STANDALONE (may not be part of this chart version)"
+else
+    log_info "Found PostgreSQL StatefulSet: $STANDALONE_POSTGRES"
+    # Wait for PostgreSQL to be ready
+    kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
 fi
 log_info "Found standalone deployment: $STANDALONE_DEPLOY"
 
@@ -718,6 +735,26 @@ for pod_dir in "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY
         check_file_contains "$pod_dir/container=backstage-backend.txt" "node" "Node.js process in process list in standalone $pod_name"
     fi
 done
+
+# Verify dependent services (PostgreSQL) are collected for standalone deployments
+log_info ""
+log_info "--- Validating dependent services collection for standalone deployment ---"
+if [ -n "$STANDALONE_POSTGRES" ]; then
+    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies" "dependencies directory for standalone deployment"
+    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES" "PostgreSQL dependency in standalone deployment"
+    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES/statefulset.yaml" "PostgreSQL StatefulSet YAML"
+    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES/statefulset.describe.txt" "PostgreSQL StatefulSet description"
+    # Verify PostgreSQL logs are collected
+    postgres_log_files=$(find "$OUTPUT_DIR/helm/standalone/ns=$NS_STANDALONE/$STANDALONE_DEPLOY/dependencies/$STANDALONE_POSTGRES" -name 'logs-*.txt' 2>/dev/null | wc -l)
+    if [ "$postgres_log_files" -ge 1 ]; then
+        log_info "✓ Found $postgres_log_files PostgreSQL log file(s)"
+    else
+        log_error "✗ Expected at least 1 PostgreSQL log file, found $postgres_log_files"
+        ((ERRORS++))
+    fi
+else
+    log_warn "○ Skipping dependent services validation (PostgreSQL not found in this chart version)"
+fi
 
 # Verify the standalone deployment is NOT in the native releases directory (it should only be in standalone/)
 if [ -d "$OUTPUT_DIR/helm/releases/ns=$NS_STANDALONE" ]; then
