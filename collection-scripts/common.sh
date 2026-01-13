@@ -702,7 +702,7 @@ collect_heap_dumps_for_pods() {
           echo "2. Redeploy and wait for the pod to restart"
           echo "3. Run must-gather again with --with-heap-dumps:"
           echo ""
-          echo "   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather:next -- \\"
+          echo "   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- \\"
           echo "     /usr/bin/gather --with-heap-dumps"
           echo ""
           echo "The heap dump will be automatically collected and included in the output."

@@ -6,7 +6,7 @@
 #   ./hack/deploy-k8s.sh [OPTIONS]
 #
 # Options:
-#   --image <image>     Full image name (default: quay.io/rhdh-community/rhdh-must-gather:next)
+#   --image <image>     Full image name (default: quay.io/rhdh-community/rhdh-must-gather:latest)
 #   --overlay <overlay> Overlay to use. Can be:
 #                       - A pre-built overlay name (e.g., "with-heap-dumps", "debug-mode")
 #                       - A full/relative path to a user-defined overlay directory
@@ -29,7 +29,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 KUSTOMIZE_BASE="${REPO_ROOT}/deploy"
 
 # Default values
-DEFAULT_IMAGE="quay.io/rhdh-community/rhdh-must-gather:next"
+DEFAULT_IMAGE="quay.io/rhdh-community/rhdh-must-gather:latest"
 IMAGE="${DEFAULT_IMAGE}"
 OVERLAY=""
 OPTS_STRING=""

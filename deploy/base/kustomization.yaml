@@ -18,5 +18,5 @@ labels:
 
 images:
   - name: quay.io/rhdh-community/rhdh-must-gather
-    newTag: next
+    newTag: latest
 
