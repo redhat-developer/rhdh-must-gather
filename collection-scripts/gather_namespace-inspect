@@ -48,19 +48,15 @@ else
         | sort | uniq || echo "")
     
     # Find namespaces with standalone Helm deployments (helm template + kubectl apply)
-    # These are detected via labels/images since they don't have Helm release secrets
+    # These have app.kubernetes.io/managed-by=Helm label (set by helm template)
     # Note: In disconnected environments with mirrored images, the image pattern won't match.
     # Detection will still work via Helm labels (helm.sh/chart, app.kubernetes.io/name, etc.)
-    # Excludes operator-managed resources (collected separately via cr_namespaces/operator_namespaces)
     RHDH_PATTERN="backstage|rhdh|developer-hub"
     RHDH_IMAGE_PATTERN="quay.io/rhdh|registry.redhat.io/rhdh|ghcr.io/backstage/backstage"
     standalone_namespaces=$($KUBECTL_CMD get deployments --all-namespaces -o json 2>/dev/null | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
       .items[] |
-      # Exclude operator-managed resources (collected separately)
-      select(
-        (.metadata.labels["rhdh.redhat.com/app"] // null) == null and
-        (.metadata.labels["app.kubernetes.io/name"] // "") != "rhdh-operator"
-      ) |
+      # Must be managed by Helm (set by helm template)
+      select(.metadata.labels["app.kubernetes.io/managed-by"] == "Helm") |
       select(
         (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
         (.metadata.labels["app.kubernetes.io/name"] // "" | test($pattern; "i")) or
