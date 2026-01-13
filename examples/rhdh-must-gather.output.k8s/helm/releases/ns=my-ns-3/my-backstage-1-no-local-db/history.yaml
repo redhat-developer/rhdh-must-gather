@@ -1,6 +1,0 @@
-- app_version: ""
-  chart: backstage-4.6.0
-  description: Install complete
-  revision: 1
-  status: deployed
-  updated: "2025-10-23T11:47:31.237759319+02:00"

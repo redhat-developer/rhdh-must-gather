@@ -1,4 +1,0 @@
-NAME                  DATA   AGE
-kube-root-ca.crt      1      31m
-rhdh-default-config   12     31m
-rhdh-plugin-deps      3      31m

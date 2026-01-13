@@ -1,6 +1,0 @@
-Detected Platform Information
------------------------------
-Platform   : OCP
-Underlying : AWS
-OCP Version: 4.19.16
-K8s Version: v1.32.9

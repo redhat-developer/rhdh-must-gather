@@ -1,2 +1,0 @@
-REVISION	UPDATED                 	STATUS  	CHART                     	APP VERSION	DESCRIPTION     
-1       	Thu Oct 23 11:11:17 2025	deployed	redhat-developer-hub-1.7.1	1.7.1      	Install complete

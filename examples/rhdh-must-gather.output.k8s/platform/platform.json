@@ -1,6 +1,0 @@
-{
-  "platform": "Vanilla K8s",
-  "underlying": "",
-  "ocpVersion": "",
-  "k8sVersion": "v1.31.5+k3s1"
-}

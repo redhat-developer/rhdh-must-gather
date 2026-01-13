@@ -1,8 +1,0 @@
-USER-SUPPLIED VALUES:
-global:
-  host: my-backstage-1.127.0.0.1.sslip.io
-route:
-  enabled: false
-upstream:
-  ingress:
-    enabled: true

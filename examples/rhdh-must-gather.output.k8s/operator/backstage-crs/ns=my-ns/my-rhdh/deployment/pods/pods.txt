@@ -1,2 +1,0 @@
-NAME                                 READY   STATUS    RESTARTS   AGE
-backstage-my-rhdh-6457df4994-r2cps   1/1     Running   0          29m

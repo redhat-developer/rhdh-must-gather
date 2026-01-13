@@ -1,2 +1,0 @@
-REVISION	UPDATED                 	STATUS  	CHART          	APP VERSION	DESCRIPTION     
-1       	Thu Oct 23 11:47:31 2025	deployed	backstage-4.6.0	           	Install complete

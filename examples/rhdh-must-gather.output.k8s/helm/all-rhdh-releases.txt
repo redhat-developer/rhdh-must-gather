@@ -1,3 +1,0 @@
-NAME                           	NAMESPACE  	REVISION	UPDATED                                 	STATUS  	CHART                                 	APP VERSION
-my-backstage-1                 	my-ns-2    	3       	2025-10-23 11:49:24.286656423 +0200 CEST	deployed	backstage-4.6.0                       	           
-my-backstage-1-no-local-db     	my-ns-3    	1       	2025-10-23 11:47:31.237759319 +0200 CEST	deployed	backstage-4.6.0                       	           

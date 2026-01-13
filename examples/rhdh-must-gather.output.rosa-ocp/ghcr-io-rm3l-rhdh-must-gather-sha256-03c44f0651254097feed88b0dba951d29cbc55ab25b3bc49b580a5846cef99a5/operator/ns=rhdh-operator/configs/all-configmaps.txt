@@ -1,5 +1,0 @@
-NAME                       DATA   AGE
-kube-root-ca.crt           1      11m
-openshift-service-ca.crt   1      11m
-rhdh-default-config        12     11m
-rhdh-plugin-deps           1      11m

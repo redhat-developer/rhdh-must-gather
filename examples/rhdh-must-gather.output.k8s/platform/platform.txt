@@ -1,5 +1,0 @@
-Detected Platform Information
------------------------------
-Platform   : Vanilla K8s
-Underlying : 
-K8s Version: v1.31.5+k3s1

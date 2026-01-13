@@ -1,5 +1,0 @@
-NAME: redhat-developer-hub-helm
-LAST DEPLOYED: Thu Oct 23 11:11:17 2025
-NAMESPACE: my-ns
-STATUS: deployed
-REVISION: 1

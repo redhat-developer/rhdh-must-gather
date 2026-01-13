@@ -1,2 +1,0 @@
-NAME                                         READY   STATUS    RESTARTS   AGE
-redhat-developer-hub-helm-6698c6d684-ccdhj   1/1     Running   0          9m3s

@@ -1,3 +1,0 @@
-NAMESPACE   NAME               AGE
-olm         olm-operators      32m
-operators   global-operators   32m

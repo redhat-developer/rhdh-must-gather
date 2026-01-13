@@ -1,6 +1,0 @@
-{
-  "platform": "OCP",
-  "underlying": "AWS",
-  "ocpVersion": "4.19.16",
-  "k8sVersion": "v1.32.9"
-}

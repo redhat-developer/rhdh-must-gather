@@ -1,6 +1,0 @@
-- app_version: ""
-  chart: redhat-developer-hub-orchestrator-infra-0.3.0
-  description: Install complete
-  revision: 1
-  status: deployed
-  updated: "2025-10-23T13:07:28.707051871+02:00"

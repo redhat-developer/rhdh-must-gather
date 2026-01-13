@@ -1,7 +1,0 @@
-{
-  "RHDH Version": "1.8.0",
-  "Backstage Version": "1.42.5",
-  "Upstream": "https://github.com/redhat-developer/rhdh/tree/release-1.8 @ d48728e9",
-  "Midstream": "https://gitlab.cee.redhat.com/rhidp/rhdh/-/commits/rhdh-1.8-rhel-9 @ d94f566b",
-  "Build Time": "2025-10-21T13:59:11Z"
-}

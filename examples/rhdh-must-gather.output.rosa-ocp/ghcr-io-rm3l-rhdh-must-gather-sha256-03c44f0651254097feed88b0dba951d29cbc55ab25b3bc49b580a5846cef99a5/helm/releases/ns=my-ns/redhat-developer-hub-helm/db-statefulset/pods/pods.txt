@@ -1,2 +1,0 @@
-NAME                                     READY   STATUS    RESTARTS   AGE
-redhat-developer-hub-helm-postgresql-0   1/1     Running   0          9m10s

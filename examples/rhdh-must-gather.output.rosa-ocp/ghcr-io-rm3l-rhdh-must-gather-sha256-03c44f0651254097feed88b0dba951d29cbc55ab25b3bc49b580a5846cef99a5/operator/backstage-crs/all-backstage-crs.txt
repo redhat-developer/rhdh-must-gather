@@ -1,2 +1,0 @@
-NAMESPACE   NAME                  AGE
-my-ns       my-developer-hub-op   8m24s

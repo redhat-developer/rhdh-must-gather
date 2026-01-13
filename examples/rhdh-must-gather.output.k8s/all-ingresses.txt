@@ -1,2 +1,0 @@
-NAMESPACE   NAME                           CLASS     HOSTS                               ADDRESS                                       PORTS   AGE
-my-ns-2     my-backstage-1-developer-hub   traefik   my-backstage-1.127.0.0.1.sslip.io   172.18.0.2,172.18.0.3,172.18.0.4,172.18.0.5   80      25m

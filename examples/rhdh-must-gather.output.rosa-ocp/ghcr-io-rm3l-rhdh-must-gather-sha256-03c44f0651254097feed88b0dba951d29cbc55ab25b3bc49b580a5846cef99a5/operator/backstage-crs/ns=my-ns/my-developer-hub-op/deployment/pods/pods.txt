@@ -1,2 +1,0 @@
-NAME                                             READY   STATUS    RESTARTS   AGE
-backstage-my-developer-hub-op-67d5df4bcc-8pmvq   1/1     Running   0          9m18s

@@ -1,9 +1,0 @@
-NAMESPACE                                  NAME                                AGE
-openshift-customer-monitoring              openshift-customer-monitoring       4h6m
-openshift-deployment-validation-operator   deployment-validation-operator-og   4h5m
-openshift-monitoring                       openshift-cluster-monitoring        4h8m
-openshift-operator-lifecycle-manager       olm-operators                       4h8m
-openshift-operators                        global-operators                    4h8m
-openshift-serverless-logic                 openshift-serverless-logic          12m
-openshift-serverless                       serverless-operator-group           12m
-rhdh-operator                              rhdh-operator-wtgrm                 11m

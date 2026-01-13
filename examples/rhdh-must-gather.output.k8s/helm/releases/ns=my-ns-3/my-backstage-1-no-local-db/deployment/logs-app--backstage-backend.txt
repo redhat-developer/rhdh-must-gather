@@ -1,1 +1,0 @@
-Error from server (BadRequest): container "backstage-backend" in pod "my-backstage-1-no-local-db-developer-hub-7d94c7ccbd-gsknc" is waiting to start: CreateContainerConfigError

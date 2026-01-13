@@ -1,5 +1,0 @@
-NAME: my-backstage-1
-LAST DEPLOYED: Thu Oct 23 11:49:24 2025
-NAMESPACE: my-ns-2
-STATUS: deployed
-REVISION: 3

@@ -502,8 +502,6 @@ Usage: ./must_gather [params...]
 
 > **Note**: The tool automatically detects and collects data for both Helm and Operator-based RHDH deployments. For cluster-wide information, use the `--cluster-info` flag or combine with standard `oc adm must-gather`.
 
-See the [examples](examples) folder for sample outputs on various platforms.
-
 ## Contributing and reporting issues
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).

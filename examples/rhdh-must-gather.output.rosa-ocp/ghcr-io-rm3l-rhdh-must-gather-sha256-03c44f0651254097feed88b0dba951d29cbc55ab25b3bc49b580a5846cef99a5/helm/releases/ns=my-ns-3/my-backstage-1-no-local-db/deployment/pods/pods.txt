@@ -1,2 +1,0 @@
-NAME                                                        READY   STATUS                       RESTARTS   AGE
-my-backstage-1-no-local-db-developer-hub-56fbb8cf48-gzwxj   0/1     CreateContainerConfigError   0          11m
