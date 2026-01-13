@@ -16,7 +16,7 @@ spec:
       restartPolicy: Never
       containers:
       - name: gather
-        image: quay.io/rhdh-community/rhdh-must-gather:next
+        image: quay.io/rhdh-community/rhdh-must-gather:latest
         env:
         - name: POD_NAME
           valueFrom:

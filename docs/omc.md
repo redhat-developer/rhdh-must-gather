@@ -8,7 +8,7 @@ The Namepace's inspect output is fully compatible with [OMC (OpenShift Must-Gath
 
 1. **Collect data** (Namepace's inspect included by default):
    ```bash
-   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather:next
+   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
    ```
 
 2. **Install OMC** (if not already installed):

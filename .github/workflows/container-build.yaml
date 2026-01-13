@@ -1,4 +1,4 @@
-name: Next container image build
+name: Container image build
 
 on:
   push:
@@ -70,17 +70,17 @@ jobs:
               echo "EXTRA_TAGS=" >> "$GITHUB_OUTPUT"
             fi
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            # Main branch: push next and next-${commit}
-            echo "IMAGE_TAG=next" >> "$GITHUB_OUTPUT"
-            echo "EXTRA_TAGS=next-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            # Main branch: push latest and latest-${commit}
+            echo "IMAGE_TAG=latest" >> "$GITHUB_OUTPUT"
+            echo "EXTRA_TAGS=latest-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
             VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
             echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.ref }}" == refs/heads/release-* ]]; then
-            # Release branch: extract version and push next-1.x and next-1.x-${commit}
+            # Release branch: extract version and push latest-1.x and latest-1.x-${commit}
             BRANCH_NAME=${GITHUB_REF#refs/heads/}
             RELEASE_VERSION=${BRANCH_NAME#release-}
-            echo "IMAGE_TAG=next-${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "EXTRA_TAGS=next-${RELEASE_VERSION}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            echo "IMAGE_TAG=latest-${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "EXTRA_TAGS=latest-${RELEASE_VERSION}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
             VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
             echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
@@ -121,7 +121,7 @@ jobs:
             docker push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
             
             # Track commit-SHA tags for expiration
-            if [[ ${TAG} == next-* ]]; then
+            if [[ ${TAG} == latest-* ]]; then
               echo "${TAG}" >> /tmp/expiry-tags.txt
             fi
             

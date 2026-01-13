@@ -5,7 +5,7 @@
 #
 # Common use cases:
 #   - Testing a development build
-#   - Using a specific release tag instead of :next
+#   - Using a specific release tag instead of :latest
 #   - Using a mirrored image in an air-gapped environment
 #
 apiVersion: kustomize.config.k8s.io/v1beta1

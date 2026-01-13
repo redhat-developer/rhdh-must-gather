@@ -86,11 +86,11 @@ npx @memlab/cli analyze --help
 1. **Collect multiple snapshots over time** (optional, not done automatically):
    ```bash
    # Collect initial snapshot
-   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather:next -- /usr/bin/gather --with-heap-dumps
+   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather --with-heap-dumps
    
    # Wait 30 minutes for memory to grow
    # Collect second snapshot
-   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather:next -- /usr/bin/gather --with-heap-dumps
+   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather --with-heap-dumps
    ```
 
 2. **Compare snapshots in Chrome DevTools**:
