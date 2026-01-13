@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - '**.sh'
+      - 'collection-scripts/**'
       - '.github/workflows/scripts-checks.yaml'
+      - 'tests/e2e/**'
     branches: [ main ]
   pull_request:
     paths:
       - '**.sh'
+      - 'collection-scripts/**'
       - '.github/workflows/scripts-checks.yaml'
+      - 'tests/e2e/**'
     branches: [ 'main' ]
 
 permissions:
