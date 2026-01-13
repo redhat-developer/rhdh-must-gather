@@ -339,7 +339,7 @@ EOF
     # Wait for the Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)
     log_info "Waiting for Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)..."
     HELM_POD=""
-    TIMEOUT=60
+    TIMEOUT=120
     until HELM_POD=$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$HELM_POD" ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
@@ -400,10 +400,10 @@ EOF
             --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
     fi
 
-    # Wait for the standalone-deployed RHDH pod to be ready
-    log_info "Waiting for standalone-deployed RHDH pod to be ready..."
+    # Wait for the standalone-deployed RHDH pod to be running (not necessarily Ready)
+    log_info "Waiting for standalone-deployed RHDH pod to be running..."
     STANDALONE_POD=""
-    TIMEOUT=60
+    TIMEOUT=120
     until STANDALONE_POD=$(kubectl -n "$NS_STANDALONE" get pods -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STANDALONE_POD" ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
@@ -417,12 +417,12 @@ EOF
         exit 1
     fi
     log_info "Found standalone-deployed pod: $STANDALONE_POD"
-    if ! kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"$STANDALONE_POD" --timeout=5m; then
-        log_error "Standalone-deployed pod $STANDALONE_POD did not become ready within expected time."
+    if ! kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"$STANDALONE_POD" --timeout=5m; then
+        log_error "Standalone-deployed pod $STANDALONE_POD did not reach Running state."
         dump_debug_info
         exit 1
     fi
-    log_info "Standalone-deployed pod $STANDALONE_POD is ready."
+    log_info "Standalone-deployed pod $STANDALONE_POD is running."
 
     # Get the deployment name
     STANDALONE_DEPLOY=$(kubectl -n "$NS_STANDALONE" get deployment -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
@@ -438,7 +438,7 @@ EOF
         log_warn "Could not find PostgreSQL StatefulSet in namespace $NS_STANDALONE (may not be part of this chart version)"
     else
         log_info "Found PostgreSQL StatefulSet: $STANDALONE_POSTGRES"
-        kubectl -n "$NS_STANDALONE" wait --for=condition=Ready pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
+        kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
     fi
     log_info "Standalone deployment '$STANDALONE_DEPLOY' deployed successfully in namespace $NS_STANDALONE"
 else
@@ -498,22 +498,46 @@ spec:
         replicas: 2
 EOF
 
-    # Wait for the Backstage CRs to be reconciled
-    log_info "Waiting for Backstage CR $BACKSTAGE_CR to be reconciled..."
-    if ! kubectl -n "$NS_OPERATOR" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR --timeout=5m; then
-        log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR to be reconciled."
+    # Wait for the Backstage pods to be running (not necessarily Ready - we just need them to exist for must-gather)
+    log_info "Waiting for Backstage pod for CR $BACKSTAGE_CR to be running..."
+    OPERATOR_POD=""
+    TIMEOUT=300
+    until OPERATOR_POD=$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$OPERATOR_POD" ]; do
+        sleep 2
+        TIMEOUT=$((TIMEOUT - 2))
+        if [ $TIMEOUT -le 0 ]; then
+            log_error "Timed out waiting for Backstage pod for CR $BACKSTAGE_CR to appear."
+            dump_debug_info
+            exit 1
+        fi
+    done
+    log_info "Found Backstage pod: $OPERATOR_POD, waiting for it to be running..."
+    if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pod/"$OPERATOR_POD" --timeout=3m; then
+        log_error "Backstage pod $OPERATOR_POD did not reach Running state."
         dump_debug_info
         exit 1
     fi
-    log_info "Backstage CR $BACKSTAGE_CR is now ready and deployed."
+    log_info "Backstage pod $OPERATOR_POD is now running."
 
-    log_info "Waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled..."
-    if ! kubectl -n "$NS_STATEFULSET" wait --for='jsonpath={.status.conditions[?(@.type=="Deployed")].reason}=Deployed' backstage/$BACKSTAGE_CR_STATEFULSET --timeout=5m; then
-        log_error "Timed out waiting for Backstage CR $BACKSTAGE_CR_STATEFULSET to be reconciled."
+    log_info "Waiting for Backstage pods for CR $BACKSTAGE_CR_STATEFULSET to be running..."
+    STATEFULSET_POD=""
+    TIMEOUT=300
+    until STATEFULSET_POD=$(kubectl -n "$NS_STATEFULSET" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR_STATEFULSET" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STATEFULSET_POD" ]; do
+        sleep 2
+        TIMEOUT=$((TIMEOUT - 2))
+        if [ $TIMEOUT -le 0 ]; then
+            log_error "Timed out waiting for Backstage pod for CR $BACKSTAGE_CR_STATEFULSET to appear."
+            dump_debug_info
+            exit 1
+        fi
+    done
+    log_info "Found Backstage pod: $STATEFULSET_POD, waiting for it to be running..."
+    if ! kubectl -n "$NS_STATEFULSET" wait --for=jsonpath='{.status.phase}'=Running pod/"$STATEFULSET_POD" --timeout=3m; then
+        log_error "Backstage pod $STATEFULSET_POD did not reach Running state."
         dump_debug_info
         exit 1
     fi
-    log_info "Backstage CR $BACKSTAGE_CR_STATEFULSET is now ready and deployed."
+    log_info "Backstage pod $STATEFULSET_POD is now running."
 else
     log_info "Skipping Operator setup"
 fi
