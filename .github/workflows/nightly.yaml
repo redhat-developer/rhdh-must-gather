@@ -1,0 +1,51 @@
+name: Nightly E2E Tests
+
+on:
+  schedule:
+    # Run at 21:38 UTC every day
+    - cron: '38 21 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-tests:
+    name: Nightly E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+          # Install yq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
+        with:
+          cluster_name: rhdh-must-gather-e2e
+          wait: 120s
+
+      - name: Run E2E tests
+        run: make test-e2e
+
+      - name: Display must-gather process logs
+        if: ${{ success() || failure() }}
+        run: |
+          cat rhdh-must-gather-output.k8s.*/must-gather.log || true
+
+      - name: Upload must-gather output
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: must-gather-output-nightly
+          path: out/
+          retention-days: 7

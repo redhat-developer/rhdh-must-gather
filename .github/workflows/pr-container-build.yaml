@@ -39,7 +39,6 @@ jobs:
       pull-requests: write
     outputs:
       full_image_name: ${{ steps.prep.outputs.FULL_IMAGE_NAME }}
-      any_changed: ${{ steps.changed-files.outputs.any_changed }}
 
     steps:
       - name: Checkout
@@ -56,13 +55,10 @@ jobs:
         with:
           files: |
             .github/workflows/pr-container-build.yaml
-            .github/workflows/pr-e2e-tests.yaml
             Makefile
             Dockerfile
             .containerignore
             collection-scripts/**
-            tests/e2e/**
-            hack/k8s-test.sh
             deploy/**
             LICENSE
           files_ignore: |
@@ -198,15 +194,3 @@ jobs:
           echo "- **Status**: ✅ Built, pushed, and signed" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: \`pr-${{ github.event.pull_request.number }}\`, \`${{ steps.prep.outputs.EXTRA_TAGS }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Expiry**: 1 week" >> $GITHUB_STEP_SUMMARY
-
-  e2e-tests:
-    name: E2E Tests
-    needs: pr-image-publish
-    if: needs.pr-image-publish.outputs.any_changed == 'true'
-    uses: ./.github/workflows/pr-e2e-tests.yaml
-    with:
-      image_name: ${{ needs.pr-image-publish.outputs.full_image_name }}
-      checkout_repo: ${{ github.event.pull_request.head.repo.full_name }}
-      checkout_ref: ${{ github.event.pull_request.head.sha }}
-      run_e2e: true
-      target_branch: ${{ github.event.pull_request.base.ref }}
