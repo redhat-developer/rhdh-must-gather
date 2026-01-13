@@ -64,26 +64,15 @@ function parse_flags {
       --cluster-info)
         requested_scripts+=("cluster-info")
         ;;
-      --without-operator)
-        excluded_scripts+=("operator")
-        ;;
-      --without-orchestrator)
-        excluded_scripts+=("orchestrator")
-        ;;
-      --without-helm)
-        excluded_scripts+=("helm")
-        ;;
-      --without-platform)
-        excluded_scripts+=("platform")
-        ;;
-      --without-route)
-        excluded_scripts+=("route")
-        ;;
-      --without-ingress)
-        excluded_scripts+=("ingress")
-        ;;
-      --without-namespace-inspect)
-        excluded_scripts+=("namespace-inspect")
+      --without-*)
+        type="${1#--without-}"
+        # Validate against known scripts to catch typos
+        local pattern=" ${type} "
+        if [[ " ${mandatory_scripts[*]} " =~ $pattern ]]; then
+          excluded_scripts+=("$type")
+        else
+          log_warn "Unknown collector type '${type}' (available: ${mandatory_scripts[*]})"
+        fi
         ;;
       --with-secrets)
         with_secrets="true"
