@@ -119,19 +119,33 @@ function gather_backstage_crs() {
   crs_dir="$operator_dir/backstage-crs"
   ensure_directory "$crs_dir"
 
+  # Check if the Backstage CRD exists first
+  if ! $KUBECTL_CMD get crd backstages.rhdh.redhat.com >/dev/null 2>&1; then
+      log_warn "No Backstage CR found (CRD not installed)"
+      echo "No Backstage CR found (CRD backstages.rhdh.redhat.com not installed)" > "$crs_dir/no-crs.txt"
+      echo "No resources found." > "$crs_dir/all-backstage-crs.txt"
+      return 0
+  fi
+
   namespace_args=$(get_namespace_args)
   safe_exec "$KUBECTL_CMD get backstages.rhdh.redhat.com $namespace_args" "$crs_dir/all-backstage-crs.txt" \
     "All Backstage CRs in $namespace_args"
-  safe_exec "$KUBECTL_CMD get backstages.rhdh.redhat.com $namespace_args -o json | jq -r '.items[]'" "$crs_dir/all-backstage-crs.json" \
-    "All Backstage CRs in $namespace_args - JSON"
 
-  crs=$(jq -r '"\(.metadata.namespace)/\(.metadata.name)"' < "$crs_dir/all-backstage-crs.json" || echo "")
-  cr_namespaces=$(jq -r '"\(.metadata.namespace)"' < "$crs_dir/all-backstage-crs.json" || echo "")
-  cr_namespaces=$(echo "$cr_namespaces" | sort | uniq)
-  rm -rf "$crs_dir/all-backstage-crs.json"
+  # Get JSON output and store in temp file, only parse if it's valid JSON
+  local json_output
+  # shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
+  json_output=$($KUBECTL_CMD get backstages.rhdh.redhat.com $namespace_args -o json 2>/dev/null || echo "")
+  
+  crs=""
+  cr_namespaces=""
+  if [[ -n "$json_output" ]] && echo "$json_output" | jq -e '.items' >/dev/null 2>&1; then
+      crs=$(echo "$json_output" | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name)"' 2>/dev/null || echo "")
+      cr_namespaces=$(echo "$json_output" | jq -r '.items[].metadata.namespace' 2>/dev/null | sort | uniq || echo "")
+  fi
 
   if [[ -z "$crs" ]]; then
-      log_warn "No Backstage CR found" > "$crs_dir/no-crs.txt"
+      log_warn "No Backstage CR found"
+      echo "No Backstage CR found" > "$crs_dir/no-crs.txt"
       return 0
   fi
 
