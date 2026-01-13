@@ -42,10 +42,30 @@ else
     # Otherwise, find namespaces with RHDH deployments
     log_info "Auto-detecting namespaces with RHDH deployments..."
     
-    # Find namespaces with Helm releases
+    # Find namespaces with native Helm releases
     helm_namespaces=$(helm list --all-namespaces -o json 2>/dev/null \
         | jq -r '.[] | select(.chart | test("backstage|rhdh|developer-hub"; "i")) | .namespace' \
         | sort | uniq || echo "")
+    
+    # Find namespaces with standalone Helm deployments (helm template + kubectl apply)
+    # These have app.kubernetes.io/managed-by=Helm label (set by helm template)
+    # Note: In disconnected environments with mirrored images, the image pattern won't match.
+    # Detection will still work via Helm labels (helm.sh/chart, app.kubernetes.io/name, etc.)
+    RHDH_PATTERN="backstage|rhdh|developer-hub"
+    RHDH_IMAGE_PATTERN="quay.io/rhdh|registry.redhat.io/rhdh|ghcr.io/backstage/backstage"
+    standalone_namespaces=$($KUBECTL_CMD get deployments --all-namespaces -o json 2>/dev/null | jq -r --arg pattern "$RHDH_PATTERN" --arg img_pattern "$RHDH_IMAGE_PATTERN" '
+      .items[] |
+      # Must be managed by Helm (set by helm template)
+      select(.metadata.labels["app.kubernetes.io/managed-by"] == "Helm") |
+      select(
+        (.metadata.labels["helm.sh/chart"] // "" | test($pattern; "i")) or
+        (.metadata.labels["app.kubernetes.io/name"] // "" | test($pattern; "i")) or
+        (.metadata.labels["app.kubernetes.io/instance"] // "" | test($pattern; "i")) or
+        (.spec.template.spec.containers[]?.image // "" | test($img_pattern; "i")) or
+        (.spec.template.spec.initContainers[]?.image // "" | test($img_pattern; "i"))
+      ) |
+      .metadata.namespace
+    ' 2>/dev/null | sort | uniq || echo "")
     
     # Find namespaces with Backstage CRs
     cr_namespaces=$($KUBECTL_CMD get backstages.rhdh.redhat.com --all-namespaces -o jsonpath='{.items[*].metadata.namespace}' 2>/dev/null \
@@ -56,7 +76,7 @@ else
         | tr ' ' '\n' | sort | uniq || echo "")
     
     # Combine and deduplicate
-    all_namespaces=$(echo -e "${helm_namespaces}\n${cr_namespaces}\n${operator_namespaces}" | grep -v '^$' | sort | uniq || echo "")
+    all_namespaces=$(echo -e "${helm_namespaces}\n${standalone_namespaces}\n${cr_namespaces}\n${operator_namespaces}" | grep -v '^$' | sort | uniq || echo "")
     
     if [[ -z "$all_namespaces" ]]; then
         log_warn "No RHDH deployments found in cluster"
