@@ -334,6 +334,77 @@ else
             collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir"
         fi
 
+        # Collect dependent services (e.g., PostgreSQL) with the same app.kubernetes.io/instance label
+        # These are part of the same Helm release (e.g., PostgreSQL subchart)
+        release_instance=$($KUBECTL_CMD get "$workload_kind" -n "$workload_ns" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null || echo "")
+        if [[ -n "$release_instance" ]]; then
+            log_debug "Looking for dependent services with instance=$release_instance in namespace $workload_ns"
+
+            # Find other workloads with same instance label (managed by Helm)
+            dependent_workloads=$($KUBECTL_CMD get deployments,statefulsets -n "$workload_ns" -o json 2>/dev/null | jq -r --arg instance "$release_instance" --arg main_name "$workload_name" '
+              .items[] |
+              select(.metadata.labels["app.kubernetes.io/managed-by"] == "Helm") |
+              select(.metadata.labels["app.kubernetes.io/instance"] == $instance) |
+              select(.metadata.name != $main_name) |
+              "\(.kind)/\(.metadata.name)"
+            ' 2>/dev/null || echo "")
+
+            for dep_info in $dependent_workloads; do
+                if [[ -z "$dep_info" ]]; then
+                    continue
+                fi
+
+                dep_kind=$(echo "$dep_info" | cut -d'/' -f1)
+                dep_name=$(echo "$dep_info" | cut -d'/' -f2)
+                dep_key="$workload_ns/$dep_name"
+
+                # Skip if already processed
+                if [[ -n "${processed_deployments[$dep_key]:-}" ]]; then
+                    continue
+                fi
+
+                log_info "    --> Collecting dependent service: $dep_name ($dep_kind)"
+                dep_dir="$workload_dir/dependencies/$dep_name"
+                ensure_directory "$dep_dir"
+
+                if [[ "$dep_kind" == "Deployment" ]]; then
+                    safe_exec "$KUBECTL_CMD -n '$workload_ns' get deployment '$dep_name' -o yaml" "$dep_dir/deployment.yaml" "Dependent Deployment YAML"
+                    safe_exec "$KUBECTL_CMD -n '$workload_ns' describe deployment '$dep_name'" "$dep_dir/deployment.describe.txt" "Dependent Deployment description"
+
+                    # Collect logs from dependent deployment pods
+                    dep_pods=$($KUBECTL_CMD get pods -n "$workload_ns" -l "app.kubernetes.io/instance=$release_instance,app.kubernetes.io/name=$dep_name" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+                    if [[ -z "$dep_pods" ]]; then
+                        # Try alternative label selector
+                        dep_pods=$($KUBECTL_CMD get pods -n "$workload_ns" -l "app.kubernetes.io/instance=$release_instance" --field-selector "metadata.name!=$workload_name" -o json 2>/dev/null | \
+                            jq -r --arg dep "$dep_name" '.items[] | select(.metadata.name | contains($dep)) | .metadata.name' 2>/dev/null || echo "")
+                    fi
+                    for dep_pod in $dep_pods; do
+                        if [[ -n "$dep_pod" ]]; then
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                        fi
+                    done
+                elif [[ "$dep_kind" == "StatefulSet" ]]; then
+                    safe_exec "$KUBECTL_CMD -n '$workload_ns' get statefulset '$dep_name' -o yaml" "$dep_dir/statefulset.yaml" "Dependent StatefulSet YAML"
+                    safe_exec "$KUBECTL_CMD -n '$workload_ns' describe statefulset '$dep_name'" "$dep_dir/statefulset.describe.txt" "Dependent StatefulSet description"
+
+                    # Collect logs from dependent StatefulSet pods
+                    dep_pods=$($KUBECTL_CMD get pods -n "$workload_ns" -l "app.kubernetes.io/instance=$release_instance,app.kubernetes.io/name=$dep_name" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo "")
+                    if [[ -z "$dep_pods" ]]; then
+                        # Try matching by StatefulSet naming convention (name-0, name-1, etc.)
+                        dep_pods=$($KUBECTL_CMD get pods -n "$workload_ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep "^${dep_name}-[0-9]" || echo "")
+                    fi
+                    for dep_pod in $dep_pods; do
+                        if [[ -n "$dep_pod" ]]; then
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                        fi
+                    done
+                fi
+
+                # Mark dependent as processed
+                processed_deployments["$dep_key"]=1
+            done
+        fi
+
         # Mark as processed
         processed_deployments["$workload_info"]=1
     done
