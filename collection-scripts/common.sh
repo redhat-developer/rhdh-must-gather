@@ -2,7 +2,9 @@
 
 set -euo pipefail
 
-trap 'log "An unexpected error occurred. See logs above."' ERR
+# Only log ERR trap in debug mode to avoid confusing users with expected failures
+# (e.g., resource not found errors). Script-level failures are handled by must_gather.
+trap 'if [[ "$LOG_LEVEL" == "debug" || "$LOG_LEVEL" == "trace" ]]; then log "DEBUG" "Command failed at line $LINENO (this may be expected)"; fi' ERR
 
 export BASE_COLLECTION_PATH="${BASE_COLLECTION_PATH:-/must-gather}"
 mkdir -p "${BASE_COLLECTION_PATH}"

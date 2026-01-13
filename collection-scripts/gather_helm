@@ -432,7 +432,12 @@ if [[ -n "$releases" ]]; then
 else
     total_native=0
 fi
-total_standalone=$(find "$standalone_dir" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' \n')
+# Count standalone deployments (if directory exists)
+if [[ -d "$standalone_dir" ]]; then
+    total_standalone=$(find "$standalone_dir" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' \n')
+else
+    total_standalone=0
+fi
 # Ensure values are valid integers
 [[ -z "$total_native" || ! "$total_native" =~ ^[0-9]+$ ]] && total_native=0
 [[ -z "$total_standalone" || ! "$total_standalone" =~ ^[0-9]+$ ]] && total_standalone=0
