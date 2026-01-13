@@ -1,3 +1,9 @@
+---
+description: Guidelines for writing commit messages when committing code changes
+globs:
+alwaysApply: true
+---
+
 # Commit Message Guidelines
 
 ## Format
@@ -85,4 +91,3 @@ Before committing, ask:
 - [ ] Is the `Assisted-by: Cursor` trailer included?
 - [ ] Are changes grouped logically?
 - [ ] Would someone reading this commit in 6 months understand the reasoning?
-
