@@ -426,8 +426,16 @@ else
 fi
 
 # Final summary
-total_native=$(echo "$releases" | grep -c '/' 2>/dev/null || echo "0")
-total_standalone=$(find "$standalone_dir" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l || echo "0")
+# Count native releases (non-empty lines containing '/')
+if [[ -n "$releases" ]]; then
+    total_native=$(echo "$releases" | grep -c '/' 2>/dev/null || echo "0")
+else
+    total_native=0
+fi
+total_standalone=$(find "$standalone_dir" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' \n')
+# Ensure values are valid integers
+[[ -z "$total_native" || ! "$total_native" =~ ^[0-9]+$ ]] && total_native=0
+[[ -z "$total_standalone" || ! "$total_standalone" =~ ^[0-9]+$ ]] && total_standalone=0
 
 if [[ "$total_native" -eq 0 && "$total_standalone" -eq 0 ]]; then
     log_warn "No RHDH-related Helm releases found (native or standalone)"
