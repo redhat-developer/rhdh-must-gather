@@ -263,10 +263,6 @@ collect_rhdh_info_from_running_pods() {
     echo "=== RHDH/Backstage Environment Variables ==="
     echo ""
     env | grep -E "^(BACKSTAGE_|RHDH_|UPSTREAM_REPO|MIDSTREAM_REPO|NODE_|APP_CONFIG_|LOG_LEVEL|PLUGIN_|NO_PROXY|HTTP_PROXY|HTTPS_PROXY|NPM_CONFIG_|GLOBAL_AGENT_)" | sort || true
-    echo ""
-    echo "=== All Environment Variables ==="
-    echo ""
-    env | sort
   ' > "$env_vars_file" 2>&1 || true
 
   # Extract specific env vars for version/metadata collection
