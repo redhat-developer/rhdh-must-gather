@@ -1,4 +1,4 @@
-name: PR Unit Tests
+name: PR Tests
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
       - 'collection-scripts/**'
       - 'tests/**'
       - 'Makefile'
-      - '.github/workflows/unit-tests.yaml'
+      - '.github/workflows/test.yaml'
     branches: [main]
 
 permissions:
@@ -38,3 +38,43 @@ jobs:
         with:
           report_paths: '**/test-results/*.xml'
           annotate_only: ${{ github.event.pull_request.head.repo.full_name != github.repository }} # forked repo cannot write to checks so just do annotations
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+          # Install yq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          # Install oc CLI (needed for namespace-inspect)
+          curl -sLO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          rm -f openshift-client-linux.tar.gz kubectl
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
+        with:
+          cluster_name: rhdh-must-gather-e2e
+          wait: 120s
+
+      - name: Run E2E tests (local mode)
+        run: make test-e2e LOCAL=true
+
+      - name: Upload must-gather output
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: must-gather-output-e2e
+          path: out/
+          retention-days: 5
