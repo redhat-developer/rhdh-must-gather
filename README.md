@@ -14,55 +14,61 @@ This tool helps support teams and engineers collect essential RHDH-specific info
 
 ## Quick Start
 
-### Using with OpenShift (`oc adm must-gather`)
+### For OpenShift clusters
+
+You can use the [OpenShift client CLI](https://developers.redhat.com/learn/openshift/download-and-install-red-hat-openshift-cli):
 
 ```bash
-# Use the published image
+# Use the published image with the default options
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
 
-# To pass specific options to the gather script
+# Or to pass specific options to the gather script
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather [options...]
 ```
 
-### Using with Kubernetes (`Kustomize`)
+### For Kubernetes clusters
 
 ```bash
-# Basic deployment using the default configuration
+# 1. Basic deployment using the default configuration
 kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
 
-# Wait for job completion
+# 2. Wait for job completion
 kubectl -n rhdh-must-gather wait --for=condition=complete job/rhdh-must-gather \
   --timeout=600s
 
-# Wait for the data retriever pod to be ready
+# 3. Wait for the data retriever pod to be ready
 kubectl -n rhdh-must-gather wait --for=condition=ready pod/rhdh-must-gather-data-retriever \
   --timeout=60s
 
-# Stream the tar archive from the pod
+# 4. Stream the must-gather data from the pod
 kubectl -n rhdh-must-gather exec rhdh-must-gather-data-retriever -- \
   tar czf - -C /data . > rhdh-must-gather-output.k8s.tar.gz
 
-# Clean up
+# 5. Clean up the must-gather resources
 kubectl delete -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
 ```
 
 **Using pre-built overlays:**
 
 ```bash
-# Enable debug mode with increased resources
+# Use case 1: Enable debug mode with increased resources
 kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy/overlays/debug-mode?ref=main'
 
-# Enable heap dump collection (larger storage, extended timeout)
+# Use case 2: Enable heap dump collection (larger storage, extended timeout)
 kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy/overlays/with-heap-dumps?ref=main'
 ```
 
 **Creating your own overlay for custom configurations:**
 
-```bash
-# Create a local overlay directory
-mkdir -p my-must-gather-overlay
+1. Create a local overlay directory:
 
-# Create a kustomization.yaml that references the base
+```bash
+mkdir -p my-must-gather-overlay
+```
+
+2. Create a `kustomization.yaml` that references the base
+
+```bash
 cat > my-must-gather-overlay/kustomization.yaml <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -91,14 +97,17 @@ patches:
           - "rhdh-prod,rhdh-staging"
           - "--with-secrets"
 EOF
+```
 
-# Apply your custom overlay
+3. Apply your custom overlay
+
+```bash
 kubectl apply -k my-must-gather-overlay/
 ```
 
-See the [deploy/overlays](deploy/overlays) directory for more overlay examples.
+See the [deploy/overlays](deploy/overlays) directory for more more details and examples.
 
-## What Data is Collected
+## What data is collected
 
 See [data-collected.md](./docs/data-collected.md) for more details.
 
@@ -106,11 +115,11 @@ See [data-collected.md](./docs/data-collected.md) for more details.
 
 See [omc.md](./docs/omc.md) for more details.
 
-## Analyzing Heap Dumps
+## Analyzing heap dumps
 
 See [heap-dumps-collection.md](./docs/heap-dumps-collection.md) for more details.
 
-## Secrets Collection and Sanitization (Opt-In by default)
+## Secrets collection and sanitization (opt-in by default)
 
 See [secret-collection-and-sanitization.md](./docs/secret-collection-and-sanitization.md) for more details.
 
@@ -173,7 +182,7 @@ Usage: ./must_gather [params...]
                                 Heap dumps are collected immediately after pod logs for each deployment/CR
                                 Useful for troubleshooting memory leaks and performance issues
                                 
-                                IMPORTANT: Requires NODE_OPTIONS environment variable:
+                                IMPORTANT: Requires NODE_OPTIONS environment variable to be set on the backstage-backend RHDH container:
                                   NODE_OPTIONS=--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp
                                 
                                 Why these flags?
@@ -229,7 +238,7 @@ Usage: ./must_gather [params...]
 | `--without-platform` | Skip platform detection and information | For minimal collections when platform info is not needed |
 | `--without-route` | Skip OpenShift route collection | For non-OpenShift clusters or when routes are not relevant |
 | `--without-ingress` | Skip Kubernetes ingress collection | When ingresses are not used for RHDH access |
-| `--without-namespace-inspect` | Skip deep Namepace's inspect | **Not recommended** - removes OMC compatibility. Use only for minimal/quick collections |
+| `--without-namespace-inspect` | Skip deep Namepace's inspect | **Not recommended** as it removes OMC compatibility. Use only for minimal/quick collections |
 
 #### Namespace Filtering
 
@@ -243,7 +252,7 @@ Usage: ./must_gather [params...]
 - `--namespaces=my-rhdh-ns` - Collect only from a single namespace
 - Combine with exclusions: `--namespaces prod-ns --without-helm` - Only operator data from prod-ns
 
-#### Optional Feature Flags
+#### Optional feature flags
 
 | Flag | Description | Use Case |
 |------|-------------|----------|
@@ -256,7 +265,7 @@ Usage: ./must_gather [params...]
 - `--with-secrets --with-heap-dumps` - Full diagnostic collection
 - `--namespaces prod-ns --with-heap-dumps` - Heap dumps from specific namespace only
 
-## Output Structure
+## Output structure
 
 <details>
 
