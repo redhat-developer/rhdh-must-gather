@@ -20,12 +20,6 @@ This tool helps support teams and engineers collect essential RHDH-specific info
 # Use the published image
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
 
-# Collect relevant RHDH data and logs and events from last 2 hours
-oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather --since=2h
-
-# Collect relevant RHDH data and logs and events since specific time
-oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather --since-time=2025-08-21T20:00:00Z
-
 # To pass specific options to the gather script
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather [options...]
 ```
