@@ -2,9 +2,8 @@ name: Nightly E2E Tests
 
 on:
   schedule:
-    # Run at 21:38 UTC every day
     - cron: '38 21 * * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -55,5 +54,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: must-gather-output-nightly
-          path: out/
+          path: |
+            rhdh-must-gather-output.k8s.*.tar.gz
+            rhdh-must-gather-output.k8s.*/
           retention-days: 7
