@@ -1,16 +1,14 @@
-# RHDH Must-Gather Tool (WIP)
+# RHDH Must-Gather
 
-A specialized diagnostic data collection tool for Red Hat Developer Hub (RHDH) deployments on Kubernetes and OpenShift clusters.
+A specialized diagnostic data collection tool for [Red Hat Developer Hub (RHDH)](https://developers.redhat.com/products/rhdh) deployments on Kubernetes and OpenShift clusters.
 
 ## Overview
 
-This tool helps support teams and engineers collect essential RHDH-specific information to troubleshoot issues effectively. It focuses exclusively on RHDH resources and can be combined with generic cluster information collection. It supports:
+This `must-gather` helps users collect essential RHDH data from their deployments. This helps support teams and engineers troubleshoot issues effectively. This tool allows for focused data gathering across any installation method and platform supported by RHDH.
 
 - **Multi-platform**: OpenShift and standard Kubernetes
-- **Multi-deployment**: Helm-based and Operator-based RHDH instances
+- **Multi-deployment**: Helm-based and Operator-managed RHDH instances
 - **RHDH-focused collection**: Only RHDH-specific logs, configurations, and resources
-
-> **Note**: For more general cluster-wide information, combine this with the generic OpenShift must-gather: `oc adm must-gather`
 
 ## Quick Start
 
@@ -25,6 +23,8 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
 # Or to pass specific options to the gather script
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather [options...]
 ```
+
+> **Note**: For more general cluster-wide information, combine this with the generic OpenShift must-gather (by not omitting the `--image` option): `oc adm must-gather`
 
 ### For Kubernetes clusters
 
