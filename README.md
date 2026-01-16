@@ -24,7 +24,7 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather [options...]
 ```
 
-> **Note**: For more general cluster-wide information, combine this with the generic OpenShift must-gather (by not omitting the `--image` option): `oc adm must-gather`
+> **Note**: For more general cluster-wide information, combine this with the generic OpenShift must-gather (by omitting the `--image` option): `oc adm must-gather`
 
 ### For Kubernetes clusters
 
