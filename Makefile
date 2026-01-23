@@ -185,7 +185,7 @@ clean-out: ## Remove the local output directory
 	@echo "Local output directory cleaned"
 
 .PHONY: clean
-clean: clean-out## Remove built images and test output
+clean: clean-out ## Remove built images and test output
 	@echo "Cleaning up..."
 	-podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Namepace's inspect Script
+# Namespace inspect Script
 # Collects comprehensive namespace-level data using 'oc adm inspect'
 # This provides deep resource inspection with pod logs and events
 #
@@ -18,16 +18,16 @@ set -euo pipefail
 DIR_NAME=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 source "${DIR_NAME}/common.sh"
 
-log_info "Starting Namepace's inspect collection..."
+log_info "Starting Namespace inspect collection..."
 
 inspect_dir="$BASE_COLLECTION_PATH/namespace-inspect"
 ensure_directory "$inspect_dir"
 
 # Check if oc command is available (required for oc adm inspect)
 if ! command_exists "oc"; then
-    log_warn "'oc' command not found. Namepace's inspect requires OpenShift CLI (oc)."
-    log_warn "Skipping Namepace's inspect. Install 'oc' to enable this feature."
-    echo "oc command not available - Namepace's inspect skipped" > "$inspect_dir/skipped.txt"
+    log_warn "'oc' command not found. Namespace inspect requires OpenShift CLI (oc)."
+    log_warn "Skipping Namespace inspect. Install 'oc' to enable this feature."
+    echo "oc command not available - Namespace inspect skipped" > "$inspect_dir/skipped.txt"
     exit 0
 fi
 
@@ -137,7 +137,7 @@ log_debug "Using timeout: ${multi_ns_timeout}s for ${#namespaces_to_inspect[@]} 
 log_debug "Executing: $inspect_cmd"
 
 if ! timeout "${multi_ns_timeout}" bash -c "$inspect_cmd || true" >> "$inspect_dir/inspect.log" 2>&1; then
-    log_warn "Namepace's inspect timed out or failed (timeout: ${multi_ns_timeout}s)"
+    log_warn "Namespace inspect timed out or failed (timeout: ${multi_ns_timeout}s)"
     echo "Inspection failed or timed out (${multi_ns_timeout}s for ${#namespaces_to_inspect[@]} namespaces)" >> "$inspect_dir/inspect.log"
     echo "Timestamp: $(date)" >> "$inspect_dir/inspect.log"
     exit 1
@@ -164,7 +164,7 @@ fi
 # Create summary file
 summary_file="$inspect_dir/inspection-summary.txt"
 {
-    echo "Namepace's inspect Summary"
+    echo "Namespace inspect Summary"
     echo "============================"
     echo ""
     echo "Inspection timestamp: $(date)"
@@ -194,5 +194,5 @@ summary_file="$inspect_dir/inspection-summary.txt"
     echo "Output directory: $inspect_dir"
 } > "$summary_file"
 
-log_success "Namepace's inspect collection completed. Summary: $summary_file"
+log_success "Namespace inspect collection completed. Summary: $summary_file"
 
