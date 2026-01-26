@@ -13,7 +13,7 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/g
 ```
 
 When secrets are excluded (default behavior):
-- Secret resources are removed from Namepace's inspect data
+- Secret resources are removed from Namespace inspect data
 - Secret resources are filtered from Helm manifests
 - Secret collection is skipped in helm/operator data gathering
 - ConfigMaps and other resources are still collected normally
@@ -30,7 +30,7 @@ When secrets are collected (`--with-secrets`), the tool includes automatic sanit
 **Data Sources Sanitized:**
 - **Helm release data** - ConfigMaps, Secrets, and deployed manifests
 - **Operator resources** - Backstage CRs, operator configs, and secrets
-- **Namepace's inspect data** - All resources collected by `oc adm inspect` (Secrets, ConfigMaps, pod specs, etc.)
+- **Namespace inspect data** - All resources collected by `oc adm inspect` (Secrets, ConfigMaps, pod specs, etc.)
 - **Platform information** - System and cluster metadata
 - **Log files** - Container logs and must-gather execution logs
 

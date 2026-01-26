@@ -102,7 +102,7 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 - **Secrets**(opt-in with `--with-secrets`): Sanitized secret resources (data fields redacted for security)
 - **Services, Routes, Ingresses**: Network configurations for RHDH access
 
-### Namepace's inspect (collected by default)
+### Namespace inspect (collected by default)
 - **Deep namespace resource inspection** using `oc adm inspect namespace` (included by default)
 - **Auto-detects RHDH namespaces**:
   - Namespaces with Helm-based RHDH deployments

@@ -1,12 +1,12 @@
 ## Using with OMC (OpenShift Must-Gather Client)
 
-The Namepace's inspect output is fully compatible with [OMC (OpenShift Must-Gather Client)](https://github.com/gmeghnag/omc), a powerful tool for interactive must-gather analysis used by Support teams.
+The Namespace inspect output is fully compatible with [OMC (OpenShift Must-Gather Client)](https://github.com/gmeghnag/omc), a powerful tool for interactive must-gather analysis used by Support teams.
 
-**Note**: Namepace's inspect is **collected by default**, so all must-gather outputs are OMC-compatible.
+**Note**: Namespace inspect is **collected by default**, so all must-gather outputs are OMC-compatible.
 
 ### Setup
 
-1. **Collect data** (Namepace's inspect included by default):
+1. **Collect data** (Namespace inspect included by default):
    ```bash
    oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
    ```
@@ -18,15 +18,15 @@ The Namepace's inspect output is fully compatible with [OMC (OpenShift Must-Gath
    sudo mv ./omc /usr/local/bin/
    ```
 
-### Using OMC with Namepace's inspect Data
+### Using OMC with Namespace inspect Data
 
-Point OMC to the Namepace's inspect directory:
+Point OMC to the Namespace inspect directory:
 
 ```bash
 # Navigate to your must-gather output
 cd must-gather.local.*/
 
-# Use OMC with the Namepace's inspect directory
+# Use OMC with the Namespace inspect directory
 omc use namespace-inspect
 
 # Now query resources interactively (OMC will see all inspected namespaces)
@@ -60,7 +60,7 @@ omc get pods -o jsonpath="{.items[*].metadata.name}"
 
 ### Directory Structure for OMC
 
-The Namepace's inspect creates OMC-compatible directory structures:
+The Namespace inspect creates OMC-compatible directory structures:
 
 ```
 namespace-inspect/            # ← Point OMC here: omc use namespace-inspect

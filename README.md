@@ -164,7 +164,7 @@ Usage: ./must_gather [params...]
   --without-platform            Skip platform detection and information
   --without-route               Skip OpenShift route collection
   --without-ingress             Skip Kubernetes ingress collection
-  --without-namespace-inspect   Skip deep Namepace's inspect
+  --without-namespace-inspect   Skip deep Namespace inspect
 
   > You can also choose to enable optional collectors:
   --cluster-info                Collect cluster-wide diagnostic information
@@ -196,7 +196,7 @@ Usage: ./must_gather [params...]
                                 Warning: May take several minutes and generate large files (100MB-1GB+ per pod)
 
   Examples:
-  # Default collection (includes Namepace's inspect for OMC compatibility)
+  # Default collection (includes Namespace inspect for OMC compatibility)
   ./must_gather
 
   # Collect only Helm data (skip operator data)
@@ -205,10 +205,10 @@ Usage: ./must_gather [params...]
   # Collect only operator data (skip Helm data)
   ./must_gather --without-helm
 
-  # Skip Namepace's inspect (not recommended - removes OMC compatibility)
+  # Skip Namespace inspect (not recommended - removes OMC compatibility)
   ./must_gather --without-namespace-inspect
 
-  # Minimal collection (only platform info, no Namepace's inspect)
+  # Minimal collection (only platform info, no Namespace inspect)
   ./must_gather --without-operator --without-helm --without-route --without-ingress --without-namespace-inspect
 
   # Collect from specific namespaces only
@@ -221,7 +221,7 @@ Usage: ./must_gather [params...]
   ./must_gather --with-secrets
 
   # Collect heap dumps for memory troubleshooting (requires app configured with NODE_OPTIONS)
-  # Prerequisites: Add NODE_OPTIONS=--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp to the backsetage-backend container
+  # Prerequisites: Add NODE_OPTIONS=--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp to the backstage-backend container
   ./must_gather --with-heap-dumps
 
   # Full diagnostic collection (secrets + heap dumps - generates large output)
@@ -238,7 +238,7 @@ Usage: ./must_gather [params...]
 | `--without-platform` | Skip platform detection and information | For minimal collections when platform info is not needed |
 | `--without-route` | Skip OpenShift route collection | For non-OpenShift clusters or when routes are not relevant |
 | `--without-ingress` | Skip Kubernetes ingress collection | When ingresses are not used for RHDH access |
-| `--without-namespace-inspect` | Skip deep Namepace's inspect | **Not recommended** as it removes OMC compatibility. Use only for minimal/quick collections |
+| `--without-namespace-inspect` | Skip deep Namespace inspect | **Not recommended** as it removes OMC compatibility. Use only for minimal/quick collections |
 
 #### Namespace Filtering
 
@@ -280,7 +280,7 @@ Usage: ./must_gather [params...]
 ├── must-gather.log                 # Must-gather container logs (if running in pod)
 ├── cluster-info/                   # Cluster-wide information (if --cluster-info used)
 │   └── [cluster-info dump output]
-├── namespace-inspect/              # Deep Namepace's inspect (collected by default)
+├── namespace-inspect/              # Deep Namespace inspect (collected by default)
 │   ├── inspect.log                 # Inspection command logs
 │   ├── inspection-summary.txt      # Summary of inspected namespaces and data collected
 │   ├── namespaces/                 # All inspected namespaces (OMC-compatible structure)
