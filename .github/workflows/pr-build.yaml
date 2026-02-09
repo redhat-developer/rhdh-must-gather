@@ -1,0 +1,143 @@
+name: PR Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+      - release-1.[0-9]+
+
+env:
+  IMAGE_NAME: rhdh-must-gather
+
+jobs:
+  pr-build:
+    name: Build PR Container Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
+
+      # check changes in this commit for regex include and exclude matches
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@e0021407031f5be11a464abee9a0776171c79891 # v47.0.1
+        with:
+          files: |
+            .github/workflows/pr-build.yaml
+            .github/workflows/pr-push.yaml
+            Makefile
+            Dockerfile
+            .containerignore
+            collection-scripts/**
+            deploy/**
+            LICENSE
+          files_ignore: |
+            **/*.md
+            **/*.adoc
+            examples/**
+
+      - name: List all changed files (for troubleshooting)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          # Use printf and quoted variables to prevent word splitting/execution
+          printf '%s\n' "$ALL_CHANGED_FILES" | while IFS= read -r file; do
+            echo "Changed: $file"
+          done
+
+      # Generate image tags and build args
+      - name: Prepare build variables
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: prep
+        env:
+          # Map context to ENV to prevent injection into the 'run' script
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
+
+          echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA} ${VERSION}-pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "BUILD_ARGS=--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          # Map outputs to environment variables here
+          TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+          ARGS: ${{ steps.prep.outputs.BUILD_ARGS }}
+          NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          make image-build \
+            CONTAINER_TOOL=docker \
+            IMAGE_NAME="$NAME" \
+            IMAGE_TAG="$TAG" \
+            BUILD_ARGS="$ARGS"
+
+      # Save the image as a tarball for the push workflow
+      - name: Save image to tarball
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+           NAME: ${{ env.IMAGE_NAME }}
+           TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+        run: |
+          docker save "${NAME}:${TAG}" | gzip > image.tar.gz
+
+      # Create metadata file for the push workflow
+      - name: Create metadata
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          IMAGE_TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+          EXTRA_TAGS: ${{ steps.prep.outputs.EXTRA_TAGS }}
+          VERSION: ${{ steps.prep.outputs.VERSION }}
+        run: |
+          jq -n \
+            --argjson pr "$PR_NUMBER" \
+            --arg it "$IMAGE_TAG" \
+            --arg et "$EXTRA_TAGS" \
+            --arg vs "$VERSION" \
+            '{pr_number: $pr, image_tag: $it, extra_tags: $et, version: $vs}' > metadata.json
+
+      - name: Upload image artifact
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image
+          path: |
+            image.tar.gz
+            metadata.json
+          retention-days: 1
+
+      - name: Summary
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          VERSION: ${{ steps.prep.outputs.VERSION }}
+          IMAGE_TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+          EXTRA_TAGS: ${{ steps.prep.outputs.EXTRA_TAGS }}
+        run: |
+          # Format tags as comma-separated backtick-wrapped list
+          ALL_TAGS="\`${IMAGE_TAG}\`"
+          for tag in ${EXTRA_TAGS}; do
+            ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
+          done
+          
+          echo "### Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Number**: ${PR_NUM}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
