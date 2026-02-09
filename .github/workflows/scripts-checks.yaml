@@ -32,6 +32,7 @@ jobs:
         with:
           # Differential ShellCheck requires full git history
           fetch-depth: 0
+          persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
 
       - id: ShellCheck
         name: Differential ShellCheck
