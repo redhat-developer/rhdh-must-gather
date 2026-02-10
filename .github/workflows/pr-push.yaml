@@ -1,0 +1,272 @@
+name: PR Push
+
+on:
+  workflow_run:
+    workflows: ["PR Build"]
+    types:
+      - completed
+
+env:
+  IMAGE_NAME: rhdh-must-gather
+
+jobs:
+  pr-push:
+    name: Push PR Container Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+      actions: read
+
+    steps:
+
+      - name: Get the PR number from the workflow run
+        id: pr-number
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const branch = context.payload.workflow_run.head_branch;
+            const headRepoOwner = context.payload.workflow_run.head_repository?.owner?.login;
+            const isFork = headRepoOwner && headRepoOwner !== context.repo.owner;
+
+            console.log(`Commit SHA: ${sha}`);
+            console.log(`Branch: ${branch}`);
+            console.log(`Head repo owner: ${headRepoOwner}`);
+            console.log(`Is fork: ${isFork}`);
+
+            // Method 1: Try to get PR from workflow_run.pull_requests (works for non-fork PRs)
+            const workflowPRs = context.payload.workflow_run.pull_requests || [];
+            if (workflowPRs.length > 0) {
+              console.log(`Found PR #${workflowPRs[0].number} from workflow_run.pull_requests`);
+              core.setOutput("number", workflowPRs[0].number);
+              return;
+            }
+            console.log("No PRs in workflow_run.pull_requests, trying API lookup...");
+
+            // Method 2: Try listPullRequestsAssociatedWithCommit
+            const { data: pulls } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+            });
+
+            console.log(`Found ${pulls.length} PR(s) via listPullRequestsAssociatedWithCommit`);
+            pulls.forEach(p => console.log(`  - PR #${p.number}: state=${p.state}`));
+
+            let pr = pulls.find(p => p.state === "open");
+
+            // Method 3: If no results and this is a fork, try searching by branch
+            if (!pr && isFork) {
+              console.log(`Trying branch-based lookup for fork: ${headRepoOwner}:${branch}`);
+              const { data: branchPulls } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                head: `${headRepoOwner}:${branch}`,
+              });
+              console.log(`Found ${branchPulls.length} PR(s) via branch lookup`);
+              pr = branchPulls[0];
+            }
+
+            if (!pr) {
+              core.setFailed(`No open PR found for commit ${sha}`);
+              return;
+            }
+
+            console.log(`Using PR #${pr.number}`);
+            core.setOutput("number", pr.number);
+
+      - name: Download artifact from build workflow
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          name: pr-image
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Load and Validate Metadata
+        id: meta
+        env:
+          EXPECTED_PR: ${{ steps.pr-number.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f metadata.json ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          # Use -e to fail fast on malformed JSON
+          if ! jq -e . metadata.json >/dev/null 2>&1; then
+            echo "Invalid JSON" && exit 1
+          fi
+
+          # 1. Validate PR_NUMBER (Integer only)
+          PR_NUM=$(jq -r '.pr_number | select(type == "number")' metadata.json)
+          if [[ -z "$PR_NUM" ]]; then
+            echo "::error::Invalid or missing PR_NUMBER"
+            exit 1
+          fi
+          if [ "$EXPECTED_PR" != "$PR_NUM" ]; then
+            echo "Security Alert: Mismatched PR context. Possible artifact poisoning."
+            exit 1
+          fi
+
+          # 2. Validate TAGS (Allow alphanumeric, dot, dash, underscore)
+          IMAGE_TAG=$(jq -r '.image_tag' metadata.json | grep -E '^[a-zA-Z0-9._-]+$')
+          
+          if [[ -z "$IMAGE_TAG" ]]; then
+             echo "::error::Malicious or invalid IMAGE_TAG detected"
+             exit 1
+          fi
+
+          # Validate EXTRA_TAGS (space-separated list of tags)
+          EXTRA_TAGS_RAW=$(jq -r '.extra_tags // ""' metadata.json)
+          EXTRA_TAGS=""
+          for tag in $EXTRA_TAGS_RAW; do
+            if echo "$tag" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+              EXTRA_TAGS="${EXTRA_TAGS:+$EXTRA_TAGS }$tag"
+            else
+              echo "::warning::Skipping invalid extra tag: $tag"
+            fi
+          done
+
+          # 3. Validate VERSION (Allow alphanumeric, dot, dash)
+          # We sanitize this because we print it to the Summary later
+          VERSION=$(jq -r '.version' metadata.json | grep -E '^[a-zA-Z0-9._-]+$')
+          if [[ -z "$VERSION" ]]; then
+             VERSION="unknown"
+          fi
+
+          # 4. Safe Exports
+          echo "SAFE_PR_NUMBER=$PR_NUM" >> "$GITHUB_ENV"
+          echo "SAFE_IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "SAFE_EXTRA_TAGS=$EXTRA_TAGS" >> "$GITHUB_ENV"
+          echo "SAFE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          
+          echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
+
+      - name: Load image from tarball
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          gunzip -c image.tar.gz | docker load
+
+      - name: Log into registry ${{ vars.REGISTRY }}
+        if: steps.meta.outputs.skip != 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ vars.REGISTRY }}
+          username: ${{ vars.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_TOKEN }}
+
+      - name: Tag and push main tag
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          # Reconstruct the Local Image name using trusted variables
+          # This prevents the "local_image" field in JSON from injecting commands
+          LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
+          
+          docker tag $LOCAL_IMAGE \
+            ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
+          docker push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
+
+      - name: Tag and push extra tags
+        if: steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
+        run: |
+          LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
+          
+          for tag in ${{ env.SAFE_EXTRA_TAGS }}; do
+            echo "Pushing extra tag: ${tag}"
+            docker tag $LOCAL_IMAGE \
+              ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
+            docker push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
+          done
+
+      - name: Set expiration on PR images
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          API_TOKEN: ${{ secrets.QUAY_OAUTH_TOKEN || secrets.QUAY_TOKEN }}
+        run: |
+          set_tag_expiration() {
+            local tag="$1"
+            local url="https://${{ vars.REGISTRY }}/api/v1/repository/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}/tag/${tag}"
+            
+            echo "Setting expiration for tag: ${tag}"
+            echo "Expiration timestamp: ${EXPIRATION_TIMESTAMP} ($(date -d @${EXPIRATION_TIMESTAMP} -u))"
+            
+            response=$(curl -s -w "\n%{http_code}" -X PUT \
+              -H "Authorization: Bearer ${API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"expiration\": ${EXPIRATION_TIMESTAMP}}" \
+              "${url}")
+            
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+            
+            echo "HTTP Status: ${http_code}"
+            echo "Response: ${body}"
+            
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              echo "::warning::Failed to set expiration for tag ${tag} (HTTP ${http_code})"
+              return 1
+            fi
+          }
+
+          # Set expiration on main tag (continue on failure)
+          set_tag_expiration "${SAFE_IMAGE_TAG}" || true
+
+          # Set expiration on extra tags if present
+          for tag in $SAFE_EXTRA_TAGS; do
+            set_tag_expiration "${tag}" || true
+          done
+
+      - name: Comment image links in PR
+        if: steps.meta.outputs.skip != 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          PR_NUM: ${{ env.SAFE_PR_NUMBER }}
+          MAIN_TAG: ${{ env.SAFE_IMAGE_TAG }}
+          EXTRA_TAGS: ${{ env.SAFE_EXTRA_TAGS }}
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        with:
+          script: |
+            // Safe: using process.env avoids code injection
+            const prNumber = parseInt(process.env.PR_NUM);
+            const mainTag = process.env.MAIN_TAG;
+            const extraTags = process.env.EXTRA_TAGS ? process.env.EXTRA_TAGS.split(' ').filter(Boolean) : [];
+            const registry = process.env.REGISTRY;
+            const registryOrg = process.env.REGISTRY_ORG;
+            const imageName = process.env.IMAGE_NAME;
+            
+            const baseUrl = `https://${registry}/${registryOrg}/${imageName}`;
+            const allTags = [mainTag, ...extraTags];
+            const tagList = allTags.map(tag => `<li><code>${baseUrl}:${tag}</code></li>`).join('\n');
+            
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `PR images are available (for 1 week):\n<ol>\n${tagList}\n</ol>`
+            })
+
+      - name: Summary
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          ALL_TAGS="\`${{ env.SAFE_IMAGE_TAG }}\`"
+          
+          # FIXED: Use env var to avoid syntax error if empty
+          for tag in $SAFE_EXTRA_TAGS; do
+            ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
+          done
+          
+          echo "### Push Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ env.SAFE_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Pushed and expiration set" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
