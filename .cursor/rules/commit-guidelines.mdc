@@ -57,7 +57,7 @@ remain permanent, while commit-SHA variants (next-{sha}, next-1.x-{sha},
 pr-{number}-{sha}) now automatically expire after 2 weeks to reduce
 registry clutter.
 
-The rebuild is efficient thanks to Docker's layer caching, as all
+The rebuild is efficient thanks to container layer caching, as all
 layers are already cached from the main tag build.
 
 Assisted-by: Cursor

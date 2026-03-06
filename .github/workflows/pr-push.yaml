@@ -153,7 +153,7 @@ jobs:
       - name: Load image from tarball
         if: steps.meta.outputs.skip != 'true'
         run: |
-          gunzip -c image.tar.gz | docker load
+          gunzip -c image.tar.gz | podman load
 
       - name: Log into registry ${{ vars.REGISTRY }}
         if: steps.meta.outputs.skip != 'true'
@@ -170,9 +170,9 @@ jobs:
           # This prevents the "local_image" field in JSON from injecting commands
           LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
           
-          docker tag $LOCAL_IMAGE \
+          podman tag $LOCAL_IMAGE \
             ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
-          docker push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
+          podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
 
       - name: Tag and push extra tags
         if: steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
@@ -181,9 +181,9 @@ jobs:
           
           for tag in ${{ env.SAFE_EXTRA_TAGS }}; do
             echo "Pushing extra tag: ${tag}"
-            docker tag $LOCAL_IMAGE \
+            podman tag $LOCAL_IMAGE \
               ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
-            docker push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
+            podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
           done
 
       - name: Set expiration on PR images
