@@ -94,14 +94,14 @@ jobs:
           
           # Build and push main tag
           make image-push \
-            CONTAINER_TOOL=docker \
+            CONTAINER_TOOL=podman \
             REGISTRY=${{ vars.REGISTRY }} \
             IMAGE_NAME=${{ env.IMAGE_NAME}} \
             IMAGE_TAG=${{ steps.prep.outputs.IMAGE_TAG }} \
             BUILD_ARGS="--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}"
           
           # Get image digest
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)
+          DIGEST=$(podman inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           
           # Save main tag for signing
@@ -117,8 +117,8 @@ jobs:
             
             # All extra tags reuse the main image to preserve digest
             echo "Tagging and pushing: ${TAG}"
-            docker tag ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
-            docker push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
+            podman tag ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
+            podman push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
             
             # Track commit-SHA tags for expiration
             if [[ ${TAG} == latest-* ]]; then
