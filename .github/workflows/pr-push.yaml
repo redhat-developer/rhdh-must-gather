@@ -80,7 +80,23 @@ jobs:
             console.log(`Using PR #${pr.number}`);
             core.setOutput("number", pr.number);
 
+      - name: Check if build artifact exists
+        id: check-artifact
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const runId = context.payload.workflow_run.id;
+            const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const found = artifacts.some(a => a.name === 'pr-image');
+            console.log(`Artifact 'pr-image' for run ${runId}: ${found ? 'found' : 'not found'}`);
+            core.setOutput('exists', found);
+
       - name: Download artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true'
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8
         with:
           name: pr-image
@@ -88,6 +104,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Load and Validate Metadata
+        if: steps.check-artifact.outputs.exists == 'true'
         id: meta
         env:
           EXPECTED_PR: ${{ steps.pr-number.outputs.number }}
@@ -151,12 +168,12 @@ jobs:
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
       - name: Load image from tarball
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         run: |
           gunzip -c image.tar.gz | podman load
 
       - name: Log into registry ${{ vars.REGISTRY }}
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         uses: redhat-actions/podman-login@4934294ad0449894bcd1e9f191899d7292469603 # v1
         with:
           registry: ${{ vars.REGISTRY }}
@@ -164,7 +181,7 @@ jobs:
           password: ${{ secrets.QUAY_TOKEN }}
 
       - name: Tag and push main tag
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         run: |
           # Reconstruct the Local Image name using trusted variables
           # This prevents the "local_image" field in JSON from injecting commands
@@ -175,7 +192,7 @@ jobs:
           podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
 
       - name: Tag and push extra tags
-        if: steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
         run: |
           LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
           
@@ -187,7 +204,7 @@ jobs:
           done
 
       - name: Set expiration on PR images
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         env:
           API_TOKEN: ${{ secrets.QUAY_OAUTH_TOKEN || secrets.QUAY_TOKEN }}
         run: |
@@ -225,7 +242,7 @@ jobs:
           done
 
       - name: Comment image links in PR
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           PR_NUM: ${{ env.SAFE_PR_NUMBER }}
@@ -256,7 +273,7 @@ jobs:
             })
 
       - name: Summary
-        if: steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         run: |
           ALL_TAGS="\`${{ env.SAFE_IMAGE_TAG }}\`"
           
@@ -270,3 +287,10 @@ jobs:
           echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: Pushed and expiration set" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Summary (skipped - no artifact)
+        if: steps.check-artifact.outputs.exists != 'true'
+        run: |
+          echo "### Push Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No \`pr-image\` artifact was produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
+          echo "This is expected when the PR changes don't affect the container image (e.g., docs-only changes)." >> $GITHUB_STEP_SUMMARY
