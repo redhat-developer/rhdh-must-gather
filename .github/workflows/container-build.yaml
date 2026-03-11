@@ -29,10 +29,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      # Login to Quay.io
-      # https://github.com/docker/login-action
       - name: Log into registry ${{ vars.REGISTRY }}
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        uses: redhat-actions/podman-login@4934294ad0449894bcd1e9f191899d7292469603 # v1
         with:
           registry: ${{ vars.REGISTRY }}
           username: ${{ vars.QUAY_USERNAME }}
@@ -94,14 +92,14 @@ jobs:
           
           # Build and push main tag
           make image-push \
-            CONTAINER_TOOL=docker \
+            CONTAINER_TOOL=podman \
             REGISTRY=${{ vars.REGISTRY }} \
             IMAGE_NAME=${{ env.IMAGE_NAME}} \
             IMAGE_TAG=${{ steps.prep.outputs.IMAGE_TAG }} \
             BUILD_ARGS="--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}"
           
           # Get image digest
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)
+          DIGEST=$(podman inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           
           # Save main tag for signing
@@ -117,8 +115,8 @@ jobs:
             
             # All extra tags reuse the main image to preserve digest
             echo "Tagging and pushing: ${TAG}"
-            docker tag ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
-            docker push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
+            podman tag ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
+            podman push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
             
             # Track commit-SHA tags for expiration
             if [[ ${TAG} == latest-* ]]; then
@@ -168,9 +166,9 @@ jobs:
             fi
           done < /tmp/expiry-tags.txt
 
-      # Sign the resulting Docker image digests
+      # Sign the resulting image digests
       # https://github.com/sigstore/cosign
-      - name: Sign the published Docker images
+      - name: Sign the published images
         env:
           DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |

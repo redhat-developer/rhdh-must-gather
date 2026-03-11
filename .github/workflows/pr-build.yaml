@@ -34,7 +34,7 @@ jobs:
             .github/workflows/pr-build.yaml
             .github/workflows/pr-push.yaml
             Makefile
-            Dockerfile
+            Containerfile
             .containerignore
             collection-scripts/**
             deploy/**
@@ -79,7 +79,7 @@ jobs:
           NAME: ${{ env.IMAGE_NAME }}
         run: |
           make image-build \
-            CONTAINER_TOOL=docker \
+            CONTAINER_TOOL=podman \
             IMAGE_NAME="$NAME" \
             IMAGE_TAG="$TAG" \
             BUILD_ARGS="$ARGS"
@@ -91,7 +91,7 @@ jobs:
            NAME: ${{ env.IMAGE_NAME }}
            TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
         run: |
-          docker save "${NAME}:${TAG}" | gzip > image.tar.gz
+          podman save "${NAME}:${TAG}" | gzip > image.tar.gz
 
       # Create metadata file for the push workflow
       - name: Create metadata
