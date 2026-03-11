@@ -29,10 +29,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      # Login to Quay.io
-      # https://github.com/docker/login-action
       - name: Log into registry ${{ vars.REGISTRY }}
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        uses: redhat-actions/podman-login@4934294ad0449894bcd1e9f191899d7292469603 # v1
         with:
           registry: ${{ vars.REGISTRY }}
           username: ${{ vars.QUAY_USERNAME }}
@@ -168,9 +166,9 @@ jobs:
             fi
           done < /tmp/expiry-tags.txt
 
-      # Sign the resulting Docker image digests
+      # Sign the resulting image digests
       # https://github.com/sigstore/cosign
-      - name: Sign the published Docker images
+      - name: Sign the published images
         env:
           DIGEST: ${{ steps.build-push.outputs.digest }}
         run: |
