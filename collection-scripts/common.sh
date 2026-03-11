@@ -223,11 +223,17 @@ safe_exec() {
     mkdir -p "$(dirname "$output_file")"
 
     if ! timeout "$CMD_TIMEOUT" bash -c "$cmd" > "$output_file" 2>&1; then
-        log_warn "\tCommand timed out or failed: $cmd"
-        echo "Command failed or timed out: $cmd" > "$output_file"
-        echo "Timestamp: $(date)" >> "$output_file"
-        echo "Timeout: ${CMD_TIMEOUT}s" >> "$output_file"
-        #return 1
+        local exec_err
+        exec_err=$(cat "$output_file" 2>/dev/null)
+        log_warn "\tCommand timed out or failed: $cmd${exec_err:+ — $exec_err}"
+        {
+            echo "Command failed or timed out: $cmd"
+            echo "Timestamp: $(date)"
+            echo "Timeout: ${CMD_TIMEOUT}s"
+            echo ""
+            echo "=== Error Details ==="
+            echo "${exec_err:-No error output captured}"
+        } > "$output_file"
     fi
 
     #return 0
@@ -261,11 +267,15 @@ collect_rhdh_info_from_running_pods() {
   # Collect relevant environment variables from the container
   log_info "\tCollecting: environment variables from container"
   local env_vars_file="$output_dir/env-vars.txt"
-  $KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c '
+  if ! $KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c '
     echo "=== RHDH/Backstage Environment Variables ==="
     echo ""
     env | grep -E "^(BACKSTAGE_|RHDH_|UPSTREAM_REPO|MIDSTREAM_REPO|NODE_|APP_CONFIG_|LOG_LEVEL|PLUGIN_|NO_PROXY|HTTP_PROXY|HTTPS_PROXY|NPM_CONFIG_|GLOBAL_AGENT_)" | sort || true
-  ' > "$env_vars_file" 2>&1 || true
+  ' > "$env_vars_file" 2>&1; then
+    local exec_err
+    exec_err=$(cat "$env_vars_file" 2>/dev/null)
+    log_warn "Failed to collect environment variables from container: ${exec_err:-unknown error}"
+  fi
 
   # Extract specific env vars for version/metadata collection
   local backstage_version=""
@@ -273,14 +283,21 @@ collect_rhdh_info_from_running_pods() {
   local upstream_repo=""
   local midstream_repo=""
 
+  local _env_output
   # shellcheck disable=SC2016 # Variables are intentionally expanded inside the container, not on the host
-  backstage_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$BACKSTAGE_VERSION"' 2>/dev/null || true)
-  # shellcheck disable=SC2016
-  rhdh_version=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$RHDH_VERSION"' 2>/dev/null || true)
-  # shellcheck disable=SC2016
-  upstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$UPSTREAM_REPO"' 2>/dev/null || true)
-  # shellcheck disable=SC2016
-  midstream_repo=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c 'echo "$MIDSTREAM_REPO"' 2>/dev/null || true)
+  if _env_output=$($KUBECTL_CMD -n "$ns" exec "$first_pod" -- sh -c '
+    echo "BACKSTAGE_VERSION=${BACKSTAGE_VERSION:-}"
+    echo "RHDH_VERSION=${RHDH_VERSION:-}"
+    echo "UPSTREAM_REPO=${UPSTREAM_REPO:-}"
+    echo "MIDSTREAM_REPO=${MIDSTREAM_REPO:-}"
+  ' 2>&1); then
+    backstage_version=$(echo "$_env_output" | sed -n 's/^BACKSTAGE_VERSION=//p')
+    rhdh_version=$(echo "$_env_output" | sed -n 's/^RHDH_VERSION=//p')
+    upstream_repo=$(echo "$_env_output" | sed -n 's/^UPSTREAM_REPO=//p')
+    midstream_repo=$(echo "$_env_output" | sed -n 's/^MIDSTREAM_REPO=//p')
+  else
+    log_warn "Failed to extract version env vars from pod $first_pod: ${_env_output:-unknown error}"
+  fi
 
   # Build Metadata to extract the RHDH version information
   # Primary: Use BACKSTAGE_VERSION env var; Fallback: Read backstage.json file
@@ -445,9 +462,16 @@ collect_container_processes() {
         grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree):" /proc/meminfo
       fi
     ' -- "$container" "$pod" "$ns" > "$container_file" 2>&1; then
-      log_warn "Failed to collect processes from container $container"
-      echo "Failed to collect processes from container $container" > "$container_file"
-      echo "The container may not be running or may not have /proc mounted" >> "$container_file"
+      local exec_err
+      exec_err=$(cat "$container_file" 2>/dev/null)
+      log_warn "Failed to collect processes from container $container: ${exec_err:-unknown error}"
+      {
+        echo "Failed to collect processes from container $container"
+        echo "The container may not be running or may not have /proc mounted"
+        echo ""
+        echo "=== Error Details ==="
+        echo "${exec_err:-No error output captured}"
+      } > "$container_file"
     fi
   done
 
@@ -511,6 +535,7 @@ collect_heap_dumps_for_pods() {
       # (unlike ps, pidof, or pgrep which require additional packages)
       log_debug "Looking for Node.js process using /proc filesystem..."
       local node_pid
+      local _pid_err
       node_pid=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
         for pid_dir in /proc/[0-9]*; do
           pid=\$(basename \$pid_dir)
@@ -525,8 +550,22 @@ collect_heap_dumps_for_pods() {
             break
           fi
         done
-      " 2>/dev/null || true)
+      " 2>&1) || _pid_err="$node_pid"
       
+      if [[ -n "$_pid_err" ]]; then
+        log_warn "Failed to exec into container $container in pod $pod: ${_pid_err:-unknown error}"
+        local container_dir="$pod_dir/container=$container"
+        ensure_directory "$container_dir"
+        {
+          echo "Failed to exec into container to find Node.js process"
+          echo ""
+          echo "=== Error Details ==="
+          echo "${_pid_err:-No error output captured}"
+        } > "$container_dir/no-node-process.txt"
+        node_pid=""
+        continue
+      fi
+
       if [[ -z "$node_pid" ]]; then
         log_warn "No Node.js process found in backstage-backend container"
         local container_dir="$pod_dir/container=$container"
