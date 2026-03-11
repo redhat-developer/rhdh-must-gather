@@ -21,7 +21,7 @@ spec:
         topologyKey: kubernetes.io/hostname
   containers:
   - name: data-retriever
-    image: registry.access.redhat.com/ubi9/ubi:latest
+    image: registry.access.redhat.com/ubi9:latest
     command:
     - sleep
     - infinity
