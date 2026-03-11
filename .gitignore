@@ -39,3 +39,6 @@ inspect.local*
 *.local.*
 rhdh-must-gather-output.k8s.*
 e2e-cluster.mustgather.tar.gz
+
+rhdh-must-gather-output.tar.gz
+
