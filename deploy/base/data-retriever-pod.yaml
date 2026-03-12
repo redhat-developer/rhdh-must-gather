@@ -5,6 +5,9 @@ metadata:
   namespace: rhdh-must-gather
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    fsGroup: 1001
   affinity:
     podAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
@@ -21,7 +24,12 @@ spec:
         topologyKey: kubernetes.io/hostname
   containers:
   - name: data-retriever
-    image: registry.access.redhat.com/ubi9:latest
+    image: quay.io/rhdh-community/rhdh-must-gather:latest
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
     command:
     - sleep
     - infinity

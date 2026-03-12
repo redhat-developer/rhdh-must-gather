@@ -14,8 +14,16 @@ spec:
     spec:
       serviceAccountName: rhdh-must-gather-sa
       restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1001
       containers:
       - name: gather
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
         image: quay.io/rhdh-community/rhdh-must-gather:latest
         env:
         - name: POD_NAME
