@@ -57,6 +57,14 @@ RUN HELM_VERSION=$(curl -s https://api.github.com/repos/helm/helm/releases/lates
     && rm -rf helm.tar.gz linux-amd64 \
     && helm version
 
+# Create non-root user for running the container
+# Using UID 1001 which is commonly used and works well with OpenShift's arbitrary UID assignment
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils \
+    && groupadd -g 1001 must-gather \
+    && useradd -u 1001 -g must-gather -s /bin/bash -m must-gather \
+    && microdnf remove -y shadow-utils \
+    && microdnf clean all
+
 # Use our gather script in place of the original one
 # Copy collection scripts
 COPY collection-scripts/* /usr/bin/
@@ -65,5 +73,8 @@ RUN mv /usr/bin/must_gather /usr/bin/gather
 
 # Set environment variable from build argument
 ENV RHDH_MUST_GATHER_VERSION=$RHDH_MUST_GATHER_VERSION
+
+# Run as non-root user
+USER 1001
 
 ENTRYPOINT ["/usr/bin/gather"]
