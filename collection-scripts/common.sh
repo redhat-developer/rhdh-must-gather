@@ -129,7 +129,7 @@ check_cluster_connectivity() {
     fi
 
     # if ! $KUBECTL_CMD get pods --no-headers --limit=1 >/dev/null 2>&1; then
-	  if ! $KUBECTL_CMD get pods --no-headers --limit=1; then
+	  if ! $KUBECTL_CMD version; then
         log_error "Unable to connect to Kubernetes cluster"
         return 1
     fi
