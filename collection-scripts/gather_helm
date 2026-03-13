@@ -46,14 +46,13 @@ fi
 log_info "Phase 1: Detecting native Helm releases..."
 
 # shellcheck disable=SC2086 # namespace_args may contain multiple arguments, word splitting is intentional
-helm list $namespace_args | grep -E 'REVISION|backstage|rhdh|developer-hub' > "$helm_dir/all-rhdh-releases.txt" || true
+helm list $namespace_args | grep -E 'REVISION|backstage|rhdh|developer-hub' | grep -v 'must-gather' > "$helm_dir/all-rhdh-releases.txt" || true
 # shellcheck disable=SC2086
-helm list $namespace_args -o json | jq -r '.[] | select(.chart | test("backstage|rhdh|developer-hub"; "i"))' > "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "" > "$helm_dir/all-rhdh-releases.json"
+helm list $namespace_args -o json | jq -r '.[] | select(.chart | test("backstage|rhdh|developer-hub"; "i")) | select(.chart | test("must-gather"; "i") | not)' > "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "" > "$helm_dir/all-rhdh-releases.json"
 
 releases=$(jq -r '"\(.namespace)/\(.name)"' < "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "")
 release_namespaces=$(jq -r '"\(.namespace)"' < "$helm_dir/all-rhdh-releases.json" 2>/dev/null || echo "")
 release_namespaces=$(echo "$release_namespaces" | sort | uniq)
-rm -rf "$helm_dir/all-rhdh-releases.json"
 
 if [[ -z "$releases" ]]; then
     log_info "No native Helm releases found, will check for standalone Helm deployments..."
@@ -201,6 +200,7 @@ standalone_deployments=$(echo "$all_deployments" | jq -r --arg pattern "$RHDH_PA
     # Match by init container images
     (.spec.template.spec.initContainers[]?.image // "" | test($img_pattern; "i"))
   ) |
+  select(.metadata.name | test("must-gather"; "i") | not) |
   "\(.metadata.namespace)/\(.metadata.name)"
 ' 2>/dev/null || echo "")
 
@@ -221,6 +221,7 @@ standalone_statefulsets=$(echo "$all_statefulsets" | jq -r --arg pattern "$RHDH_
     (.spec.template.spec.containers[]?.image // "" | test($img_pattern; "i")) or
     (.spec.template.spec.initContainers[]?.image // "" | test($img_pattern; "i"))
   ) |
+  select(.metadata.name | test("must-gather"; "i") | not) |
   "\(.metadata.namespace)/\(.metadata.name)"
 ' 2>/dev/null || echo "")
 
