@@ -159,11 +159,11 @@ if [[ ${#OPTS[@]} -gt 0 ]]; then
     cat >> "${TMP_OVERLAY}/kustomization.yaml" <<EOF
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
 EOF
     for opt in "${OPTS[@]}"; do
@@ -180,32 +180,25 @@ echo ""
 kubectl apply -k "${TMP_OVERLAY}"
 echo ""
 
-# Wait for job completion
-echo "Waiting for job to complete (timeout: 600s)..."
-if ! kubectl -n "${NAMESPACE}" wait --for=condition=complete job/rhdh-must-gather --timeout=600s 2>&1; then
-    echo "Error: Job did not complete within timeout"
+# Wait for deployment to be available (gather init container must complete first)
+echo "Waiting for deployment to be available (timeout: 3600s)..."
+if ! kubectl -n "${NAMESPACE}" wait --for=condition=available deployment/rhdh-must-gather --timeout=3600s 2>&1; then
+    echo "Error: Deployment did not become available within timeout"
     echo ""
-    echo "Job logs:"
-    kubectl -n "${NAMESPACE}" logs job/rhdh-must-gather --tail=50 || true
+    echo "Pod logs:"
+    POD_NAME=$(kubectl -n "${NAMESPACE}" get pod -l app=rhdh-must-gather,component=data-holder -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [[ -n "${POD_NAME}" ]]; then
+        kubectl -n "${NAMESPACE}" logs "${POD_NAME}" -c gather --tail=50 || true
+    fi
     exit 1
 fi
-echo "Job completed successfully"
+echo "Deployment is available (gather completed)"
 echo ""
 
-# Wait for data retriever pod
-echo "Waiting for data retriever pod to be ready (timeout: 60s)..."
-if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod/rhdh-must-gather-data-retriever --timeout=60s 2>&1; then
-    echo "Error: Data retriever pod did not become ready within timeout"
-    echo ""
-    kubectl -n "${NAMESPACE}" describe pod/rhdh-must-gather-data-retriever || true
-    exit 1
-fi
-echo "Data retriever pod is ready"
-echo ""
-
-# Pull data
-echo "Pulling must-gather data from pod..."
-kubectl -n "${NAMESPACE}" exec rhdh-must-gather-data-retriever -- tar czf - -C /data . > "${OUTPUT_FILE}"
+# Pull data from the data-holder pod
+echo "Pulling must-gather data from data-holder pod..."
+POD_NAME=$(kubectl -n "${NAMESPACE}" get pod -l app=rhdh-must-gather,component=data-holder -o jsonpath='{.items[0].metadata.name}')
+kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
 echo ""
 
 # Cleanup

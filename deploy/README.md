@@ -2,6 +2,13 @@
 
 This directory contains Kustomize configurations for deploying the RHDH must-gather tool on standard Kubernetes clusters.
 
+## Architecture
+
+The tool runs as a single **Deployment** with:
+- An **init container** (`gather`) that runs the must-gather collection scripts
+- A **main container** (`data-holder`) that sleeps indefinitely, allowing users to retrieve the collected data via `kubectl exec`
+- An **ephemeral volume** (inline `volumeClaimTemplate`) that is automatically provisioned and cleaned up with the pod lifecycle
+
 ## Directory Structure
 
 ```
@@ -12,9 +19,7 @@ deploy/
 │   ├── namespace.yaml
 │   ├── serviceaccount.yaml
 │   ├── rbac.yaml
-│   ├── pvc.yaml
-│   ├── job.yaml
-│   └── data-retriever-pod.yaml
+│   └── deployment.yaml
 └── overlays/                   # Example customization overlays
     ├── custom-namespace/       # Deploy to a custom namespace
     ├── debug-mode/             # Enable debug logging with increased resources
@@ -51,7 +56,7 @@ kubectl apply -k deploy/overlays/with-heap-dumps/
 |---------|-------------|-------------|
 | `custom-namespace` | Deploy to a different namespace | Changes namespace from `rhdh-must-gather` |
 | `debug-mode` | Enable verbose logging | Sets `LOG_LEVEL=DEBUG`, increases memory limits |
-| `with-heap-dumps` | Collect heap dumps | Adds `--with-heap-dumps` arg, 10Gi PVC, 2h timeout |
+| `with-heap-dumps` | Collect heap dumps | Adds `--with-heap-dumps` arg, 10Gi storage, increased memory |
 | `specific-namespaces` | Target specific namespaces | Adds `--namespaces` arg to filter collection |
 | `custom-image` | Use different image/tag | Updates image reference for custom builds |
 
@@ -80,11 +85,11 @@ images:
 # Add patches for further customization
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
           - "--with-secrets"
           - "--namespaces"
@@ -101,16 +106,16 @@ images:
     newTag: v1.2.3
 ```
 
-### Change PVC storage size
+### Change ephemeral volume storage size
 
 ```yaml
 patches:
   - target:
-      kind: PersistentVolumeClaim
-      name: rhdh-must-gather-pvc
+      kind: Deployment
+      name: rhdh-must-gather
     patch: |
       - op: replace
-        path: /spec/resources/requests/storage
+        path: /spec/template/spec/volumes/0/ephemeral/volumeClaimTemplate/spec/resources/requests/storage
         value: 5Gi
 ```
 
@@ -119,11 +124,11 @@ patches:
 ```yaml
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
           - "--namespaces"
           - "ns1,ns2"
@@ -135,11 +140,11 @@ patches:
 ```yaml
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: replace
-        path: /spec/template/spec/containers/0/env/2/value
+        path: /spec/template/spec/initContainers/0/env/2/value
         value: "DEBUG"
 ```
 
@@ -148,14 +153,14 @@ patches:
 ```yaml
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/memory
+        path: /spec/template/spec/initContainers/0/resources/limits/memory
         value: "1Gi"
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/cpu
+        path: /spec/template/spec/initContainers/0/resources/limits/cpu
         value: "1"
 ```
 
@@ -164,27 +169,27 @@ patches:
 ```yaml
 patches:
   - target:
-      kind: PersistentVolumeClaim
-      name: rhdh-must-gather-pvc
+      kind: Deployment
+      name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/storageClassName
+        path: /spec/template/spec/volumes/0/ephemeral/volumeClaimTemplate/spec/storageClassName
         value: my-storage-class
 ```
 
 ## Retrieving the Output
 
-After the job completes, retrieve the collected data:
+After the deployment is ready (the gather init container has completed), retrieve the collected data:
 
 ```bash
-# Wait for job completion
-kubectl -n rhdh-must-gather wait --for=condition=complete job/rhdh-must-gather --timeout=600s
+# Wait for the deployment to be available (gather init container must complete first)
+kubectl -n rhdh-must-gather wait --for=condition=available deployment/rhdh-must-gather --timeout=3600s
 
-# Wait for the data retriever pod to be ready
-kubectl -n rhdh-must-gather wait --for=condition=ready pod/rhdh-must-gather-data-retriever --timeout=60s
+# Get the data-holder pod name
+POD_NAME=$(kubectl -n rhdh-must-gather get pod -l app=rhdh-must-gather,component=data-holder -o jsonpath='{.items[0].metadata.name}')
 
 # Download the archive
-kubectl -n rhdh-must-gather exec rhdh-must-gather-data-retriever -- tar czf - -C /data . > rhdh-must-gather-output.tar.gz
+kubectl -n rhdh-must-gather exec "$POD_NAME" -- tar czf - -C /must-gather . > rhdh-must-gather-output.tar.gz
 ```
 
 ## Cleanup
@@ -199,4 +204,3 @@ kubectl delete -k deploy/overlays/debug-mode/
 # From GitHub
 kubectl delete -k https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main
 ```
-

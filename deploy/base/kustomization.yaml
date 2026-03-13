@@ -7,9 +7,7 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - rbac.yaml
-  - pvc.yaml
-  - job.yaml
-  - data-retriever-pod.yaml
+  - deployment.yaml
 
 labels:
   - pairs:

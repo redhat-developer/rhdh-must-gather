@@ -32,19 +32,17 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/g
 # 1. Basic deployment using the default configuration
 kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
 
-# 2. Wait for job completion
-kubectl -n rhdh-must-gather wait --for=condition=complete job/rhdh-must-gather \
-  --timeout=600s
+# 2. Wait for the deployment to be available (gather init container must complete first)
+kubectl -n rhdh-must-gather wait --for=condition=available deployment/rhdh-must-gather \
+  --timeout=3600s
 
-# 3. Wait for the data retriever pod to be ready
-kubectl -n rhdh-must-gather wait --for=condition=ready pod/rhdh-must-gather-data-retriever \
-  --timeout=60s
+# 3. Stream the must-gather data from the data-holder pod
+POD_NAME=$(kubectl -n rhdh-must-gather get pod -l app=rhdh-must-gather,component=data-holder \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n rhdh-must-gather exec "$POD_NAME" -- \
+  tar czf - -C /must-gather . > rhdh-must-gather-output.k8s.tar.gz
 
-# 4. Stream the must-gather data from the pod
-kubectl -n rhdh-must-gather exec rhdh-must-gather-data-retriever -- \
-  tar czf - -C /data . > rhdh-must-gather-output.k8s.tar.gz
-
-# 5. Clean up the must-gather resources
+# 4. Clean up the must-gather resources
 kubectl delete -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
 ```
 
@@ -85,13 +83,13 @@ images:
     newTag: v1.0.0
 
 patches:
-  # Example: Add custom arguments to the gather script
+  # Example: Add custom arguments to the gather init container
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
           - "--namespaces"
           - "rhdh-prod,rhdh-staging"
