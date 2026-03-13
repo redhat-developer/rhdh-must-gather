@@ -115,7 +115,7 @@ patches:
       name: rhdh-must-gather
     patch: |
       - op: replace
-        path: /spec/template/spec/volumes/0/ephemeral/volumeClaimTemplate/spec/resources/requests/storage
+        path: /spec/template/spec/volumes/1/ephemeral/volumeClaimTemplate/spec/resources/requests/storage
         value: 5Gi
 ```
 
@@ -173,7 +173,7 @@ patches:
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/volumes/0/ephemeral/volumeClaimTemplate/spec/storageClassName
+        path: /spec/template/spec/volumes/1/ephemeral/volumeClaimTemplate/spec/storageClassName
         value: my-storage-class
 ```
 
