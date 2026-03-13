@@ -4,8 +4,8 @@
 #   kubectl apply -k deploy/overlays/with-heap-dumps
 #
 # This overlay:
-#   - Increases PVC storage to 10Gi (heap dumps can be large)
-#   - Increases memory limits for the gather job
+#   - Increases ephemeral volume storage to 10Gi (heap dumps can be large)
+#   - Increases memory limits for the gather init container
 #   - Adds --with-heap-dumps argument to the gather script
 #
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -15,28 +15,20 @@ resources:
   - ../../base
 
 patches:
-  # Increase PVC storage for heap dumps
   - target:
-      kind: PersistentVolumeClaim
-      name: rhdh-must-gather-pvc
-    patch: |
-      - op: replace
-        path: /spec/resources/requests/storage
-        value: 10Gi
-
-  # Add --with-heap-dumps argument and increase resources
-  - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
+      # Increase ephemeral volume storage for heap dumps
+      - op: replace
+        path: /spec/template/spec/volumes/1/ephemeral/volumeClaimTemplate/spec/resources/requests/storage
+        value: 10Gi
+      # Add --with-heap-dumps argument to the gather init container
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
           - "--with-heap-dumps"
+      # Increase memory limits for the gather init container
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/memory
+        path: /spec/template/spec/initContainers/0/resources/limits/memory
         value: "1Gi"
-      - op: replace
-        path: /spec/activeDeadlineSeconds
-        value: 7200
-

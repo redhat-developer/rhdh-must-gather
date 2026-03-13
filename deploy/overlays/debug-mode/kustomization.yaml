@@ -11,16 +11,15 @@ resources:
 
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: replace
-        path: /spec/template/spec/containers/0/env/2/value
-        value: "DEBUG"
+        path: /spec/template/spec/initContainers/0/env/2/value
+        value: "trace"
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/memory
+        path: /spec/template/spec/initContainers/0/resources/limits/memory
         value: "1Gi"
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits/cpu
+        path: /spec/template/spec/initContainers/0/resources/limits/cpu
         value: "1"
-

@@ -13,12 +13,11 @@ resources:
 
 patches:
   - target:
-      kind: Job
+      kind: Deployment
       name: rhdh-must-gather
     patch: |
       - op: add
-        path: /spec/template/spec/containers/0/args
+        path: /spec/template/spec/initContainers/0/args
         value:
           - "--namespaces"
           - "rhdh-prod,rhdh-staging"
-
