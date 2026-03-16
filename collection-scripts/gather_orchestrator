@@ -220,8 +220,6 @@ function gather_sonataflow_platforms() {
         safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers --prefix --previous ${log_collection_args:-}" \
             "$sfp_cr_dir/logs-previous.txt" "SonataFlowPlatform related logs (previous containers)"
 
-        # Collect SonataFlow workflows in the same namespace
-        gather_sonataflows_in_namespace "$sfp_ns" "$sfp_cr_dir"
     done
 }
 
@@ -229,51 +227,87 @@ function gather_sonataflow_platforms() {
 # SonataFlow Workflows Collection
 # ============================================================================
 
-function gather_sonataflows_in_namespace() {
-    local ns="$1"
-    local output_dir="$2"
+function gather_sonataflow_workflows() {
+    log_info "Searching for SonataFlow workflows..."
 
-    log_info "\tCollecting SonataFlow workflows in namespace $ns..."
-
-    local workflows_dir="$output_dir/workflows"
-    ensure_directory "$workflows_dir"
+    local sfw_dir="$orchestrator_dir/sonataflow-workflows"
+    ensure_directory "$sfw_dir"
 
     # Check if SonataFlow CRD exists
     if ! $KUBECTL_CMD get crd sonataflows.sonataflow.org >/dev/null 2>&1; then
-        log_debug "\tSonataFlow CRD not found"
+        log_info "\tSonataFlow CRD not found - Serverless Logic may not be installed"
+        echo "SonataFlow CRD not found" > "$sfw_dir/crd-not-found.txt"
         return 0
     fi
 
-    safe_exec "$KUBECTL_CMD -n '$ns' get sonataflows.sonataflow.org" "$workflows_dir/all-workflows.txt" \
-        "SonataFlow workflows in $ns"
+    namespace_args=$(get_namespace_args)
+    safe_exec "$KUBECTL_CMD get sonataflows.sonataflow.org $namespace_args" "$sfw_dir/all-sonataflow-workflows.txt" \
+        "All SonataFlow workflows"
+    safe_exec "$KUBECTL_CMD get sonataflows.sonataflow.org $namespace_args -o json | jq -r '.items[]'" "$sfw_dir/all-sonataflow-workflows.json" \
+        "All SonataFlow workflows - JSON"
 
-    # Get list of workflows
+    # Parse the JSON to get namespace/name pairs
     local workflows
-    workflows=$($KUBECTL_CMD -n "$ns" get sonataflows.sonataflow.org -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    workflows=$(jq -r '"\(.metadata.namespace)/\(.metadata.name)"' < "$sfw_dir/all-sonataflow-workflows.json" 2>/dev/null || echo "")
+    rm -rf "$sfw_dir/all-sonataflow-workflows.json"
 
     if [[ -z "$workflows" ]]; then
-        echo "No SonataFlow workflows found in namespace $ns" > "$workflows_dir/no-workflows.txt"
+        log_info "\tNo SonataFlow workflows found"
+        echo "No SonataFlow workflows found" > "$sfw_dir/no-workflows.txt"
         return 0
     fi
 
-    for workflow in $workflows; do
-        log_info "\t\tProcessing SonataFlow workflow: $workflow"
-        
-        local wf_dir="$workflows_dir/$workflow"
+    orchestrator_detected=true
+
+    # Group workflows by namespace for organized output
+    local seen_namespaces=()
+    for wf_info in $workflows; do
+        if [[ -z "$wf_info" ]]; then
+            continue
+        fi
+
+        local wf_ns=""
+        local wf_name="$wf_info"
+
+        if [[ "$wf_info" == *"/"* ]]; then
+            wf_ns=$(echo "$wf_info" | cut -d'/' -f1)
+            wf_name=$(echo "$wf_info" | cut -d'/' -f2)
+        fi
+
+        local ns_dir="$sfw_dir/ns=$wf_ns"
+
+        # Collect per-namespace workflow list once
+        local ns_seen=false
+        for seen_ns in "${seen_namespaces[@]:-}"; do
+            if [[ "$seen_ns" == "$wf_ns" ]]; then
+                ns_seen=true
+                break
+            fi
+        done
+        if [[ "$ns_seen" == "false" ]]; then
+            seen_namespaces+=("$wf_ns")
+            ensure_directory "$ns_dir"
+            safe_exec "$KUBECTL_CMD -n '$wf_ns' get sonataflows.sonataflow.org" "$ns_dir/all-workflows.txt" \
+                "SonataFlow workflows in $wf_ns"
+        fi
+
+        log_info "\tProcessing SonataFlow workflow: $wf_name in namespace $wf_ns"
+
+        local wf_dir="$ns_dir/$wf_name"
         ensure_directory "$wf_dir"
 
-        safe_exec "$KUBECTL_CMD -n '$ns' get sonataflows.sonataflow.org '$workflow' -o yaml" \
-            "$wf_dir/workflow.yaml" "SonataFlow $workflow definition"
-        safe_exec "$KUBECTL_CMD -n '$ns' describe sonataflows.sonataflow.org '$workflow'" \
-            "$wf_dir/describe.txt" "SonataFlow $workflow description"
-        
+        safe_exec "$KUBECTL_CMD -n '$wf_ns' get sonataflows.sonataflow.org '$wf_name' -o yaml" \
+            "$wf_dir/workflow.yaml" "SonataFlow $wf_name definition"
+        safe_exec "$KUBECTL_CMD -n '$wf_ns' describe sonataflows.sonataflow.org '$wf_name'" \
+            "$wf_dir/describe.txt" "SonataFlow $wf_name description"
+
         # Collect related pods and logs for this workflow
-        safe_exec "$KUBECTL_CMD -n '$ns' get pods -l 'sonataflow.org/workflow-app=$workflow'" \
-            "$wf_dir/pods.txt" "SonataFlow $workflow pods"
-        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers --prefix ${log_collection_args:-}" \
-            "$wf_dir/logs.txt" "SonataFlow $workflow logs"
-        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers --prefix --previous ${log_collection_args:-}" \
-            "$wf_dir/logs-previous.txt" "SonataFlow $workflow logs (previous containers)"
+        safe_exec "$KUBECTL_CMD -n '$wf_ns' get pods -l 'sonataflow.org/workflow-app=$wf_name'" \
+            "$wf_dir/pods.txt" "SonataFlow $wf_name pods"
+        safe_exec "$KUBECTL_CMD -n '$wf_ns' logs -l 'sonataflow.org/workflow-app=$wf_name' --all-containers --prefix ${log_collection_args:-}" \
+            "$wf_dir/logs.txt" "SonataFlow $wf_name logs"
+        safe_exec "$KUBECTL_CMD -n '$wf_ns' logs -l 'sonataflow.org/workflow-app=$wf_name' --all-containers --prefix --previous ${log_collection_args:-}" \
+            "$wf_dir/logs-previous.txt" "SonataFlow $wf_name logs (previous containers)"
     done
 }
 
@@ -424,6 +458,7 @@ function generate_orchestrator_summary() {
 gather_serverless_operators
 gather_orchestrator_crds
 gather_sonataflow_platforms
+gather_sonataflow_workflows
 gather_knative_resources
 generate_orchestrator_summary
 
