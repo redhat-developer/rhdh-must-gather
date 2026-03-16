@@ -73,6 +73,11 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "gather_orchestrator defines gather_sonataflow_workflows function" {
+    run grep -q "function gather_sonataflow_workflows" "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+}
+
 @test "gather_orchestrator defines gather_knative_resources function" {
     run grep -q "function gather_knative_resources" "${SCRIPTS_DIR}/gather_orchestrator"
     [ "$status" -eq 0 ]

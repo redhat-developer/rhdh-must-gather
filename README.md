@@ -407,14 +407,16 @@ Usage: ./must_gather [params...]
 │   │           ├── describe.txt            # CR description
 │   │           ├── related-deployments.txt # Platform-related deployments
 │   │           ├── related-services.txt    # Platform-related services
-│   │           ├── logs.txt                # Platform-related logs
-│   │           └── workflows/              # SonataFlow workflows in this namespace
-│   │               ├── all-workflows.txt   # List of workflows
-│   │               └── [workflow-name]/    # Per-workflow directory
-│   │                   ├── workflow.yaml   # SonataFlow workflow definition
-│   │                   ├── describe.txt    # Workflow description
-│   │                   ├── pods.txt        # Workflow pods
-│   │                   └── logs.txt        # Workflow logs
+│   │           └── logs.txt                # Platform-related logs
+│   ├── sonataflow-workflows/       # SonataFlow Workflow Custom Resources
+│   │   ├── all-sonataflow-workflows.txt   # List of all SonataFlow workflows
+│   │   └── ns=[namespace]/         # Per-namespace workflow data
+│   │       ├── all-workflows.txt   # List of workflows in this namespace
+│   │       └── [workflow-name]/    # Per-workflow directory
+│   │           ├── workflow.yaml   # SonataFlow workflow definition
+│   │           ├── describe.txt    # Workflow description
+│   │           ├── pods.txt        # Workflow pods
+│   │           └── logs.txt        # Workflow logs
 │   └── knative/                    # Knative resources
 │       ├── knative-serving-list.txt        # KnativeServing CRs list
 │       ├── knative-serving.yaml            # KnativeServing CR details

@@ -53,7 +53,10 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
   - Full CR definitions and descriptions
   - Related deployments, services, and logs
   - Data Index Service information
-  - SonataFlow workflows in the same namespace
+
+- **SonataFlow Workflows** (collected independently across all namespaces):
+  - Full workflow definitions and descriptions
+  - Workflow-related pods and logs
 
 - **Knative Resources**:
   - KnativeServing CRs and namespace resources (`knative-serving`)
