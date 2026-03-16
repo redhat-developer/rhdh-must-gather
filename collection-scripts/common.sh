@@ -779,9 +779,12 @@ collect_rhdh_data() {
 
     safe_exec "$KUBECTL_CMD -n '$ns' get deployment $deploy -o yaml || $KUBECTL_CMD -n '$ns' get statefulset $deploy -o yaml" "$deploy_dir/deployment.yaml" "app deployment for $ns/$deploy"
     safe_exec "$KUBECTL_CMD -n '$ns' describe deployment $deploy || $KUBECTL_CMD -n '$ns' describe statefulset $deploy" "$deploy_dir/deployment.describe.txt" "app deployment for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c install-dynamic-plugins ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c install-dynamic-plugins ${log_collection_args:-}" "$deploy_dir/logs-app--install-dynamic-plugins.txt" "app init-container logs for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c backstage-backend ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c backstage-backend ${log_collection_args:-}" "$deploy_dir/logs-app--backstage-backend.txt" "app backstage-backend logs for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy --all-containers ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy --all-containers ${log_collection_args:-}" "$deploy_dir/logs-app.txt" "app deployment logs for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c install-dynamic-plugins --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c install-dynamic-plugins --prefix ${log_collection_args:-}" "$deploy_dir/logs-app--install-dynamic-plugins.txt" "app init-container logs for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c install-dynamic-plugins --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c install-dynamic-plugins --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app--install-dynamic-plugins-previous.txt" "app init-container logs (previous) for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c backstage-backend --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c backstage-backend --prefix ${log_collection_args:-}" "$deploy_dir/logs-app--backstage-backend.txt" "app backstage-backend logs for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c backstage-backend --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c backstage-backend --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app--backstage-backend-previous.txt" "app backstage-backend logs (previous) for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy --all-containers --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy --all-containers --prefix ${log_collection_args:-}" "$deploy_dir/logs-app.txt" "app deployment logs for $ns/$deploy"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy --all-containers --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy --all-containers --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app-previous.txt" "app deployment logs (previous) for $ns/$deploy"
   
     labels=$(
       $KUBECTL_CMD -n "$ns" get deployment "$deploy" -o json \
@@ -817,7 +820,8 @@ collect_rhdh_data() {
 
     safe_exec "$KUBECTL_CMD -n '$ns' get statefulset $statefulset -o yaml" "$statefulset_dir/db-statefulset.yaml" "DB statefulset for $ns/$statefulset"
     safe_exec "$KUBECTL_CMD -n '$ns' describe statefulset $statefulset" "$statefulset_dir/db-statefulset.describe.txt" "DB statefulset for $ns/$statefulset"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$statefulset --all-containers ${log_collection_args:-}" "$statefulset_dir/logs-db.txt" "DB StatefulSet logs for $ns/$statefulset"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$statefulset --all-containers --prefix ${log_collection_args:-}" "$statefulset_dir/logs-db.txt" "DB StatefulSet logs for $ns/$statefulset"
+    safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$statefulset --all-containers --prefix --previous ${log_collection_args:-}" "$statefulset_dir/logs-db-previous.txt" "DB StatefulSet logs (previous) for $ns/$statefulset"
 
     labels=$(
       $KUBECTL_CMD -n "$ns" get statefulset "$statefulset" -o json \

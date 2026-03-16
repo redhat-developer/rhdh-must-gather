@@ -109,8 +109,10 @@ function gather_operator_logs() {
   local ns=$2
   log_info "\tCollecting Operator Logs in $ns..."
 
-  safe_exec "$KUBECTL_CMD -n $ns logs -l app=rhdh-operator --all-containers ${log_collection_args:-}" "$dir/logs.txt" \
+  safe_exec "$KUBECTL_CMD -n $ns logs -l app=rhdh-operator --all-containers --prefix ${log_collection_args:-}" "$dir/logs.txt" \
     "Logs of pods with label app=rhdh-operator in $ns"
+  safe_exec "$KUBECTL_CMD -n $ns logs -l app=rhdh-operator --all-containers --prefix --previous ${log_collection_args:-}" "$dir/logs-previous.txt" \
+    "Logs (previous) of pods with label app=rhdh-operator in $ns"
 }
 
 function gather_backstage_crs() {
