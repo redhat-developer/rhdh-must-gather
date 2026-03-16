@@ -49,11 +49,15 @@ function gather_serverless_operators() {
         safe_exec "$KUBECTL_CMD get pods -n '$serverless_ns'" "$serverless_ns_dir/pods.txt" "Pods in $serverless_ns"
         safe_exec "$KUBECTL_CMD describe pods -n '$serverless_ns'" "$serverless_ns_dir/pods.describe.txt" "Pod descriptions in $serverless_ns"
 
-        # Collect operator logs
-        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --selector='name=knative-openshift' ${log_collection_args:-}" \
+        # Collect operator logs (--prefix identifies which pod produced each line)
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --prefix --selector='name=knative-openshift' ${log_collection_args:-}" \
             "$serverless_ns_dir/logs-knative-openshift.txt" "Knative OpenShift operator logs"
-        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --selector='name=knative-openshift-ingress' ${log_collection_args:-}" \
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --prefix --previous --selector='name=knative-openshift' ${log_collection_args:-}" \
+            "$serverless_ns_dir/logs-knative-openshift-previous.txt" "Knative OpenShift operator logs (previous containers)"
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --prefix --selector='name=knative-openshift-ingress' ${log_collection_args:-}" \
             "$serverless_ns_dir/logs-knative-openshift-ingress.txt" "Knative OpenShift Ingress operator logs"
+        safe_exec "$KUBECTL_CMD logs -n '$serverless_ns' --all-containers --prefix --previous --selector='name=knative-openshift-ingress' ${log_collection_args:-}" \
+            "$serverless_ns_dir/logs-knative-openshift-ingress-previous.txt" "Knative OpenShift Ingress operator logs (previous containers)"
 
         # Collect subscription info
         safe_exec "$KUBECTL_CMD get subscription -n '$serverless_ns'" "$serverless_ns_dir/subscriptions.txt" "Subscriptions in $serverless_ns"
@@ -84,9 +88,11 @@ function gather_serverless_operators() {
         safe_exec "$KUBECTL_CMD get pods -n '$logic_ns'" "$logic_ns_dir/pods.txt" "Pods in $logic_ns"
         safe_exec "$KUBECTL_CMD describe pods -n '$logic_ns'" "$logic_ns_dir/pods.describe.txt" "Pod descriptions in $logic_ns"
 
-        # Collect operator logs
-        safe_exec "$KUBECTL_CMD logs -n '$logic_ns' --all-containers -l 'app.kubernetes.io/name=logic-operator-rhel8' ${log_collection_args:-}" \
+        # Collect operator logs (--prefix identifies which pod produced each line)
+        safe_exec "$KUBECTL_CMD logs -n '$logic_ns' --all-containers --prefix -l 'app.kubernetes.io/name=logic-operator-rhel8' ${log_collection_args:-}" \
             "$logic_ns_dir/logs-logic-operator.txt" "Serverless Logic operator logs"
+        safe_exec "$KUBECTL_CMD logs -n '$logic_ns' --all-containers --prefix --previous -l 'app.kubernetes.io/name=logic-operator-rhel8' ${log_collection_args:-}" \
+            "$logic_ns_dir/logs-logic-operator-previous.txt" "Serverless Logic operator logs (previous containers)"
 
         # Collect subscription info
         safe_exec "$KUBECTL_CMD get subscription -n '$logic_ns'" "$logic_ns_dir/subscriptions.txt" "Subscriptions in $logic_ns"
@@ -209,8 +215,10 @@ function gather_sonataflow_platforms() {
             "$sfp_cr_dir/related-deployments.txt" "SonataFlowPlatform related deployments"
         safe_exec "$KUBECTL_CMD -n '$sfp_ns' get services -l 'sonataflow.org/platform=$sfp_name'" \
             "$sfp_cr_dir/related-services.txt" "SonataFlowPlatform related services"
-        safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers ${log_collection_args:-}" \
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers --prefix ${log_collection_args:-}" \
             "$sfp_cr_dir/logs.txt" "SonataFlowPlatform related logs"
+        safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers --prefix --previous ${log_collection_args:-}" \
+            "$sfp_cr_dir/logs-previous.txt" "SonataFlowPlatform related logs (previous containers)"
 
         # Collect SonataFlow workflows in the same namespace
         gather_sonataflows_in_namespace "$sfp_ns" "$sfp_cr_dir"
@@ -262,8 +270,10 @@ function gather_sonataflows_in_namespace() {
         # Collect related pods and logs for this workflow
         safe_exec "$KUBECTL_CMD -n '$ns' get pods -l 'sonataflow.org/workflow-app=$workflow'" \
             "$wf_dir/pods.txt" "SonataFlow $workflow pods"
-        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers ${log_collection_args:-}" \
+        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers --prefix ${log_collection_args:-}" \
             "$wf_dir/logs.txt" "SonataFlow $workflow logs"
+        safe_exec "$KUBECTL_CMD -n '$ns' logs -l 'sonataflow.org/workflow-app=$workflow' --all-containers --prefix --previous ${log_collection_args:-}" \
+            "$wf_dir/logs-previous.txt" "SonataFlow $workflow logs (previous containers)"
     done
 }
 

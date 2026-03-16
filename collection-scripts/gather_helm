@@ -378,7 +378,8 @@ else
                     fi
                     for dep_pod in $dep_pods; do
                         if [[ -n "$dep_pod" ]]; then
-                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers --prefix ${log_collection_args:-}" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers --prefix --previous ${log_collection_args:-}" "$dep_dir/logs-$dep_pod-previous.txt" "Logs (previous) for $dep_pod"
                         fi
                     done
                 elif [[ "$dep_kind" == "StatefulSet" ]]; then
@@ -393,7 +394,8 @@ else
                     fi
                     for dep_pod in $dep_pods; do
                         if [[ -n "$dep_pod" ]]; then
-                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers --prefix ${log_collection_args:-}" "$dep_dir/logs-$dep_pod.txt" "Logs for $dep_pod"
+                            safe_exec "$KUBECTL_CMD -n '$workload_ns' logs '$dep_pod' --all-containers --prefix --previous ${log_collection_args:-}" "$dep_dir/logs-$dep_pod-previous.txt" "Logs (previous) for $dep_pod"
                         fi
                     done
                 fi
