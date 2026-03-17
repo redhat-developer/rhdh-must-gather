@@ -74,15 +74,16 @@ run-script: local-output local-setup ## Test the specified gather-<SCRIPT> scrip
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
 		./collection-scripts/gather_${SCRIPT} $(OPTS)
 
-.PHONY: run-container
-run-container: image-build local-output ## Test using container (requires podman)
-	@echo "Testing must-gather in container..."
-	podman run --rm \
-		-v $(HOME)/.kube:/home/must-gather/.kube:ro \
-		-v $(PWD)/out:/must-gather \
-		-e LOG_LEVEL=$(LOG_LEVEL) \
-		$(IMAGE_NAME):$(IMAGE_TAG) \
-		$(OPTS)
+# TODO(asoro): Consider adding this back. It currently fails due to permission issues inside the container.
+# .PHONY: run-container
+# run-container: image-build local-output ## Test using container (requires podman)
+# 	@echo "Testing must-gather in container..."
+# 	podman run --rm \
+# 		-v $(HOME)/.kube:/home/must-gather/.kube:ro \
+# 		-v $(PWD)/out:/must-gather \
+# 		-e LOG_LEVEL=$(LOG_LEVEL) \
+# 		$(IMAGE_NAME):$(IMAGE_TAG) \
+# 		$(OPTS)
 
 .PHONY: test-results
 test-results:
@@ -235,5 +236,5 @@ help: ## Display this help.
 	@echo "  make deploy-k8s OVERLAY=with-heap-dumps            # Run deploy-k8s with heap dump overlay"
 	@echo "  make deploy-k8s OVERLAY=/path/to/my-overlay        # Run deploy-k8s with custom overlay"
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
-	@echo "  make run-container OPTS=\"--with-secrets --with-heap-dumps\""
+# @echo "  make run-container OPTS=\"--with-secrets --with-heap-dumps\""
 	@echo "  make deploy-openshift OPTS=\"--with-heap-dumps --namespaces my-ns\""

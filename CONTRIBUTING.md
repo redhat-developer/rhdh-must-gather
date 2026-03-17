@@ -24,9 +24,6 @@ make run-local
 make run-script SCRIPT=helm    # Test only gather_helm
 make run-script SCRIPT=operator # Test only gather_operator
 
-# Test in container with local cluster access
-make run-container
-
 # Test with OpenShift using oc adm must-gather
 make deploy-openshift
 
