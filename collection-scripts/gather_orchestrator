@@ -158,13 +158,8 @@ function gather_sonataflow_platforms() {
     local sfp_dir="$orchestrator_dir/sonataflow-platforms"
     ensure_directory "$sfp_dir"
 
-    # Check if SonataFlowPlatform CRD exists
-    if ! $KUBECTL_CMD get crd sonataflowplatforms.sonataflow.org >/dev/null 2>&1; then
-        log_info "\tSonataFlowPlatform CRD not found - Serverless Logic may not be installed"
-        echo "SonataFlowPlatform CRD not found" > "$sfp_dir/crd-not-found.txt"
-        return 0
-    fi
-
+    # Do not rely on "get crd" here: the user may lack permission to list CRDs but may have
+    # permission to "get sonataflowplatforms.sonataflow.org" in their namespace(s). Proceed to list CRs.
     namespace_args=$(get_namespace_args)
     safe_exec "$KUBECTL_CMD get sonataflowplatforms.sonataflow.org $namespace_args" "$sfp_dir/all-sonataflow-platforms.txt" \
         "All SonataFlowPlatform CRs"
@@ -233,13 +228,8 @@ function gather_sonataflow_workflows() {
     local sfw_dir="$orchestrator_dir/sonataflow-workflows"
     ensure_directory "$sfw_dir"
 
-    # Check if SonataFlow CRD exists
-    if ! $KUBECTL_CMD get crd sonataflows.sonataflow.org >/dev/null 2>&1; then
-        log_info "\tSonataFlow CRD not found - Serverless Logic may not be installed"
-        echo "SonataFlow CRD not found" > "$sfw_dir/crd-not-found.txt"
-        return 0
-    fi
-
+    # Do not rely on "get crd" here: the user may lack permission to list CRDs but may have
+    # permission to "get sonataflows.sonataflow.org" in their namespace(s). Proceed to list CRs.
     namespace_args=$(get_namespace_args)
     safe_exec "$KUBECTL_CMD get sonataflows.sonataflow.org $namespace_args" "$sfw_dir/all-sonataflow-workflows.txt" \
         "All SonataFlow workflows"
@@ -321,57 +311,45 @@ function gather_knative_resources() {
     local knative_dir="$orchestrator_dir/knative"
     ensure_directory "$knative_dir"
 
-    # KnativeServing CR (cluster-scoped, typically in knative-serving namespace)
-    if $KUBECTL_CMD get crd knativeservings.operator.knative.dev >/dev/null 2>&1; then
-        safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces" \
-            "$knative_dir/knative-serving-list.txt" "KnativeServing CRs"
-        safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o yaml" \
-            "$knative_dir/knative-serving.yaml" "KnativeServing CR details"
-        
-        # Check knative-serving namespace for resources
-        if $KUBECTL_CMD get namespace knative-serving >/dev/null 2>&1; then
-            orchestrator_detected=true
-            local serving_dir="$knative_dir/knative-serving"
-            ensure_directory "$serving_dir"
-            
-            safe_exec "$KUBECTL_CMD -n knative-serving get deployments" "$serving_dir/deployments.txt" "Knative Serving deployments"
-            safe_exec "$KUBECTL_CMD -n knative-serving get pods" "$serving_dir/pods.txt" "Knative Serving pods"
-            safe_exec "$KUBECTL_CMD -n knative-serving get services" "$serving_dir/services.txt" "Knative Serving services"
-        fi
-    else
-        log_debug "\tKnativeServing CRD not found"
-        echo "KnativeServing CRD not found" > "$knative_dir/knative-serving-not-installed.txt"
+    # KnativeServing CR (cluster-scoped). Try get resource directly; user may have get CR permission without get crd permission.
+    safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces" \
+        "$knative_dir/knative-serving-list.txt" "KnativeServing CRs"
+    safe_exec "$KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o yaml" \
+        "$knative_dir/knative-serving.yaml" "KnativeServing CR details"
+
+    # Check knative-serving namespace for resources
+    if $KUBECTL_CMD get namespace knative-serving >/dev/null 2>&1; then
+        orchestrator_detected=true
+        local serving_dir="$knative_dir/knative-serving"
+        ensure_directory "$serving_dir"
+
+        safe_exec "$KUBECTL_CMD -n knative-serving get deployments" "$serving_dir/deployments.txt" "Knative Serving deployments"
+        safe_exec "$KUBECTL_CMD -n knative-serving get pods" "$serving_dir/pods.txt" "Knative Serving pods"
+        safe_exec "$KUBECTL_CMD -n knative-serving get services" "$serving_dir/services.txt" "Knative Serving services"
     fi
 
-    # KnativeEventing CR
-    if $KUBECTL_CMD get crd knativeeventings.operator.knative.dev >/dev/null 2>&1; then
-        safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces" \
-            "$knative_dir/knative-eventing-list.txt" "KnativeEventing CRs"
-        safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o yaml" \
-            "$knative_dir/knative-eventing.yaml" "KnativeEventing CR details"
-        
-        # Check knative-eventing namespace for resources
-        if $KUBECTL_CMD get namespace knative-eventing >/dev/null 2>&1; then
-            orchestrator_detected=true
-            local eventing_dir="$knative_dir/knative-eventing"
-            ensure_directory "$eventing_dir"
-            
-            safe_exec "$KUBECTL_CMD -n knative-eventing get deployments" "$eventing_dir/deployments.txt" "Knative Eventing deployments"
-            safe_exec "$KUBECTL_CMD -n knative-eventing get pods" "$eventing_dir/pods.txt" "Knative Eventing pods"
-            safe_exec "$KUBECTL_CMD -n knative-eventing get services" "$eventing_dir/services.txt" "Knative Eventing services"
-        fi
-    else
-        log_debug "\tKnativeEventing CRD not found"
-        echo "KnativeEventing CRD not found" > "$knative_dir/knative-eventing-not-installed.txt"
+    # KnativeEventing CR. Try get resource directly; user may have get CR permission without get crd permission.
+    safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces" \
+        "$knative_dir/knative-eventing-list.txt" "KnativeEventing CRs"
+    safe_exec "$KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o yaml" \
+        "$knative_dir/knative-eventing.yaml" "KnativeEventing CR details"
+
+    # Check knative-eventing namespace for resources
+    if $KUBECTL_CMD get namespace knative-eventing >/dev/null 2>&1; then
+        orchestrator_detected=true
+        local eventing_dir="$knative_dir/knative-eventing"
+        ensure_directory "$eventing_dir"
+
+        safe_exec "$KUBECTL_CMD -n knative-eventing get deployments" "$eventing_dir/deployments.txt" "Knative Eventing deployments"
+        safe_exec "$KUBECTL_CMD -n knative-eventing get pods" "$eventing_dir/pods.txt" "Knative Eventing pods"
+        safe_exec "$KUBECTL_CMD -n knative-eventing get services" "$eventing_dir/services.txt" "Knative Eventing services"
     fi
 
-    # KnativeKafka CR (optional)
-    if $KUBECTL_CMD get crd knativekafkas.operator.serverless.openshift.io >/dev/null 2>&1; then
-        safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces" \
-            "$knative_dir/knative-kafka-list.txt" "KnativeKafka CRs"
-        safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces -o yaml" \
-            "$knative_dir/knative-kafka.yaml" "KnativeKafka CR details"
-    fi
+    # KnativeKafka CR (optional). Try get resource directly; user may have get CR permission without get crd permission.
+    safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces" \
+        "$knative_dir/knative-kafka-list.txt" "KnativeKafka CRs"
+    safe_exec "$KUBECTL_CMD get knativekafkas.operator.serverless.openshift.io --all-namespaces -o yaml" \
+        "$knative_dir/knative-kafka.yaml" "KnativeKafka CR details"
 }
 
 # ============================================================================
@@ -407,35 +385,19 @@ function generate_orchestrator_summary() {
         echo ""
 
         echo "=== SonataFlowPlatform CRs ==="
-        if $KUBECTL_CMD get crd sonataflowplatforms.sonataflow.org >/dev/null 2>&1; then
-            $KUBECTL_CMD get sonataflowplatforms.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlowPlatform CRs found"
-        else
-            echo "SonataFlowPlatform CRD not installed"
-        fi
+        $KUBECTL_CMD get sonataflowplatforms.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlowPlatform CRs found or no permission"
         echo ""
 
         echo "=== SonataFlow Workflows ==="
-        if $KUBECTL_CMD get crd sonataflows.sonataflow.org >/dev/null 2>&1; then
-            $KUBECTL_CMD get sonataflows.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlow workflows found"
-        else
-            echo "SonataFlow CRD not installed"
-        fi
+        $KUBECTL_CMD get sonataflows.sonataflow.org --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase' 2>/dev/null || echo "No SonataFlow workflows found or no permission"
         echo ""
 
         echo "=== Knative Serving ==="
-        if $KUBECTL_CMD get crd knativeservings.operator.knative.dev >/dev/null 2>&1; then
-            $KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found"
-        else
-            echo "KnativeServing CRD not installed"
-        fi
+        $KUBECTL_CMD get knativeservings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found or no permission"
         echo ""
 
         echo "=== Knative Eventing ==="
-        if $KUBECTL_CMD get crd knativeeventings.operator.knative.dev >/dev/null 2>&1; then
-            $KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found"
-        else
-            echo "KnativeEventing CRD not installed"
-        fi
+        $KUBECTL_CMD get knativeeventings.operator.knative.dev --all-namespaces -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,VERSION:.status.version,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null || echo "Not found or no permission"
         echo ""
 
         echo "=============================================="

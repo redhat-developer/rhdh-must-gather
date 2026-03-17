@@ -121,14 +121,8 @@ function gather_backstage_crs() {
   crs_dir="$operator_dir/backstage-crs"
   ensure_directory "$crs_dir"
 
-  # Check if the Backstage CRD exists first
-  if ! $KUBECTL_CMD get crd backstages.rhdh.redhat.com >/dev/null 2>&1; then
-      log_warn "No Backstage CR found (CRD not installed)"
-      echo "No Backstage CR found (CRD backstages.rhdh.redhat.com not installed)" > "$crs_dir/no-crs.txt"
-      echo "No resources found." > "$crs_dir/all-backstage-crs.txt"
-      return 0
-  fi
-
+  # Do not rely on "get crd" here: the user may lack permission to list CRDs but may have
+  # permission to "get backstages.rhdh.redhat.com" in their namespace(s). Proceed to list CRs.
   namespace_args=$(get_namespace_args)
   safe_exec "$KUBECTL_CMD get backstages.rhdh.redhat.com $namespace_args" "$crs_dir/all-backstage-crs.txt" \
     "All Backstage CRs in $namespace_args"
