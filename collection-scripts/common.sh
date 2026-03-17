@@ -231,15 +231,22 @@ safe_exec() {
     while kill -0 "$pid" 2>/dev/null; do
         if [[ -n "${RHDH_INTERRUPTED:-}" ]]; then
             kill -INT "$pid" 2>/dev/null
+            # Disable errexit so wait (non-zero if child exited by signal) doesn't abort before we exit 130.
+            set +e
             wait "$pid" 2>/dev/null
+            set -e
             log_warn "Collection interrupted by user (Ctrl-C). Sanitizing collected data..."
             exit 130
         fi
         # || true so an interrupted sleep (e.g. SIGINT) doesn't trigger set -e and abort the script.
         sleep 0.5 || true
     done
+    # Disable errexit so we capture wait's status (timeout/failure/signal) and reach the failure-handling
+    # block below instead of exiting; safe_exec is meant to be "safe" and not abort the run on timeouts.
+    set +e
     wait "$pid" 2>/dev/null
     ret=$?
+    set -e
     if [[ -n "${RHDH_INTERRUPTED:-}" ]]; then
         log_warn "Collection interrupted. Sanitizing collected data..."
         exit 130
