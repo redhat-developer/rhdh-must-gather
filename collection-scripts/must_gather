@@ -30,7 +30,14 @@ function main() {
 
   parse_flags "$@"
 
-  trap "echo 'done with data collection. Now sanitizing data...' && '${DIR_NAME}'/sanitize '${BASE_COLLECTION_PATH}' || true" EXIT
+  # shellcheck disable=SC2329
+  on_exit() {
+    echo 'done with data collection. Now sanitizing data...' && "${DIR_NAME}/sanitize" "${BASE_COLLECTION_PATH}" || true
+  }
+  trap on_exit EXIT
+  # Set flag only; safe_exec polls and exits so trap can run during its sleep (bash defers trap until foreground command completes)
+  trap 'RHDH_INTERRUPTED=1; log_warn "Interrupt requested, stopping after current step..."' INT
+  trap 'RHDH_INTERRUPTED=1; log_warn "Interrupt requested, stopping after current step..."' TERM
 
   log_info "Starting RHDH must-gather collection..."
   log_info "Output directory: $BASE_COLLECTION_PATH"
@@ -234,7 +241,12 @@ function run_scripts {
   do
     script_name="gather_${script}"
     log_info "running ${script_name}"
-    if ! eval "${DIR_NAME}/${script_name}"; then
+    local ret=0
+    eval "${DIR_NAME}/${script_name}" || ret=$?
+    if [[ $ret -eq 130 || $ret -eq 143 ]]; then
+      exit $ret
+    fi
+    if [[ $ret -ne 0 ]]; then
       log_warn "Failed to run ${script_name}, continuing with next script..."
     fi
   done
@@ -242,7 +254,12 @@ function run_scripts {
 
 function run_logs {
   log_info "running logs"
-  if ! "${DIR_NAME}"/logs.sh; then
+  local ret=0
+  "${DIR_NAME}"/logs.sh || ret=$?
+  if [[ $ret -eq 130 || $ret -eq 143 ]]; then
+    exit $ret
+  fi
+  if [[ $ret -ne 0 ]]; then
     log_warn "Failed to run logs.sh, continuing..."
   fi
 }

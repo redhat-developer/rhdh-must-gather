@@ -12,6 +12,10 @@ source "${DIR_NAME}/common.sh"
 SANITIZE_DIR="${1:-${BASE_COLLECTION_PATH}}"
 SANITIZATION_REPORT="${SANITIZE_DIR}/sanitization-report.txt"
 
+# Allow Ctrl-C during sanitization to exit immediately (parent EXIT handler uses || true)
+trap 'log_warn "Sanitization interrupted."; exit 130' INT
+trap 'log_warn "Sanitization interrupted."; exit 143' TERM
+
 log_info "Starting data sanitization on directory: $SANITIZE_DIR"
 
 # Counter for tracking sanitization
