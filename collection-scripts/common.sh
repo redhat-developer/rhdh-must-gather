@@ -223,7 +223,32 @@ safe_exec() {
     # Ensure output directory exists
     mkdir -p "$(dirname "$output_file")"
 
-    if ! timeout "$CMD_TIMEOUT" bash -c "$cmd" > "$output_file" 2>&1; then
+    local ret
+    # Run in background so we can poll for RHDH_INTERRUPTED; bash defers the INT trap until the
+    # current foreground command completes, so a short sleep in the loop lets the trap run on Ctrl-C.
+    timeout "$CMD_TIMEOUT" bash -c "$cmd" > "$output_file" 2>&1 &
+    local pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        if [[ -n "${RHDH_INTERRUPTED:-}" ]]; then
+            kill -INT "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            log_warn "Collection interrupted by user (Ctrl-C). Sanitizing collected data..."
+            exit 130
+        fi
+        # || true so an interrupted sleep (e.g. SIGINT) doesn't trigger set -e and abort the script.
+        sleep 0.5 || true
+    done
+    wait "$pid" 2>/dev/null
+    ret=$?
+    if [[ -n "${RHDH_INTERRUPTED:-}" ]]; then
+        log_warn "Collection interrupted. Sanitizing collected data..."
+        exit 130
+    fi
+    if [[ $ret -ne 0 ]]; then
+        # Propagate SIGINT/SIGTERM so the main script exits and runs the EXIT (sanitize) trap.
+        if [[ $ret -eq 130 || $ret -eq 143 ]]; then
+            exit $ret
+        fi
         local exec_err
         exec_err=$(cat "$output_file" 2>/dev/null)
         log_warn "\tCommand timed out or failed: $cmd${exec_err:+ — $exec_err}"
@@ -236,8 +261,6 @@ safe_exec() {
             echo "${exec_err:-No error output captured}"
         } > "$output_file"
     fi
-
-    #return 0
 }
 
 collect_rhdh_info_from_running_pods() {
