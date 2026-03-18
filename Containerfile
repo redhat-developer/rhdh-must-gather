@@ -34,7 +34,8 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
 # Install oc and kubectl (OpenShift CLI)
 # The OpenShift client package includes both oc and kubectl
 # oc is required for OpenShift-specific features like 'oc adm inspect' and routes
-RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz \
+# renovate: datasource=custom.openshift-client
+RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.18.7/openshift-client-linux.tar.gz \
     | tar xz -C /usr/local/bin/ oc kubectl \
     && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl \
     && oc version --client \
@@ -50,8 +51,7 @@ RUN curl -sSLo- https://github.com/mikefarah/yq/releases/download/v4.50.1/yq_lin
 # Required for collecting Helm-based RHDH deployments
 # Installing directly from GitHub releases instead of using the install script
 # to avoid dependency on openssl for checksum verification
-RUN HELM_VERSION=$(curl -s https://api.github.com/repos/helm/helm/releases/latest | grep '"tag_name"' | cut -d'"' -f4) \
-    && curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" -o helm.tar.gz \
+RUN curl -fsSL "https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz" -o helm.tar.gz \
     && tar xzf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin/helm \
     && rm -rf helm.tar.gz linux-amd64 \

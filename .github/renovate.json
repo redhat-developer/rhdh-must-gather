@@ -2,5 +2,43 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "customDatasources": {
+    "openshift-client": {
+      "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": $map($match($, /\\\"(4\\.\\d+\\.\\d+)\\/\"/), function($m) { {\"version\": $m.groups[0]} })}"
+      ]
+    }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^Containerfile$"],
+      "matchStrings": [
+        "https://github\\.com/mikefarah/yq/releases/download/(?<currentValue>v[\\d.]+)/yq_linux_amd64"
+      ],
+      "depNameTemplate": "mikefarah/yq",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^Containerfile$"],
+      "matchStrings": [
+        "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
+      ],
+      "depNameTemplate": "helm/helm",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^Containerfile$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
+      ],
+      "depNameTemplate": "openshift-client",
+      "datasourceTemplate": "custom.openshift-client"
+    }
   ]
 }
