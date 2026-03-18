@@ -90,15 +90,54 @@ fi
 ## Commit Guidelines
 
 Follow Conventional Commits format with required body and trailers:
+
 ```
 <type>(<scope>): <subject>
 
-<body explaining WHY the change was made>
+<body>
+
+<trailers>
+```
+
+### Subject Line
+- Use conventional commit format: `<type>(<scope>): <subject>`
+- Types: `feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `ci`
+- Keep under 72 characters
+- Use imperative mood (e.g., "add" not "added")
+
+### Body (Required)
+- **Must include context explaining WHY the change was made**
+- Separate from subject with a blank line
+- Wrap at 72 characters
+- Explain: What problem does this solve? Why this approach? What are the implications?
+
+### Trailers (Required)
+- Must include: `Assisted-by: Claude`
+- Other trailers as needed (e.g., `Co-authored-by`, `Fixes`, etc.)
+
+### Example
+
+```
+feat(ci): add expiry labels to commit-SHA tagged images
+
+Update both PR and release workflows to rebuild and push extra tags
+(those with commit SHA) using make build-push instead of simple
+docker tag/push. This ensures the quay.expires-after=2w label is
+properly applied to ephemeral commit-specific tags.
+
+Main stable tags (next, next-1.x, pr-{number}, and version tags)
+remain permanent, while commit-SHA variants (next-{sha}, next-1.x-{sha},
+pr-{number}-{sha}) now automatically expire after 2 weeks to reduce
+registry clutter.
 
 Assisted-by: Claude
 ```
 
-Types: `feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `ci`
+### Checklist
+- Does the subject line clearly describe WHAT changed?
+- Does the body explain WHY this change was needed?
+- Is the `Assisted-by: Claude` trailer included?
+- Would someone reading this in 6 months understand the reasoning?
 
 ## Environment Variables
 
