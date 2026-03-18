@@ -51,7 +51,7 @@ RUN curl -sSLo- https://github.com/mikefarah/yq/releases/download/v4.50.1/yq_lin
 # Required for collecting Helm-based RHDH deployments
 # Installing directly from GitHub releases instead of using the install script
 # to avoid dependency on openssl for checksum verification
-RUN curl -fsSL "https://get.helm.sh/helm-v3.17.3-linux-amd64.tar.gz" -o helm.tar.gz \
+RUN curl -fsSL "https://get.helm.sh/helm-v3.20.1-linux-amd64.tar.gz" -o helm.tar.gz \
     && tar xzf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin/helm \
     && rm -rf helm.tar.gz linux-amd64 \
