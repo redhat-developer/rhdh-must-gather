@@ -11,7 +11,7 @@
       "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
       "format": "html",
       "transformTemplates": [
-        "{\"releases\": $map($match($, /(4\\.\\d+\\.\\d+)\\//), function($m) { {\"version\": $m.groups[0]} })}"
+        "{\"releases\": $filter($, function($v){$match($v, /^(4\\.\\d+\\.\\d+)\\/$/)}).{\"version\": $replace($, /\\/$/, \"\")}}"
       ]
     }
   },
