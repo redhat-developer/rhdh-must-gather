@@ -20,7 +20,7 @@
       "customType": "regex",
       "fileMatch": ["^\\.github/workflows/.*\\.ya?ml$"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=npm\\s+depName=(?<depName>\\S+)\\n\\s*\\w+_VERSION=(?<currentValue>[\\d.]+)"
+        "#\\s*renovate:\\s*datasource=npm\\n\\s*npm install\\s+--no-save\\s+(?<depName>[^@\\s]+)@(?<currentValue>[\\d.]+)"
       ],
       "datasourceTemplate": "npm"
     },
