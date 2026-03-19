@@ -18,3 +18,13 @@ jobs:
         # See https://docs.renovatebot.com/config-validation/
         run: |
           npx --yes --package renovate -- renovate-config-validator --strict .github/renovate.json
+
+      - name: Validate JSONata expressions
+        run: |
+          # Extract and validate all transformTemplates JSONata expressions
+          # renovate: datasource=npm
+          npm install --no-save jsonata@2.1.0
+          jq -r '.. | .transformTemplates? // empty | .[]' .github/renovate.json | while IFS= read -r expr; do
+            echo "Validating: $expr"
+            node -e "const jsonata = require('jsonata'); jsonata(process.argv[1])" "$expr" || exit 1
+          done
