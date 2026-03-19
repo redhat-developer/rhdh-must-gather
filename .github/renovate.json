@@ -4,14 +4,15 @@
     "config:recommended"
   ],
   "ignorePaths": [
-    "deploy/overlays/custom-image/**"
+    "deploy/overlays/custom-image/kustomization.yaml",
+    "deploy/base/kustomization.yaml"
   ],
   "customDatasources": {
     "openshift-client": {
       "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
       "format": "html",
       "transformTemplates": [
-        "{\"releases\": $filter($, function($v){$type($v)=\"string\" and $contains($v, /^4\\.\\d+\\.\\d+\\/$/)}). ({\"version\": $replace($, /\\/$/, \"\")})}"
+        "{\"releases\": [$filter($, function($v){$type($v)=\"string\" and $contains($v, /^4\\.\\d+\\.\\d+\\/$/)}).( {\"version\": $replace($, /\\/$/, \"\")} )]}"
       ]
     }
   },
