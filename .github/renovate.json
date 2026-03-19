@@ -18,6 +18,14 @@
   "customManagers": [
     {
       "customType": "regex",
+      "fileMatch": ["^\\.github/workflows/.*\\.ya?ml$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=npm\\s+depName=(?<depName>\\S+)\\n\\s*\\w+_VERSION=(?<currentValue>[\\d.]+)"
+      ],
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
       "fileMatch": ["^Containerfile$"],
       "matchStrings": [
         "https://github\\.com/mikefarah/yq/releases/download/(?<currentValue>v[\\d.]+)/yq_linux_amd64"
