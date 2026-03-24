@@ -794,7 +794,10 @@ collect_heap_dump_via_inspector() {
 
   # Step 6: Extract heap snapshot from the output
   # The output contains multiple JSON lines, including HeapProfiler.addHeapSnapshotChunk events
-  # Each chunk has: {"method":"HeapProfiler.addHeapSnapshotChunk","params":{"chunk":"..."}}
+  # Each line is a complete JSON object: {"method":"HeapProfiler.addHeapSnapshotChunk","params":{"chunk":"..."}}
+  #
+  # Note: The WebSocket output may contain control characters that jq cannot parse directly.
+  # We use a line-by-line approach with error handling to extract as many chunks as possible.
 
   log_info "Extracting heap snapshot data..."
 
@@ -804,10 +807,84 @@ collect_heap_dump_via_inspector() {
   echo "Found $chunk_count heap snapshot chunks in inspector response" >> "$log_file"
 
   # Extract all chunks and concatenate them
+  # The inspector response may contain control characters that jq cannot parse.
+  # We try multiple extraction methods in order of reliability.
   local extract_error=""
-  if grep -o '{"method":"HeapProfiler.addHeapSnapshotChunk"[^}]*}' "$outfile" 2>/dev/null | \
-     jq -r '.params.chunk' 2>"$outfile.jq_err" | \
-     tr -d '\n' > "$output_file"; then
+  local extracted_chunks=0
+  local failed_chunks=0
+
+  # Clear output file and jq error file
+  : > "$output_file"
+  : > "$outfile.jq_err"
+
+  # Method 1: Try jq with slurp mode to handle the entire file
+  # This works if each JSON message is on its own line
+  echo "Attempting extraction method 1: jq line-by-line..." >> "$log_file"
+  while IFS= read -r line; do
+    # Try to extract chunk from this line using jq
+    if chunk=$(echo "$line" | jq -j '.params.chunk // empty' 2>>"$outfile.jq_err"); then
+      if [[ -n "$chunk" ]]; then
+        printf '%s' "$chunk" >> "$output_file"
+        extracted_chunks=$((extracted_chunks + 1))
+      fi
+    else
+      failed_chunks=$((failed_chunks + 1))
+    fi
+  done < <(grep 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null)
+
+  echo "Method 1 result: extracted=$extracted_chunks, failed=$failed_chunks" >> "$log_file"
+
+  # Method 2: If jq failed on all chunks, try Python-based extraction
+  # Python's json module is more lenient with control characters
+  if [[ $extracted_chunks -eq 0 && $chunk_count -gt 0 ]]; then
+    echo "Attempting extraction method 2: Python json module..." >> "$log_file"
+
+    if command -v python3 >/dev/null 2>&1; then
+      python3 -c "
+import sys, json
+for line in sys.stdin:
+    line = line.strip()
+    if 'HeapProfiler.addHeapSnapshotChunk' in line:
+        try:
+            obj = json.loads(line)
+            chunk = obj.get('params', {}).get('chunk', '')
+            if chunk:
+                sys.stdout.write(chunk)
+        except json.JSONDecodeError:
+            pass  # Skip malformed lines
+" < "$outfile" > "$output_file" 2>>"$outfile.jq_err"
+
+      if [[ -s "$output_file" ]]; then
+        extracted_chunks=$chunk_count  # Assume all chunks extracted if output is non-empty
+        echo "Method 2 (Python) succeeded: $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
+      else
+        echo "Method 2 (Python) produced no output" >> "$log_file"
+      fi
+    else
+      echo "Method 2 skipped: Python3 not available" >> "$log_file"
+    fi
+  fi
+
+  # Method 3: Last resort - use sed to extract chunk content (fragile but may work)
+  if [[ ! -s "$output_file" && $chunk_count -gt 0 ]]; then
+    echo "Attempting extraction method 3: sed-based extraction..." >> "$log_file"
+
+    # Extract everything between "chunk":" and the final "}}
+    # Then unescape common JSON escapes
+    grep 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null | \
+    sed 's/.*"chunk":"//; s/"}}$//' | \
+    sed 's/\\"/"/g; s/\\\\/\\/g' >> "$output_file"
+
+    if [[ -s "$output_file" ]]; then
+      echo "Method 3 (sed) produced: $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
+    else
+      echo "Method 3 (sed) produced no output" >> "$log_file"
+    fi
+  fi
+
+  echo "Final extraction: output file size = $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
+
+  if [[ -s "$output_file" ]]; then
 
     local file_size
     file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
@@ -832,12 +909,14 @@ collect_heap_dump_via_inspector() {
   {
     echo ""
     echo "=== Heap Snapshot Extraction Failed ==="
-    echo "Error: ${extract_error:-unknown}"
-    echo "Chunks found: $chunk_count"
+    echo "Error: ${extract_error:-extraction produced no usable data}"
+    echo "Chunks in response: $chunk_count"
+    echo "Chunks extracted: $extracted_chunks"
+    echo "Chunks failed: $failed_chunks"
     echo ""
     if [[ -f "$outfile.jq_err" && -s "$outfile.jq_err" ]]; then
-      echo "=== jq errors ==="
-      cat "$outfile.jq_err"
+      echo "=== jq errors (first 50 lines) ==="
+      head -50 "$outfile.jq_err"
       echo ""
     fi
     echo "=== Inspector Response Analysis ==="
