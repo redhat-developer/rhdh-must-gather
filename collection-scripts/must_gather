@@ -195,8 +195,6 @@ Usage: ./$(basename "$0") [params...]
   ./$(basename "$0") --with-secrets
 
   # Collect heap dumps for memory troubleshooting
-  # For best results, add NODE_OPTIONS="--inspect=0.0.0.0:9229" to the backstage-backend container
-  # (The tool will also try to activate the inspector dynamically via SIGUSR1)
   ./$(basename "$0") --with-heap-dumps
 
   # Full diagnostic collection (secrets + heap dumps - generates large output)

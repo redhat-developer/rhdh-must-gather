@@ -631,7 +631,6 @@ collect_heap_dump_via_inspector() {
 
   # Wait for port-forward to be ready
   local wait_count=0
-  local curl_err=""
   while ! curl -s "http://localhost:$local_port/json" >/dev/null 2>&1; do
     sleep 0.5
     wait_count=$((wait_count + 1))
@@ -1042,9 +1041,11 @@ _process_container_heap_dump() {
       else
         inspector_error=$?
         log_info "Inspector protocol method failed (exit code: $inspector_error), trying SIGUSR2 fallback..."
-        echo "" >> "$container_dir/heap-dump.log"
-        echo "=== Falling back to SIGUSR2 method ===" >> "$container_dir/heap-dump.log"
-        echo "Inspector protocol failed with exit code: $inspector_error" >> "$container_dir/heap-dump.log"
+        {
+          echo ""
+          echo "=== Falling back to SIGUSR2 method ==="
+          echo "Inspector protocol failed with exit code: $inspector_error"
+        } >> "$container_dir/heap-dump.log"
       fi
 
       # =====================================================================
