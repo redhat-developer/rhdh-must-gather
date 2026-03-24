@@ -156,20 +156,16 @@ Usage: ./$(basename "$0") [params...]
                                 Heap dumps are collected immediately after pod logs for each deployment/CR
                                 Useful for troubleshooting memory leaks and performance issues
 
+                                NO CONFIGURATION REQUIRED for most deployments!
+                                The tool automatically activates the Node.js inspector via SIGUSR1.
+
                                 Collection Methods (tried in order):
-                                  1. Inspector Protocol (recommended) - uses Chrome DevTools Protocol
-                                  2. SIGUSR2 Signal (fallback) - sends signal to trigger heap snapshot
+                                  1. Inspector Protocol (primary) - activates inspector via SIGUSR1,
+                                     then uses v8.writeHeapSnapshot() via Chrome DevTools Protocol
+                                  2. SIGUSR2 Signal (fallback) - requires NODE_OPTIONS configuration
 
-                                For best results, configure NODE_OPTIONS in your Deployment/CR:
-
-                                  Option 1 (Recommended - Inspector Protocol):
-                                    NODE_OPTIONS="--inspect=0.0.0.0:9229"
-
-                                  Option 2 (Fallback - SIGUSR2):
-                                    NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-
-                                Note: Even without configuration, the tool will attempt to activate
-                                the inspector dynamically via SIGUSR1. No image rebuild needed!
+                                If the primary method fails, configure NODE_OPTIONS for the fallback:
+                                  NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
 
                                 Warning: May take several minutes and generate large files (100MB-1GB+ per pod)
 

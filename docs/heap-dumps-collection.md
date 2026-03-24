@@ -6,15 +6,29 @@ When heap dumps are collected using `--with-heap-dumps`, they can be analyzed us
 
 The must-gather tool uses two methods to collect heap dumps, tried in order:
 
-1. **Inspector Protocol (Primary - Recommended)**: Uses the Node.js inspector and Chrome DevTools Protocol
+1. **Inspector Protocol (Primary)**: Uses the Node.js inspector and Chrome DevTools Protocol
 2. **SIGUSR2 Signal (Fallback)**: Sends a signal to trigger heap snapshot
 
-#### Option 1: Inspector Protocol (Recommended)
+#### Option 1: Inspector Protocol (Primary - No Configuration Required)
 
-Enable the Node.js inspector for the most reliable heap dump collection:
+The inspector protocol method **works out of the box** for most RHDH deployments without any configuration changes. The tool automatically:
+
+1. Sends SIGUSR1 to the Node.js process to activate the inspector dynamically
+2. Connects to the inspector via WebSocket
+3. Triggers a heap snapshot using `v8.writeHeapSnapshot()`
+4. Copies the heap dump file from the container
+
+**Benefits:**
+- No configuration changes required in most cases
+- Provides direct feedback on collection success/failure
+- Heap dump location is controlled by the must-gather tool
+
+**Optional: Pre-enable Inspector**
+
+If you prefer to have the inspector always enabled (e.g., for debugging), you can add:
 
 ```yaml
-# In your Deployment or Backstage CR
+# In your Deployment or Backstage CR (optional)
 spec:
   template:
     spec:
@@ -25,19 +39,11 @@ spec:
           value: "--inspect=0.0.0.0:9229"
 ```
 
-**Benefits:**
-- Most reliable method for heap dump collection
-- Works even if inspector wasn't enabled at startup (SIGUSR1 can activate it dynamically)
-- Provides direct feedback on collection success/failure
-- Heap dump location is controlled by the must-gather tool
-
 **Custom Inspector Port:**
 
 If you use a non-default port (e.g., `--inspect=0.0.0.0:9230`), the must-gather tool will automatically detect it from the process command line or NODE_OPTIONS environment variable.
 
-**Note:** Even without `--inspect` configured, the must-gather tool will attempt to activate the inspector dynamically by sending SIGUSR1 to the Node.js process.
-
-**Important - `--disable-sigusr1`:**
+**When Configuration IS Required:**
 
 If Node.js is started with the `--disable-sigusr1` flag, the dynamic inspector activation will not work. In this case, you **must** either:
 1. Remove `--disable-sigusr1` from your NODE_OPTIONS, or
@@ -47,7 +53,7 @@ If Node.js is started with the `--disable-sigusr1` flag, the dynamic inspector a
 
 #### Option 2: SIGUSR2 Signal (Fallback)
 
-If the inspector protocol fails, the tool falls back to sending SIGUSR2:
+If the inspector protocol fails, the tool falls back to sending SIGUSR2. **This method requires configuration:**
 
 ```yaml
 # In your Deployment or Backstage CR
