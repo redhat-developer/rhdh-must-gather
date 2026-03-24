@@ -57,6 +57,15 @@ RUN curl -fsSL "https://get.helm.sh/helm-v4.1.3-linux-amd64.tar.gz" -o helm.tar.
     && rm -rf helm.tar.gz linux-amd64 \
     && helm version
 
+# Install websocat (WebSocket CLI client)
+# Required for heap dump collection via the Node.js inspector protocol
+# Used to communicate with the Chrome DevTools Protocol over WebSocket
+# renovate: datasource=github-releases depName=vi/websocat
+RUN curl -fsSL "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl" \
+    -o /usr/local/bin/websocat \
+    && chmod +x /usr/local/bin/websocat \
+    && websocat --version
+
 # Create non-root user for running the container
 # Using UID 1001 which is commonly used and works well with OpenShift's arbitrary UID assignment
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils \

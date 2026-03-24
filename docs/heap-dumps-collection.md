@@ -4,7 +4,40 @@ When heap dumps are collected using `--with-heap-dumps`, they can be analyzed us
 
 ### Prerequisites for Heap Dump Collection
 
-Use Node.js's built-in `--heapsnapshot-signal` flag (available since Node.js v12.0.0):
+The must-gather tool uses two methods to collect heap dumps, tried in order:
+
+1. **Inspector Protocol (Primary - Recommended)**: Uses the Node.js inspector and Chrome DevTools Protocol
+2. **SIGUSR2 Signal (Fallback)**: Sends a signal to trigger heap snapshot
+
+#### Option 1: Inspector Protocol (Recommended)
+
+Enable the Node.js inspector for the most reliable heap dump collection:
+
+```yaml
+# In your Deployment or Backstage CR
+spec:
+  template:
+    spec:
+      containers:
+      - name: backstage-backend
+        env:
+        - name: NODE_OPTIONS
+          value: "--inspect=0.0.0.0:9229"
+```
+
+**Benefits:**
+- Most reliable method for heap dump collection
+- Works even if inspector wasn't enabled at startup (SIGUSR1 can activate it dynamically)
+- Provides direct feedback on collection success/failure
+- Heap dump location is controlled by the must-gather tool
+
+**Note:** Even without `--inspect` configured, the must-gather tool will attempt to activate the inspector dynamically by sending SIGUSR1 to the Node.js process.
+
+**Reference:** [Node.js Inspector Protocol](https://nodejs.org/en/learn/diagnostics/memory/using-heap-snapshot#4-trigger-heap-snapshot-using-inspector-protocol)
+
+#### Option 2: SIGUSR2 Signal (Fallback)
+
+If the inspector protocol fails, the tool falls back to sending SIGUSR2:
 
 ```yaml
 # In your Deployment or Backstage CR
@@ -121,11 +154,11 @@ Each heap dump collection includes metadata files:
 
 ### Tips and Best Practices
 
-- **Application instrumentation**: For reliable heap dump collection, instrument your Backstage application (see Prerequisites above)
+- **Application instrumentation**: For most reliable heap dump collection, add `--inspect=0.0.0.0:9229` to NODE_OPTIONS (see Prerequisites above). The tool can also try to activate the inspector dynamically via SIGUSR1.
 - **Large files**: Heap dumps can be 100MB-1GB+. Ensure sufficient disk space and bandwidth for analysis.
 - **Privacy**: Heap dumps may contain sensitive data from memory. Handle them securely and apply sanitization if sharing.
 - **Timing**: Collect heap dumps when memory usage is high or after OOM events for best results.
 - **Comparison**: Multiple snapshots over time help identify memory leaks vs. normal memory growth.
 - **Node.js version**: Ensure your analysis tools support the Node.js version used by the application.
-- **Collection methods**: The tool tries multiple approaches (kubectl debug, inspector, signals) but success depends on cluster permissions and application setup.
+- **Collection methods**: The tool tries two approaches in order: (1) Inspector Protocol via SIGUSR1 + port-forward + websocat, then (2) SIGUSR2 signal. Success depends on application setup - see Prerequisites above.
 - **Troubleshooting failures**: If collection fails, check `heap-dump.log` and `collection-failed.txt` for specific guidance on enabling heap dumps.

@@ -155,18 +155,22 @@ Usage: ./$(basename "$0") [params...]
   --with-heap-dumps             Collect heap dumps from running backstage-backend processes (opt-in, disabled by default)
                                 Heap dumps are collected immediately after pod logs for each deployment/CR
                                 Useful for troubleshooting memory leaks and performance issues
-                                
-                                IMPORTANT: Requires NODE_OPTIONS environment variable:
-                                  NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-                                
-                                Why these flags?
-                                  • --heapsnapshot-signal=SIGUSR2: Built into Node.js v12.0.0+, enables heap dumps
-                                  • --diagnostic-dir=/tmp: REQUIRED for read-only root filesystems
-                                
-                                No image rebuild or source code changes needed!
-                                
-                                Collection method: SIGUSR2 signal sent directly via kubectl exec
-                                Works with any Kubernetes version, no special RBAC permissions needed
+
+                                Collection Methods (tried in order):
+                                  1. Inspector Protocol (recommended) - uses Chrome DevTools Protocol
+                                  2. SIGUSR2 Signal (fallback) - sends signal to trigger heap snapshot
+
+                                For best results, configure NODE_OPTIONS in your Deployment/CR:
+
+                                  Option 1 (Recommended - Inspector Protocol):
+                                    NODE_OPTIONS="--inspect=0.0.0.0:9229"
+
+                                  Option 2 (Fallback - SIGUSR2):
+                                    NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+
+                                Note: Even without configuration, the tool will attempt to activate
+                                the inspector dynamically via SIGUSR1. No image rebuild needed!
+
                                 Warning: May take several minutes and generate large files (100MB-1GB+ per pod)
 
   Examples:
@@ -194,8 +198,9 @@ Usage: ./$(basename "$0") [params...]
   # Include secrets in collection (for detailed troubleshooting - secrets will be sanitized)
   ./$(basename "$0") --with-secrets
 
-  # Collect heap dumps for memory troubleshooting (requires app configured with NODE_OPTIONS)
-  # Prerequisites: Add NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp" to the backstage-backend container
+  # Collect heap dumps for memory troubleshooting
+  # For best results, add NODE_OPTIONS="--inspect=0.0.0.0:9229" to the backstage-backend container
+  # (The tool will also try to activate the inspector dynamically via SIGUSR1)
   ./$(basename "$0") --with-heap-dumps
 
   # Full diagnostic collection (secrets + heap dumps - generates large output)
