@@ -736,9 +736,12 @@ collect_heap_dump_via_inspector() {
 
   # Build the Runtime.evaluate command
   # We use v8.writeHeapSnapshot() which writes the heap dump directly to a file
-  # and returns the filename on success
-  local eval_expression="require('v8').writeHeapSnapshot('${remote_heap_file}')"
-  local eval_command="{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"${eval_expression}\",\"returnByValue\":true}}"
+  # and returns the filename on success.
+  #
+  # Note: The inspector's Runtime.evaluate doesn't have `require` in scope by default.
+  # We use dynamic import() which returns a Promise, with awaitPromise:true to wait for it.
+  local eval_expression="import('v8').then(v8 => v8.writeHeapSnapshot('${remote_heap_file}'))"
+  local eval_command="{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"${eval_expression}\",\"awaitPromise\":true,\"returnByValue\":true}}"
 
   echo "Sending Runtime.evaluate command: $eval_expression" >> "$log_file"
   echo "$eval_command" >&3
