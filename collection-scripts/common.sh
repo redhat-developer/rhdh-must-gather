@@ -532,8 +532,6 @@ collect_heap_dump_via_inspector() {
   local output_file="$5"
   local log_file="$6"
 
-  local inspector_port=9229
-  local local_port=$((9229 + RANDOM % 1000))  # Avoid port conflicts
   local inspector_timeout="${INSPECTOR_TIMEOUT:-30}"
   local port_forward_pid=""
 
@@ -558,28 +556,54 @@ collect_heap_dump_via_inspector() {
     echo ""
   } >> "$log_file"
 
+  # Detect inspector port from process command line or environment
+  # Default is 9229, but user may have configured a different port via --inspect=host:port
+  local inspector_port=9229
+  local detected_port=""
+
+  # Try to detect port from cmdline (--inspect=0.0.0.0:9230 or --inspect=:9230 or --inspect=9230)
+  detected_port=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
+    # Check cmdline for --inspect or --inspect-brk with custom port
+    cmdline=\$(cat /proc/$node_pid/cmdline 2>/dev/null | tr '\0' ' ')
+    # Match --inspect=host:port, --inspect=:port, or --inspect=port
+    echo \"\$cmdline\" | grep -oE '\\-\\-inspect(-brk)?=[^[:space:]]*' | head -1 | grep -oE '[0-9]+\$'
+  " 2>/dev/null) || true
+
+  if [[ -n "$detected_port" && "$detected_port" =~ ^[0-9]+$ ]]; then
+    inspector_port="$detected_port"
+    echo "Detected custom inspector port from cmdline: $inspector_port" >> "$log_file"
+  else
+    # Try to detect from NODE_OPTIONS environment variable
+    detected_port=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
+      env_opts=\$(cat /proc/$node_pid/environ 2>/dev/null | tr '\0' '\n' | grep '^NODE_OPTIONS=' | head -1)
+      echo \"\$env_opts\" | grep -oE '\\-\\-inspect(-brk)?=[^[:space:]]*' | head -1 | grep -oE '[0-9]+\$'
+    " 2>/dev/null) || true
+
+    if [[ -n "$detected_port" && "$detected_port" =~ ^[0-9]+$ ]]; then
+      inspector_port="$detected_port"
+      echo "Detected custom inspector port from NODE_OPTIONS: $inspector_port" >> "$log_file"
+    else
+      echo "Using default inspector port: $inspector_port" >> "$log_file"
+    fi
+  fi
+
+  local local_port=$((inspector_port + RANDOM % 1000))  # Avoid port conflicts
+
   # Step 1: Check if inspector is already enabled by looking for the port
-  log_debug "Checking if inspector is already active..."
+  # Convert port to hex for /proc/net/tcp lookup (e.g., 9229 -> 2411)
+  local port_hex
+  port_hex=$(printf '%04X' "$inspector_port")
+
+  log_debug "Checking if inspector is already active on port $inspector_port (hex: $port_hex)..."
   local inspector_active=false
   if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
-    # Check if something is listening on inspector port
-    if [ -d /proc/$node_pid/fd ]; then
-      for fd in /proc/$node_pid/fd/*; do
-        if [ -L \"\$fd\" ]; then
-          link=\$(readlink \"\$fd\" 2>/dev/null || true)
-          if echo \"\$link\" | grep -q 'socket:'; then
-            # Check if this socket is on port 9229
-            if grep -q ':2441' /proc/$node_pid/net/tcp 2>/dev/null; then
-              exit 0
-            fi
-          fi
-        fi
-      done
-    fi
-    exit 1
+    # Check if the inspector port is in use by looking at /proc/net/tcp
+    # Port is in hex format in the local_address column (second field after colon)
+    grep -qi ':$port_hex' /proc/net/tcp 2>/dev/null || \
+    grep -qi ':$port_hex' /proc/net/tcp6 2>/dev/null
   " 2>/dev/null; then
     inspector_active=true
-    echo "Inspector appears to be already active (port 9229 in use)" >> "$log_file"
+    echo "Inspector appears to be already active (port $inspector_port in use)" >> "$log_file"
   fi
 
   # Step 2: If inspector not active, send SIGUSR1 to activate it
@@ -1139,6 +1163,10 @@ _process_container_heap_dump() {
           echo "  - Most reliable method for heap dump collection"
           echo "  - Inspector can be activated dynamically via SIGUSR1"
           echo "  - Provides direct feedback on collection success"
+          echo "  - Custom ports are auto-detected (e.g., --inspect=0.0.0.0:9230)"
+          echo ""
+          echo "IMPORTANT: If NODE_OPTIONS contains --disable-sigusr1, you MUST"
+          echo "           add --inspect explicitly, as dynamic activation won't work."
           echo ""
           echo "Option 2: SIGUSR2 Signal (Fallback)"
           echo "---------------------------------------------------------"

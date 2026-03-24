@@ -31,7 +31,17 @@ spec:
 - Provides direct feedback on collection success/failure
 - Heap dump location is controlled by the must-gather tool
 
+**Custom Inspector Port:**
+
+If you use a non-default port (e.g., `--inspect=0.0.0.0:9230`), the must-gather tool will automatically detect it from the process command line or NODE_OPTIONS environment variable.
+
 **Note:** Even without `--inspect` configured, the must-gather tool will attempt to activate the inspector dynamically by sending SIGUSR1 to the Node.js process.
+
+**Important - `--disable-sigusr1`:**
+
+If Node.js is started with the `--disable-sigusr1` flag, the dynamic inspector activation will not work. In this case, you **must** either:
+1. Remove `--disable-sigusr1` from your NODE_OPTIONS, or
+2. Explicitly add `--inspect=0.0.0.0:9229` to NODE_OPTIONS to enable the inspector at startup
 
 **Reference:** [Node.js Inspector Protocol](https://nodejs.org/en/learn/diagnostics/memory/using-heap-snapshot#4-trigger-heap-snapshot-using-inspector-protocol)
 
