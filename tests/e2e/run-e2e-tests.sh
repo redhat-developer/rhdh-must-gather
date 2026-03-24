@@ -18,6 +18,7 @@
 #   --skip-helm         Skip Helm release test
 #   --skip-helm-standalone Skip standalone Helm deployment test
 #   --skip-operator     Skip Operator test
+#   --with-heap-dumps   Enable heap dump collection and validation
 #   --help              Show this help message
 #
 # Examples:
@@ -85,6 +86,7 @@ HELM_VALUES_FILE=""
 SKIP_HELM=false
 SKIP_HELM_STANDALONE=false
 SKIP_OPERATOR=false
+WITH_HEAP_DUMPS=false
 
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
@@ -127,6 +129,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-operator)
             SKIP_OPERATOR=true
+            shift
+            ;;
+        --with-heap-dumps)
+            WITH_HEAP_DUMPS=true
             shift
             ;;
         --help|-h)
@@ -178,6 +184,9 @@ if [ "$SKIP_HELM_STANDALONE" = true ]; then
 fi
 if [ "$SKIP_OPERATOR" = true ]; then
     log_info "Skipping Operator test (--skip-operator)"
+fi
+if [ "$WITH_HEAP_DUMPS" = true ]; then
+    log_info "Heap dump collection enabled (--with-heap-dumps)"
 fi
 
 # Ensure we're in the project root
@@ -483,13 +492,18 @@ log_info "=========================================="
 log_info "Running must-gather"
 log_info "=========================================="
 
+GATHER_OPTS=""
+if [ "$WITH_HEAP_DUMPS" = true ]; then
+    GATHER_OPTS="--with-heap-dumps"
+fi
+
 if [ "$LOCAL_MODE" = true ]; then
     log_info "Running in local mode"
     if [ -n "$OVERLAY" ]; then
         log_warn "--overlay option is not applicable in local mode, ignoring"
     fi
     log_info "Running make clean-out run-local..."
-    make clean-out run-local
+    make clean-out run-local OPTS="$GATHER_OPTS"
     OUTPUT_DIR="./out"
     if [ ! -d "$OUTPUT_DIR" ]; then
         log_error "No output directory found at $OUTPUT_DIR!"
@@ -509,7 +523,8 @@ elif is_openshift; then
     make deploy-openshift \
         REGISTRY="$REGISTRY" \
         IMAGE_NAME="$IMAGE_NAME" \
-        IMAGE_TAG="$IMAGE_TAG"
+        IMAGE_TAG="$IMAGE_TAG" \
+        OPTS="$GATHER_OPTS"
     # Find the output directory (most recent must-gather.local.* directory)
     OUTPUT_DIR=$(find . -maxdepth 1 -type d -name 'must-gather.local.*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$OUTPUT_DIR" ]; then
@@ -531,7 +546,8 @@ else
         REGISTRY="$REGISTRY" \
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
-        OVERLAY="$OVERLAY"
+        OVERLAY="$OVERLAY" \
+        OPTS="$GATHER_OPTS"
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$OUTPUT_TARBALL" ]; then
@@ -605,6 +621,21 @@ if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
         --cr "$NS_OPERATOR:$BACKSTAGE_CR:2" \
         --cr "$NS_STATEFULSET:$BACKSTAGE_CR_STATEFULSET:1"; then
         log_error "Operator validation failed!"
+        ((VALIDATION_FAILURES++))
+    fi
+fi
+
+# Heap dump validation (only when --with-heap-dumps is enabled)
+# Uses standalone Helm deployment since it has a running Node.js process
+if [ "$WITH_HEAP_DUMPS" = true ] && [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
+    log_info ""
+    log_info "Running heap dump validation..."
+    if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
+        --output-dir "$OUTPUT_DIR" \
+        --namespace "$NS_STANDALONE" \
+        --deployment "$STANDALONE_DEPLOY" \
+        --type standalone; then
+        log_error "Heap dump validation failed!"
         ((VALIDATION_FAILURES++))
     fi
 fi
