@@ -108,12 +108,14 @@ test: test-setup ## Run all unit tests
 
 LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of local mode
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
+HEAP_DUMP_METHOD ?= ## Heap dump method: 'inspector' (default) or 'sigusr2'
 .PHONY: test-e2e
 test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
 	@./tests/e2e/run-e2e-tests.sh --local \
-		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps)
+		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
+		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)")
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
 	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
@@ -122,7 +124,8 @@ else
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
 		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)") \
-		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps)
+		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
+		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)")
 endif
 
 .PHONY: $(TOOLS_DIR)

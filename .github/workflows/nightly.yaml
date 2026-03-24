@@ -60,8 +60,12 @@ jobs:
           retention-days: 7
 
   e2e-tests-heap-dumps:
-    name: Nightly E2E Tests (Heap Dumps)
+    name: Nightly E2E Tests (Heap Dumps - ${{ matrix.method }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        method: [default, inspector, sigusr2]
 
     steps:
       - name: Checkout repository
@@ -80,11 +84,16 @@ jobs:
       - name: Create Kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
-          cluster_name: rhdh-must-gather-e2e-heap
+          cluster_name: rhdh-must-gather-e2e-heap-${{ matrix.method }}
           wait: 120s
 
-      - name: Run E2E tests with heap dumps
-        run: make test-e2e LOCAL=false WITH_HEAP_DUMPS=true
+      - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
+        run: |
+          if [ "${{ matrix.method }}" = "default" ]; then
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true
+          else
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }}
+          fi
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
@@ -95,7 +104,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
-          name: e2e-must-gather-output-heap-dumps-nightly
+          name: e2e-must-gather-output-heap-dumps-${{ matrix.method }}-nightly
           path: e2e-cluster.mustgather.tar.gz
           retention-days: 7
 
@@ -103,7 +112,7 @@ jobs:
         if: ${{ success() || failure() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
-          name: must-gather-output-heap-dumps-nightly
+          name: must-gather-output-heap-dumps-${{ matrix.method }}-nightly
           path: |
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/

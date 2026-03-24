@@ -19,6 +19,7 @@
 #   --skip-helm-standalone Skip standalone Helm deployment test
 #   --skip-operator     Skip Operator test
 #   --with-heap-dumps   Enable heap dump collection and validation
+#   --heap-dump-method <method>  Heap dump method: 'inspector' (default) or 'sigusr2'
 #   --help              Show this help message
 #
 # Examples:
@@ -87,6 +88,7 @@ SKIP_HELM=false
 SKIP_HELM_STANDALONE=false
 SKIP_OPERATOR=false
 WITH_HEAP_DUMPS=false
+HEAP_DUMP_METHOD=""
 
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
@@ -134,6 +136,10 @@ while [[ $# -gt 0 ]]; do
         --with-heap-dumps)
             WITH_HEAP_DUMPS=true
             shift
+            ;;
+        --heap-dump-method)
+            HEAP_DUMP_METHOD="$2"
+            shift 2
             ;;
         --help|-h)
             show_help
@@ -187,6 +193,9 @@ if [ "$SKIP_OPERATOR" = true ]; then
 fi
 if [ "$WITH_HEAP_DUMPS" = true ]; then
     log_info "Heap dump collection enabled (--with-heap-dumps)"
+    if [ -n "$HEAP_DUMP_METHOD" ]; then
+        log_info "Heap dump method: $HEAP_DUMP_METHOD"
+    fi
 fi
 
 # Ensure we're in the project root
@@ -495,6 +504,9 @@ log_info "=========================================="
 GATHER_OPTS=""
 if [ "$WITH_HEAP_DUMPS" = true ]; then
     GATHER_OPTS="--with-heap-dumps"
+    if [ -n "$HEAP_DUMP_METHOD" ]; then
+        GATHER_OPTS="$GATHER_OPTS --heap-dump-method $HEAP_DUMP_METHOD"
+    fi
 fi
 
 if [ "$LOCAL_MODE" = true ]; then
