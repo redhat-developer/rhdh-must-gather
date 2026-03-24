@@ -532,7 +532,7 @@ collect_heap_dump_via_inspector() {
   local output_file="$5"
   local log_file="$6"
 
-  local inspector_timeout="${INSPECTOR_TIMEOUT:-30}"
+  local inspector_timeout="${HEAP_DUMP_TIMEOUT:-120}"
   local port_forward_pid=""
 
   # Cleanup function
