@@ -607,18 +607,45 @@ collect_heap_dump_via_inspector() {
 
   # Wait for port-forward to be ready
   local wait_count=0
+  local curl_err=""
   while ! curl -s "http://localhost:$local_port/json" >/dev/null 2>&1; do
     sleep 0.5
     wait_count=$((wait_count + 1))
     if [[ $wait_count -gt 20 ]]; then
-      echo "Timeout waiting for port-forward to be ready" >> "$log_file"
+      {
+        echo "Timeout waiting for port-forward to be ready (waited 10 seconds)"
+        echo ""
+        echo "=== Port-forward diagnostics ==="
+        echo "Local port: $local_port"
+        echo "Target: $pod:$inspector_port"
+        echo ""
+        echo "Curl error (last attempt):"
+        curl -s "http://localhost:$local_port/json" 2>&1 || true
+        echo ""
+        echo "Possible causes:"
+        echo "  - Inspector not listening on port $inspector_port"
+        echo "  - Node.js process doesn't support SIGUSR1 inspector activation"
+        echo "  - Network policy blocking the connection"
+        echo "  - Inspector bound to 127.0.0.1 instead of 0.0.0.0"
+      } >> "$log_file"
       log_warn "Port-forward failed to establish connection to inspector"
       cleanup_port_forward
       return 1
     fi
     # Check if port-forward process is still running
     if ! kill -0 "$port_forward_pid" 2>/dev/null; then
-      echo "Port-forward process died unexpectedly" >> "$log_file"
+      {
+        echo "Port-forward process died unexpectedly"
+        echo ""
+        echo "=== Port-forward diagnostics ==="
+        echo "The kubectl port-forward process terminated before connection was established."
+        echo "This usually means the target port ($inspector_port) is not open in the container."
+        echo ""
+        echo "Possible causes:"
+        echo "  - Inspector not enabled (Node.js not started with --inspect)"
+        echo "  - SIGUSR1 failed to activate the inspector"
+        echo "  - Container security context prevents port binding"
+      } >> "$log_file"
       log_warn "Port-forward process terminated"
       cleanup_port_forward
       return 1
@@ -689,7 +716,17 @@ collect_heap_dump_via_inspector() {
 
     # Check if websocat is still running
     if ! kill -0 "$websocat_pid" 2>/dev/null; then
-      echo "Websocat process ended" >> "$log_file"
+      local websocat_exit_code=0
+      wait "$websocat_pid" 2>/dev/null || websocat_exit_code=$?
+      {
+        echo "Websocat process ended prematurely (exit code: $websocat_exit_code)"
+        echo "Time elapsed: ${wait_time}s of ${max_wait}s timeout"
+        if [[ -f "$outfile" && -s "$outfile" ]]; then
+          echo "Partial output received ($(stat -c%s "$outfile" 2>/dev/null || echo "?") bytes)"
+        else
+          echo "No output received before websocat exited"
+        fi
+      } >> "$log_file"
       break
     fi
 
@@ -708,7 +745,21 @@ collect_heap_dump_via_inspector() {
   fi
 
   if [[ "$snapshot_complete" != "true" ]]; then
-    echo "Timeout or error waiting for heap snapshot completion" >> "$log_file"
+    {
+      echo "Timeout or error waiting for heap snapshot completion"
+      echo ""
+      echo "=== Inspector Response (raw output) ==="
+      if [[ -f "$outfile" && -s "$outfile" ]]; then
+        echo "Output file size: $(stat -c%s "$outfile" 2>/dev/null || echo "unknown") bytes"
+        echo "First 2000 chars of response:"
+        head -c 2000 "$outfile" 2>/dev/null || echo "(could not read output)"
+        echo ""
+        echo "Last 1000 chars of response:"
+        tail -c 1000 "$outfile" 2>/dev/null || echo "(could not read output)"
+      else
+        echo "No output received from inspector (file empty or missing)"
+      fi
+    } >> "$log_file"
     log_warn "Heap snapshot via inspector did not complete in time"
     cleanup_port_forward
     rm -f "$fifo" "$outfile"
@@ -723,9 +774,15 @@ collect_heap_dump_via_inspector() {
 
   log_info "Extracting heap snapshot data..."
 
+  # Count how many chunks we received
+  local chunk_count=0
+  chunk_count=$(grep -c 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null || echo "0")
+  echo "Found $chunk_count heap snapshot chunks in inspector response" >> "$log_file"
+
   # Extract all chunks and concatenate them
+  local extract_error=""
   if grep -o '{"method":"HeapProfiler.addHeapSnapshotChunk"[^}]*}' "$outfile" 2>/dev/null | \
-     jq -r '.params.chunk' 2>/dev/null | \
+     jq -r '.params.chunk' 2>"$outfile.jq_err" | \
      tr -d '\n' > "$output_file"; then
 
     local file_size
@@ -737,18 +794,55 @@ collect_heap_dump_via_inspector() {
       echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
       log_success "Heap dump collected via inspector protocol ($human_size)"
       cleanup_port_forward
-      rm -f "$fifo" "$outfile"
+      rm -f "$fifo" "$outfile" "$outfile.jq_err"
       return 0
     else
       echo "Heap snapshot file too small ($file_size bytes), likely incomplete" >> "$log_file"
       rm -f "$output_file"
     fi
+  else
+    extract_error="grep/jq pipeline failed"
   fi
 
-  echo "Failed to extract heap snapshot data from inspector response" >> "$log_file"
+  # Capture detailed diagnostic information on failure
+  {
+    echo ""
+    echo "=== Heap Snapshot Extraction Failed ==="
+    echo "Error: ${extract_error:-unknown}"
+    echo "Chunks found: $chunk_count"
+    echo ""
+    if [[ -f "$outfile.jq_err" && -s "$outfile.jq_err" ]]; then
+      echo "=== jq errors ==="
+      cat "$outfile.jq_err"
+      echo ""
+    fi
+    echo "=== Inspector Response Analysis ==="
+    if [[ -f "$outfile" && -s "$outfile" ]]; then
+      local outfile_size
+      outfile_size=$(stat -c%s "$outfile" 2>/dev/null || echo "unknown")
+      echo "Raw output file size: $outfile_size bytes"
+      echo ""
+      echo "Response methods found:"
+      grep -o '"method":"[^"]*"' "$outfile" 2>/dev/null | sort | uniq -c | head -20 || echo "(none)"
+      echo ""
+      echo "Error responses (if any):"
+      grep -i '"error"' "$outfile" 2>/dev/null | head -10 || echo "(none)"
+      echo ""
+      echo "First 2000 chars of raw response:"
+      head -c 2000 "$outfile" 2>/dev/null || echo "(could not read)"
+      echo ""
+      echo "..."
+      echo ""
+      echo "Last 1000 chars of raw response:"
+      tail -c 1000 "$outfile" 2>/dev/null || echo "(could not read)"
+    else
+      echo "No output received from inspector"
+    fi
+  } >> "$log_file"
+
   log_warn "Failed to extract heap snapshot from inspector protocol response"
   cleanup_port_forward
-  rm -f "$fifo" "$outfile"
+  rm -f "$fifo" "$outfile" "$outfile.jq_err"
   return 1
 }
 
