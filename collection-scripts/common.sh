@@ -800,8 +800,29 @@ collect_heap_dumps_for_pods() {
         log_debug "Skipping container $container (only collecting from backstage-backend)"
         continue
       fi
-      
+
       log_info "Processing backstage-backend container in pod: $pod"
+
+      # Wrap entire container processing in error handling to ensure we continue on failure
+      # This is a safety net for any unexpected errors
+      if ! _process_container_heap_dump "$ns" "$pod" "$container" "$pod_dir" "$HEAP_DUMP_TIMEOUT"; then
+        log_warn "Heap dump collection encountered an error for $pod/$container, continuing to next container"
+        continue
+      fi
+    done
+  done
+
+  log_success "Heap dump collection completed for namespace: $ns"
+}
+
+# Internal function to process heap dump for a single container
+# Separated to allow proper error handling without affecting the main loop
+_process_container_heap_dump() {
+  local ns="$1"
+  local pod="$2"
+  local container="$3"
+  local pod_dir="$4"
+  local HEAP_DUMP_TIMEOUT="$5"
       
       # Find the Node.js process PID in the backstage-backend container
       # Using /proc filesystem as it's always available in Linux containers
@@ -836,7 +857,7 @@ collect_heap_dumps_for_pods() {
           echo "${_pid_err:-No error output captured}"
         } > "$container_dir/no-node-process.txt"
         node_pid=""
-        continue
+        return 1
       fi
 
       if [[ -z "$node_pid" ]]; then
@@ -846,7 +867,7 @@ collect_heap_dumps_for_pods() {
         echo "No Node.js process found in backstage-backend container" > "$container_dir/no-node-process.txt"
         echo "Searched /proc filesystem for node process" >> "$container_dir/no-node-process.txt"
         echo "This usually means the container is not running a Node.js application" >> "$container_dir/no-node-process.txt"
-        continue
+        return 1
       fi
       
       log_info "Found Node.js process (PID: $node_pid) in backstage-backend container"
@@ -901,14 +922,18 @@ collect_heap_dumps_for_pods() {
       log_info "Attempting heap dump collection via inspector protocol..."
       local inspector_heap_file="$container_dir/${heap_file}"
 
+      # Wrap in error handling to ensure we continue to next container on any failure
+      local inspector_error=""
       if collect_heap_dump_via_inspector "$ns" "$pod" "$container" "$node_pid" \
-           "$inspector_heap_file" "$container_dir/heap-dump.log"; then
+           "$inspector_heap_file" "$container_dir/heap-dump.log" 2>&1; then
         heap_collected=true
         log_success "Heap dump collected via inspector protocol"
       else
-        log_info "Inspector protocol method failed, trying SIGUSR2 fallback..."
+        inspector_error=$?
+        log_info "Inspector protocol method failed (exit code: $inspector_error), trying SIGUSR2 fallback..."
         echo "" >> "$container_dir/heap-dump.log"
         echo "=== Falling back to SIGUSR2 method ===" >> "$container_dir/heap-dump.log"
+        echo "Inspector protocol failed with exit code: $inspector_error" >> "$container_dir/heap-dump.log"
       fi
 
       # =====================================================================
@@ -1054,10 +1079,9 @@ collect_heap_dumps_for_pods() {
 
         log_info "Created guidance file: $container_dir/collection-failed.txt"
       fi
-    done
-  done
-  
-  log_success "Heap dump collection completed for namespace: $ns"
+
+  # Return success - heap dump collection completed (whether successful or not)
+  return 0
 }
 
 collect_rhdh_data() {
@@ -1096,7 +1120,8 @@ collect_rhdh_data() {
       collect_rhdh_info_from_running_pods "$ns" "$labels" "$deploy_dir"
 
       # Collect heap dumps right after collecting logs (if enabled)
-      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir"
+      # Use || true to ensure heap dump failures don't stop the entire collection
+      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir" || true
 
       pods_dir="$deploy_dir/pods"
       ensure_directory "$pods_dir"
