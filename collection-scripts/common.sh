@@ -696,10 +696,17 @@ collect_heap_dump_via_inspector() {
   ws_url=$(echo "$ws_url" | sed "s|ws://[^:]*:|ws://localhost:|" | sed "s|:$inspector_port/|:$local_port/|")
   echo "WebSocket URL: $ws_url" >> "$log_file"
 
-  # Step 5: Use websocat to trigger heap dump via inspector protocol
+  # Step 5: Use websocat to trigger heap dump via Runtime.evaluate
+  # This approach uses v8.writeHeapSnapshot() which writes directly to the container filesystem,
+  # avoiding the need to stream and reassemble chunks over WebSocket.
   log_info "Triggering heap dump via inspector protocol..."
   echo "" >> "$log_file"
   echo "=== Inspector Protocol Communication ===" >> "$log_file"
+
+  # Generate a unique filename for the heap dump inside the container
+  local timestamp
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  local remote_heap_file="/tmp/heapdump-${timestamp}-$$.heapsnapshot"
 
   # Create temp files for communication
   local fifo="/tmp/inspector_fifo_$$"
@@ -709,53 +716,59 @@ collect_heap_dump_via_inspector() {
   touch "$outfile"
 
   # Start websocat in background
-  # -B sets buffer size large enough for heap snapshot chunks (10GB)
-  websocat -B 10000000000 "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
+  websocat "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
   local websocat_pid=$!
+
+  # Give websocat a moment to connect
+  sleep 0.5
+
+  # Check if websocat is still running (connection succeeded)
+  if ! kill -0 "$websocat_pid" 2>/dev/null; then
+    echo "Websocat failed to connect to inspector WebSocket" >> "$log_file"
+    log_warn "Failed to establish WebSocket connection to inspector"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 1
+  fi
 
   # Open fifo for writing
   exec 3>"$fifo"
 
-  # Send commands to inspector
-  echo '{"id":1,"method":"HeapProfiler.enable"}' >&3
-  sleep 0.5
-  echo '{"id":2,"method":"HeapProfiler.takeHeapSnapshot","params":{"reportProgress":false}}' >&3
+  # Build the Runtime.evaluate command
+  # We use v8.writeHeapSnapshot() which writes the heap dump directly to a file
+  # and returns the filename on success
+  local eval_expression="require('v8').writeHeapSnapshot('${remote_heap_file}')"
+  local eval_command="{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"${eval_expression}\",\"returnByValue\":true}}"
 
-  echo "Sent HeapProfiler.enable and HeapProfiler.takeHeapSnapshot commands" >> "$log_file"
+  echo "Sending Runtime.evaluate command: $eval_expression" >> "$log_file"
+  echo "$eval_command" >&3
 
-  # Wait for heap snapshot to complete
-  # The response will have id:2 with an empty result {} when done
-  local snapshot_complete=false
+  # Wait for the response
   local wait_time=0
   local max_wait=$inspector_timeout
+  local response_received=false
 
-  while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
+  while [[ "$response_received" != "true" && $wait_time -lt $max_wait ]]; do
     sleep 1
     wait_time=$((wait_time + 1))
 
-    # Check if we got the completion response
-    if grep -q '"id":2.*"result":{}' "$outfile" 2>/dev/null; then
-      snapshot_complete=true
+    # Check if we got a response with id:1
+    if grep -q '"id":1' "$outfile" 2>/dev/null; then
+      response_received=true
     fi
 
     # Check if websocat is still running
     if ! kill -0 "$websocat_pid" 2>/dev/null; then
-      local websocat_exit_code=0
-      wait "$websocat_pid" 2>/dev/null || websocat_exit_code=$?
-      {
-        echo "Websocat process ended prematurely (exit code: $websocat_exit_code)"
-        echo "Time elapsed: ${wait_time}s of ${max_wait}s timeout"
-        if [[ -f "$outfile" && -s "$outfile" ]]; then
-          echo "Partial output received ($(stat -c%s "$outfile" 2>/dev/null || echo "?") bytes)"
-        else
-          echo "No output received before websocat exited"
-        fi
-      } >> "$log_file"
+      echo "Websocat process ended after ${wait_time}s" >> "$log_file"
+      # Check if we got a response before it ended
+      if grep -q '"id":1' "$outfile" 2>/dev/null; then
+        response_received=true
+      fi
       break
     fi
 
-    if [[ $((wait_time % 5)) -eq 0 ]]; then
-      log_debug "Waiting for heap snapshot... ($wait_time/$max_wait seconds)"
+    if [[ $((wait_time % 10)) -eq 0 ]]; then
+      log_debug "Waiting for heap snapshot to be written... ($wait_time/$max_wait seconds)"
     fi
   done
 
@@ -768,184 +781,81 @@ collect_heap_dump_via_inspector() {
     wait "$websocat_pid" 2>/dev/null || true
   fi
 
-  if [[ "$snapshot_complete" != "true" ]]; then
-    {
-      echo "Timeout or error waiting for heap snapshot completion"
-      echo ""
-      echo "=== Inspector Response (raw output) ==="
-      if [[ -f "$outfile" && -s "$outfile" ]]; then
-        echo "Output file size: $(stat -c%s "$outfile" 2>/dev/null || echo "unknown") bytes"
-        echo "First 2000 chars of response:"
-        head -c 2000 "$outfile" 2>/dev/null || echo "(could not read output)"
-        echo ""
-        echo "Last 1000 chars of response:"
-        tail -c 1000 "$outfile" 2>/dev/null || echo "(could not read output)"
-      else
-        echo "No output received from inspector (file empty or missing)"
-      fi
-    } >> "$log_file"
-    log_warn "Heap snapshot via inspector did not complete in time"
+  echo "" >> "$log_file"
+  echo "=== Inspector Response ===" >> "$log_file"
+  cat "$outfile" >> "$log_file" 2>/dev/null || true
+  echo "" >> "$log_file"
+
+  if [[ "$response_received" != "true" ]]; then
+    echo "Timeout waiting for Runtime.evaluate response (waited ${wait_time}s)" >> "$log_file"
+    log_warn "Heap snapshot via inspector timed out"
     cleanup_port_forward
     rm -f "$fifo" "$outfile"
     return 1
   fi
 
-  echo "Heap snapshot completed, extracting data..." >> "$log_file"
+  # Parse the response to check for success or error
+  local response
+  response=$(cat "$outfile" 2>/dev/null)
 
-  # Step 6: Extract heap snapshot from the output
-  # The output contains multiple JSON lines, including HeapProfiler.addHeapSnapshotChunk events
-  # Each line is a complete JSON object: {"method":"HeapProfiler.addHeapSnapshotChunk","params":{"chunk":"..."}}
-  #
-  # Note: The WebSocket output may contain control characters that jq cannot parse directly.
-  # We use a line-by-line approach with error handling to extract as many chunks as possible.
-
-  log_info "Extracting heap snapshot data..."
-
-  # Count how many chunks we received
-  local chunk_count=0
-  chunk_count=$(grep -c 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null || echo "0")
-  echo "Found $chunk_count heap snapshot chunks in inspector response" >> "$log_file"
-
-  # Extract all chunks and concatenate them
-  # The inspector response may contain control characters that jq cannot parse.
-  # We try multiple extraction methods in order of reliability.
-  local extract_error=""
-  local extracted_chunks=0
-  local failed_chunks=0
-
-  # Clear output file and jq error file
-  : > "$output_file"
-  : > "$outfile.jq_err"
-
-  # Method 1: Try jq with slurp mode to handle the entire file
-  # This works if each JSON message is on its own line
-  echo "Attempting extraction method 1: jq line-by-line..." >> "$log_file"
-  while IFS= read -r line; do
-    # Try to extract chunk from this line using jq
-    if chunk=$(echo "$line" | jq -j '.params.chunk // empty' 2>>"$outfile.jq_err"); then
-      if [[ -n "$chunk" ]]; then
-        printf '%s' "$chunk" >> "$output_file"
-        extracted_chunks=$((extracted_chunks + 1))
-      fi
-    else
-      failed_chunks=$((failed_chunks + 1))
-    fi
-  done < <(grep 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null)
-
-  echo "Method 1 result: extracted=$extracted_chunks, failed=$failed_chunks" >> "$log_file"
-
-  # Method 2: If jq failed on all chunks, try Python-based extraction
-  # Python's json module is more lenient with control characters
-  if [[ $extracted_chunks -eq 0 && $chunk_count -gt 0 ]]; then
-    echo "Attempting extraction method 2: Python json module..." >> "$log_file"
-
-    if command -v python3 >/dev/null 2>&1; then
-      python3 -c "
-import sys, json
-for line in sys.stdin:
-    line = line.strip()
-    if 'HeapProfiler.addHeapSnapshotChunk' in line:
-        try:
-            obj = json.loads(line)
-            chunk = obj.get('params', {}).get('chunk', '')
-            if chunk:
-                sys.stdout.write(chunk)
-        except json.JSONDecodeError:
-            pass  # Skip malformed lines
-" < "$outfile" > "$output_file" 2>>"$outfile.jq_err"
-
-      if [[ -s "$output_file" ]]; then
-        extracted_chunks=$chunk_count  # Assume all chunks extracted if output is non-empty
-        echo "Method 2 (Python) succeeded: $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
-      else
-        echo "Method 2 (Python) produced no output" >> "$log_file"
-      fi
-    else
-      echo "Method 2 skipped: Python3 not available" >> "$log_file"
-    fi
+  # Check for exception/error in response
+  if echo "$response" | grep -q '"exceptionDetails"'; then
+    local error_msg
+    error_msg=$(echo "$response" | jq -r '.result.exceptionDetails.exception.description // .result.exceptionDetails.text // "unknown error"' 2>/dev/null || echo "unknown error")
+    echo "Runtime.evaluate failed with exception: $error_msg" >> "$log_file"
+    log_warn "Heap snapshot failed: $error_msg"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 1
   fi
 
-  # Method 3: Last resort - use sed to extract chunk content (fragile but may work)
-  if [[ ! -s "$output_file" && $chunk_count -gt 0 ]]; then
-    echo "Attempting extraction method 3: sed-based extraction..." >> "$log_file"
+  # Check if we got a successful result (the filename should be returned)
+  local result_value
+  result_value=$(echo "$response" | jq -r '.result.result.value // empty' 2>/dev/null)
 
-    # Extract everything between "chunk":" and the final "}}
-    # Then unescape common JSON escapes
-    grep 'HeapProfiler.addHeapSnapshotChunk' "$outfile" 2>/dev/null | \
-    sed 's/.*"chunk":"//; s/"}}$//' | \
-    sed 's/\\"/"/g; s/\\\\/\\/g' >> "$output_file"
-
-    if [[ -s "$output_file" ]]; then
-      echo "Method 3 (sed) produced: $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
-    else
-      echo "Method 3 (sed) produced no output" >> "$log_file"
-    fi
+  if [[ -z "$result_value" ]]; then
+    echo "Runtime.evaluate did not return expected result" >> "$log_file"
+    echo "Response: $response" >> "$log_file"
+    log_warn "Heap snapshot command did not return filename"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 1
   fi
 
-  echo "Final extraction: output file size = $(stat -c%s "$output_file" 2>/dev/null || echo "0") bytes" >> "$log_file"
+  echo "Heap snapshot written to container: $result_value" >> "$log_file"
+  log_info "Heap snapshot created at $result_value, copying to output..."
 
-  if [[ -s "$output_file" ]]; then
+  # Clean up WebSocket resources
+  cleanup_port_forward
+  rm -f "$fifo" "$outfile"
 
+  # Copy the heap dump file from the container
+  if $KUBECTL_CMD cp -n "$ns" "${pod}:${result_value}" "$output_file" -c "$container" >> "$log_file" 2>&1; then
     local file_size
     file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
 
     if [[ "$file_size" -gt 1000 ]]; then
       local human_size
       human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
-      echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
+      echo "Heap snapshot copied successfully: $output_file ($human_size)" >> "$log_file"
       log_success "Heap dump collected via inspector protocol ($human_size)"
-      cleanup_port_forward
-      rm -f "$fifo" "$outfile" "$outfile.jq_err"
+
+      # Clean up remote file
+      $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$result_value" 2>/dev/null || true
+
       return 0
     else
-      echo "Heap snapshot file too small ($file_size bytes), likely incomplete" >> "$log_file"
+      echo "Copied file too small ($file_size bytes), may be corrupted" >> "$log_file"
       rm -f "$output_file"
     fi
   else
-    extract_error="grep/jq pipeline failed"
+    echo "Failed to copy heap snapshot from container" >> "$log_file"
   fi
 
-  # Capture detailed diagnostic information on failure
-  {
-    echo ""
-    echo "=== Heap Snapshot Extraction Failed ==="
-    echo "Error: ${extract_error:-extraction produced no usable data}"
-    echo "Chunks in response: $chunk_count"
-    echo "Chunks extracted: $extracted_chunks"
-    echo "Chunks failed: $failed_chunks"
-    echo ""
-    if [[ -f "$outfile.jq_err" && -s "$outfile.jq_err" ]]; then
-      echo "=== jq errors (first 50 lines) ==="
-      head -50 "$outfile.jq_err"
-      echo ""
-    fi
-    echo "=== Inspector Response Analysis ==="
-    if [[ -f "$outfile" && -s "$outfile" ]]; then
-      local outfile_size
-      outfile_size=$(stat -c%s "$outfile" 2>/dev/null || echo "unknown")
-      echo "Raw output file size: $outfile_size bytes"
-      echo ""
-      echo "Response methods found:"
-      grep -o '"method":"[^"]*"' "$outfile" 2>/dev/null | sort | uniq -c | head -20 || echo "(none)"
-      echo ""
-      echo "Error responses (if any):"
-      grep -i '"error"' "$outfile" 2>/dev/null | head -10 || echo "(none)"
-      echo ""
-      echo "First 2000 chars of raw response:"
-      head -c 2000 "$outfile" 2>/dev/null || echo "(could not read)"
-      echo ""
-      echo "..."
-      echo ""
-      echo "Last 1000 chars of raw response:"
-      tail -c 1000 "$outfile" 2>/dev/null || echo "(could not read)"
-    else
-      echo "No output received from inspector"
-    fi
-  } >> "$log_file"
+  # Try to clean up remote file even on failure
+  $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$result_value" 2>/dev/null || true
 
-  log_warn "Failed to extract heap snapshot from inspector protocol response"
-  cleanup_port_forward
-  rm -f "$fifo" "$outfile" "$outfile.jq_err"
+  log_warn "Failed to retrieve heap snapshot from container"
   return 1
 }
 
