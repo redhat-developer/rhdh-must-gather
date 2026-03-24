@@ -58,3 +58,53 @@ jobs:
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/
           retention-days: 7
+
+  e2e-tests-heap-dumps:
+    name: Nightly E2E Tests (Heap Dumps)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+          # Install yq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: rhdh-must-gather-e2e-heap
+          wait: 120s
+
+      - name: Run E2E tests with heap dumps
+        run: make test-e2e LOCAL=false WITH_HEAP_DUMPS=true
+
+      - name: Display must-gather process logs
+        if: ${{ success() || failure() }}
+        run: |
+          cat rhdh-must-gather-output.k8s.*/must-gather.log || true
+
+      - name: Upload E2E must-gather output in case of failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: e2e-must-gather-output-heap-dumps-nightly
+          path: e2e-cluster.mustgather.tar.gz
+          retention-days: 7
+
+      - name: Upload must-gather output
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: must-gather-output-heap-dumps-nightly
+          path: |
+            rhdh-must-gather-output.k8s.*.tar.gz
+            rhdh-must-gather-output.k8s.*/
+          retention-days: 7
