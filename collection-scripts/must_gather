@@ -25,6 +25,7 @@ excluded_scripts=()
 target_namespaces=""
 with_secrets="false"
 with_heap_dumps="false"
+heap_dump_method="inspector"
 
 function main() {
 
@@ -86,6 +87,34 @@ function parse_flags {
         ;;
       --with-heap-dumps)
         with_heap_dumps="true"
+        ;;
+      --heap-dump-method)
+        if [[ -n "${2:-}" ]]; then
+          case "$2" in
+            inspector|sigusr2)
+              heap_dump_method="$2"
+              ;;
+            *)
+              log_error "--heap-dump-method must be 'inspector' or 'sigusr2'"
+              exit 1
+              ;;
+          esac
+          shift
+        else
+          log_error "--heap-dump-method requires a value (inspector or sigusr2)"
+          exit 1
+        fi
+        ;;
+      --heap-dump-method=*)
+        case "${1#*=}" in
+          inspector|sigusr2)
+            heap_dump_method="${1#*=}"
+            ;;
+          *)
+            log_error "--heap-dump-method must be 'inspector' or 'sigusr2'"
+            exit 1
+            ;;
+        esac
         ;;
       --namespaces)
         if [[ -n "${2:-}" ]]; then
@@ -159,14 +188,6 @@ Usage: ./$(basename "$0") [params...]
                                 NO CONFIGURATION REQUIRED for most deployments!
                                 The tool automatically activates the Node.js inspector via SIGUSR1.
 
-                                Collection Methods (tried in order):
-                                  1. Inspector Protocol (primary) - activates inspector via SIGUSR1,
-                                     then uses v8.writeHeapSnapshot() via Chrome DevTools Protocol
-                                  2. SIGUSR2 Signal (fallback) - requires NODE_OPTIONS configuration
-
-                                If the primary method fails, configure NODE_OPTIONS for the fallback:
-                                  NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-
                                 WARNING: The application will be PAUSED while the heap snapshot is being
                                 written. For large heaps (1GB+), this can take 30-60+ seconds during which
                                 the application will not respond to requests. Plan accordingly.
@@ -174,6 +195,14 @@ Usage: ./$(basename "$0") [params...]
                                 WARNING: May take several minutes and generate large files (100MB-1GB+ per pod).
                                 For very large heaps, override HEAP_DUMP_TIMEOUT (default: 600 seconds):
                                   HEAP_DUMP_TIMEOUT=900 ./gather --with-heap-dumps
+
+  --heap-dump-method <method>   Choose the heap dump collection method (default: inspector)
+                                  inspector - Activates Node.js inspector via SIGUSR1, then uses
+                                              v8.writeHeapSnapshot() via Chrome DevTools Protocol.
+                                              Works without configuration for most deployments.
+                                  sigusr2   - Sends SIGUSR2 signal to trigger heap snapshot.
+                                              Requires NODE_OPTIONS configuration:
+                                              NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
 
   Examples:
   # Default collection (includes Namespace inspect for OMC compatibility)
@@ -236,10 +265,11 @@ function run_scripts {
     log_info "Secret collection disabled by default (use --with-secrets to enable)"
   fi
 
-  # Export heap dump collection flag
+  # Export heap dump collection flag and method
   export RHDH_WITH_HEAP_DUMPS="${with_heap_dumps:-}"
+  export RHDH_HEAP_DUMP_METHOD="${heap_dump_method:-inspector}"
   if [[ "${RHDH_WITH_HEAP_DUMPS}" == "true" ]]; then
-    log_warn "Heap dump collection enabled - this may take several minutes and generate large files"
+    log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD})"
   fi
 
   for script in "${requested_scripts[@]}";

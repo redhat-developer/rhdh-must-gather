@@ -1019,42 +1019,40 @@ _process_container_heap_dump() {
       
       # Track whether heap dump was successfully collected
       local heap_collected=false
+      local heap_dump_method="${RHDH_HEAP_DUMP_METHOD:-inspector}"
 
-      # =====================================================================
-      # Method 1: Inspector Protocol (Primary - more reliable)
-      # =====================================================================
-      # Uses SIGUSR1 to activate inspector + Chrome DevTools Protocol
-      # Benefits:
-      # - Works even without --inspect flag (SIGUSR1 activates it dynamically)
-      # - Provides feedback on success/failure
-      # - Heap dump is collected directly via protocol
+      log_info "Using heap dump method: $heap_dump_method"
 
-      log_info "Attempting heap dump collection via inspector protocol..."
-      local inspector_heap_file="$container_dir/${heap_file}"
+      if [[ "$heap_dump_method" == "inspector" ]]; then
+        # =====================================================================
+        # Inspector Protocol Method
+        # =====================================================================
+        # Uses SIGUSR1 to activate inspector + Chrome DevTools Protocol
+        # Benefits:
+        # - Works even without --inspect flag (SIGUSR1 activates it dynamically)
+        # - Provides feedback on success/failure
+        # - Heap dump is collected directly via protocol
 
-      # Wrap in error handling to ensure we continue to next container on any failure
-      local inspector_error=""
-      if collect_heap_dump_via_inspector "$ns" "$pod" "$container" "$node_pid" \
-           "$inspector_heap_file" "$container_dir/heap-dump.log" 2>&1; then
-        heap_collected=true
-        log_success "Heap dump collected via inspector protocol"
-      else
-        inspector_error=$?
-        log_info "Inspector protocol method failed (exit code: $inspector_error), trying SIGUSR2 fallback..."
-        {
-          echo ""
-          echo "=== Falling back to SIGUSR2 method ==="
-          echo "Inspector protocol failed with exit code: $inspector_error"
-        } >> "$container_dir/heap-dump.log"
-      fi
+        log_info "Attempting heap dump collection via inspector protocol..."
+        local inspector_heap_file="$container_dir/${heap_file}"
 
-      # =====================================================================
-      # Method 2: SIGUSR2 Signal (Fallback)
-      # =====================================================================
-      # This works if Node.js was started with --heapsnapshot-signal=SIGUSR2
-      # or if the app has heapdump module or custom SIGUSR2 handler
+        if collect_heap_dump_via_inspector "$ns" "$pod" "$container" "$node_pid" \
+             "$inspector_heap_file" "$container_dir/heap-dump.log" 2>&1; then
+          heap_collected=true
+          log_success "Heap dump collected via inspector protocol"
+        else
+          local inspector_error=$?
+          log_warn "Inspector protocol method failed (exit code: $inspector_error)"
+          echo "Inspector protocol failed with exit code: $inspector_error" >> "$container_dir/heap-dump.log"
+        fi
 
-      if [[ "$heap_collected" != "true" ]]; then
+      elif [[ "$heap_dump_method" == "sigusr2" ]]; then
+        # =====================================================================
+        # SIGUSR2 Signal Method
+        # =====================================================================
+        # This works if Node.js was started with --heapsnapshot-signal=SIGUSR2
+        # or if the app has heapdump module or custom SIGUSR2 handler
+
         log_info "Sending SIGUSR2 signal to trigger heap dump..."
 
         {
@@ -1110,20 +1108,22 @@ _process_container_heap_dump() {
             fi
           fi
         done
+      else
+        log_error "Unknown heap dump method: $heap_dump_method"
+        echo "Unknown heap dump method: $heap_dump_method" >> "$container_dir/heap-dump.log"
       fi
 
       # =====================================================================
-      # Both methods failed - provide guidance
+      # Collection failed - provide guidance
       # =====================================================================
       if [[ "$heap_collected" != "true" ]]; then
-        log_warn "Failed to collect heap dump for $pod/$container"
-        log_info "Neither inspector protocol nor SIGUSR2 produced a heap dump"
+        log_warn "Failed to collect heap dump for $pod/$container using method: $heap_dump_method"
         {
           echo "==================================================================="
           echo "Heap Dump Collection Failed"
           echo "==================================================================="
           echo ""
-          echo "Both collection methods were attempted, but no heap dump was generated."
+          echo "Method used: $heap_dump_method"
           echo ""
           echo "Node.js Process Information:"
           echo "  PID: $node_pid"
@@ -1131,49 +1131,55 @@ _process_container_heap_dump() {
           echo "  Pod: $pod"
           echo "  Namespace: $ns"
           echo ""
-          echo "Methods Attempted:"
-          echo "  1. Inspector Protocol (SIGUSR1 + v8.writeHeapSnapshot)"
-          echo "  2. SIGUSR2 signal (requires --heapsnapshot-signal=SIGUSR2)"
-          echo ""
-          echo "==================================================================="
-          echo "Why This Failed"
-          echo "==================================================================="
-          echo ""
-          echo "The inspector protocol method usually works without any configuration."
-          echo "Common reasons for failure:"
-          echo ""
-          echo "  - NODE_OPTIONS contains --disable-sigusr1 (prevents inspector activation)"
-          echo "  - process.mainModule is not available (rare, ES modules edge case)"
-          echo "  - Security policies blocking the inspector port"
-          echo "  - Container doesn't have write access to /tmp"
-          echo ""
-          echo "Check heap-dump.log for detailed error messages."
-          echo ""
-          echo "==================================================================="
-          echo "How to Fix"
-          echo "==================================================================="
-          echo ""
-          echo "If --disable-sigusr1 is set, remove it or add --inspect explicitly:"
-          echo ""
-          echo "  env:"
-          echo "  - name: NODE_OPTIONS"
-          echo "    value: \"--inspect=0.0.0.0:9229\""
-          echo ""
-          echo "Alternatively, configure the SIGUSR2 fallback method:"
-          echo ""
-          echo "  env:"
-          echo "  - name: NODE_OPTIONS"
-          echo "    value: \"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
-          echo ""
-          echo "(--diagnostic-dir=/tmp is required for read-only root filesystems)"
-          echo ""
-          echo "==================================================================="
-          echo "Next Steps"
-          echo "==================================================================="
-          echo ""
-          echo "1. Check heap-dump.log for the specific error"
-          echo "2. Apply the appropriate fix above"
-          echo "3. Redeploy and run must-gather again with --with-heap-dumps"
+
+          if [[ "$heap_dump_method" == "inspector" ]]; then
+            echo "==================================================================="
+            echo "Why Inspector Protocol Failed"
+            echo "==================================================================="
+            echo ""
+            echo "Common reasons for failure:"
+            echo ""
+            echo "  - NODE_OPTIONS contains --disable-sigusr1 (prevents inspector activation)"
+            echo "  - process.mainModule is not available (rare, ES modules edge case)"
+            echo "  - Security policies blocking the inspector port"
+            echo "  - Container doesn't have write access to /tmp"
+            echo ""
+            echo "Check heap-dump.log for detailed error messages."
+            echo ""
+            echo "==================================================================="
+            echo "How to Fix"
+            echo "==================================================================="
+            echo ""
+            echo "If --disable-sigusr1 is set, remove it or add --inspect explicitly:"
+            echo ""
+            echo "  env:"
+            echo "  - name: NODE_OPTIONS"
+            echo "    value: \"--inspect=0.0.0.0:9229\""
+            echo ""
+            echo "Alternatively, try the SIGUSR2 method:"
+            echo ""
+            echo "  ./gather --with-heap-dumps --heap-dump-method sigusr2"
+            echo ""
+            echo "Note: SIGUSR2 method requires NODE_OPTIONS configuration:"
+            echo "  NODE_OPTIONS=\"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
+          else
+            echo "==================================================================="
+            echo "Why SIGUSR2 Method Failed"
+            echo "==================================================================="
+            echo ""
+            echo "SIGUSR2 method requires NODE_OPTIONS configuration:"
+            echo ""
+            echo "  env:"
+            echo "  - name: NODE_OPTIONS"
+            echo "    value: \"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
+            echo ""
+            echo "(--diagnostic-dir=/tmp is required for read-only root filesystems)"
+            echo ""
+            echo "Alternatively, try the inspector method (default, usually works without config):"
+            echo ""
+            echo "  ./gather --with-heap-dumps --heap-dump-method inspector"
+          fi
+
           echo ""
           echo "==================================================================="
           echo "Diagnostic Logs"

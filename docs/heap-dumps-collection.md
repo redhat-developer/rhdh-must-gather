@@ -4,12 +4,22 @@ When heap dumps are collected using `--with-heap-dumps`, they can be analyzed us
 
 ### Prerequisites for Heap Dump Collection
 
-The must-gather tool uses two methods to collect heap dumps, tried in order:
+The must-gather tool supports two methods to collect heap dumps:
 
-1. **Inspector Protocol (Primary)**: Uses the Node.js inspector and Chrome DevTools Protocol
-2. **SIGUSR2 Signal (Fallback)**: Sends a signal to trigger heap snapshot
+1. **Inspector Protocol (default)**: Uses the Node.js inspector and Chrome DevTools Protocol
+2. **SIGUSR2 Signal**: Sends a signal to trigger heap snapshot
 
-#### Option 1: Inspector Protocol (Primary - No Configuration Required)
+You can choose the method using `--heap-dump-method`:
+
+```bash
+# Use inspector protocol (default)
+./gather --with-heap-dumps --heap-dump-method inspector
+
+# Use SIGUSR2 signal
+./gather --with-heap-dumps --heap-dump-method sigusr2
+```
+
+#### Method 1: Inspector Protocol (Default - No Configuration Required)
 
 The inspector protocol method **works out of the box** for most RHDH deployments without any configuration changes. The tool automatically:
 
@@ -51,9 +61,9 @@ If Node.js is started with the `--disable-sigusr1` flag, the dynamic inspector a
 
 **Reference:** [Node.js Inspector Protocol](https://nodejs.org/en/learn/diagnostics/memory/using-heap-snapshot#4-trigger-heap-snapshot-using-inspector-protocol)
 
-#### Option 2: SIGUSR2 Signal (Fallback)
+#### Method 2: SIGUSR2 Signal
 
-If the inspector protocol fails, the tool falls back to sending SIGUSR2. **This method requires configuration:**
+Use this method if the inspector protocol doesn't work in your environment. **This method requires configuration:**
 
 ```yaml
 # In your Deployment or Backstage CR
