@@ -566,7 +566,7 @@ collect_heap_dumps_for_pods() {
       # (unlike ps, pidof, or pgrep which require additional packages)
       log_debug "Looking for Node.js process using /proc filesystem..."
       local node_pid
-      local _pid_err
+      local _pid_err=""
       node_pid=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
         for pid_dir in /proc/[0-9]*; do
           pid=\$(basename \$pid_dir)
