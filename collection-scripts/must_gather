@@ -172,7 +172,8 @@ Usage: ./$(basename "$0") [params...]
                                 the application will not respond to requests. Plan accordingly.
 
                                 WARNING: May take several minutes and generate large files (100MB-1GB+ per pod).
-                                For very large heaps, increase HEAP_DUMP_TIMEOUT (default: 600 seconds).
+                                For very large heaps, override HEAP_DUMP_TIMEOUT (default: 600 seconds):
+                                  HEAP_DUMP_TIMEOUT=900 ./gather --with-heap-dumps
 
   Examples:
   # Default collection (includes Namespace inspect for OMC compatibility)

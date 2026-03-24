@@ -171,7 +171,53 @@ Each heap dump collection includes metadata files:
 ### Important Warnings
 
 - **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. Plan heap dump collection during maintenance windows or low-traffic periods.
-- **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. Increase the timeout by setting `HEAP_DUMP_TIMEOUT=900` (or higher) in your environment.
+- **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
+
+### Overriding HEAP_DUMP_TIMEOUT
+
+For very large heaps that take longer than 10 minutes to serialize, you can increase the timeout:
+
+#### OpenShift (oc adm must-gather)
+
+```bash
+# Set timeout to 15 minutes (900 seconds)
+oc adm must-gather \
+  --image=quay.io/rhdh-community/rhdh-must-gather \
+  -- /usr/bin/gather --with-heap-dumps \
+  env HEAP_DUMP_TIMEOUT=900
+```
+
+Or using the `env` command:
+
+```bash
+oc adm must-gather \
+  --image=quay.io/rhdh-community/rhdh-must-gather \
+  -- env HEAP_DUMP_TIMEOUT=900 /usr/bin/gather --with-heap-dumps
+```
+
+#### Standard Kubernetes (Job-based deployment)
+
+Add the environment variable to your must-gather Job or Deployment:
+
+```yaml
+# deploy/overlays/with-heap-dumps/kustomization.yaml or custom overlay
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: must-gather
+        env:
+        - name: HEAP_DUMP_TIMEOUT
+          value: "900"  # 15 minutes
+```
+
+#### Local execution
+
+```bash
+HEAP_DUMP_TIMEOUT=900 ./collection-scripts/must_gather --with-heap-dumps
+```
 
 ### Tips and Best Practices
 
