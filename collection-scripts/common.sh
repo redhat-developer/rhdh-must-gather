@@ -532,7 +532,7 @@ collect_heap_dump_via_inspector() {
   local output_file="$5"
   local log_file="$6"
 
-  local inspector_timeout="${HEAP_DUMP_TIMEOUT:-120}"
+  local inspector_timeout="${HEAP_DUMP_TIMEOUT:-600}"
   local port_forward_pid=""
 
   # Cleanup function
@@ -879,7 +879,7 @@ collect_heap_dumps_for_pods() {
   ensure_directory "$heap_dump_dir"
   
   # Timeout for heap dump generation (per pod)
-  local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-120}"
+  local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-600}"
   
   # Get list of running pods matching the labels
   local pods

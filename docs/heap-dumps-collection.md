@@ -168,9 +168,13 @@ Each heap dump collection includes metadata files:
 - **`heap-dump.log`**: Collection logs, any errors or warnings
 - **`pod-spec.yaml`**: Complete pod specification for context
 
+### Important Warnings
+
+- **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. Plan heap dump collection during maintenance windows or low-traffic periods.
+- **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. Increase the timeout by setting `HEAP_DUMP_TIMEOUT=900` (or higher) in your environment.
+
 ### Tips and Best Practices
 
-- **Application instrumentation**: For most reliable heap dump collection, add `--inspect=0.0.0.0:9229` to NODE_OPTIONS (see Prerequisites above). The tool can also try to activate the inspector dynamically via SIGUSR1.
 - **Large files**: Heap dumps can be 100MB-1GB+. Ensure sufficient disk space and bandwidth for analysis.
 - **Privacy**: Heap dumps may contain sensitive data from memory. Handle them securely and apply sanitization if sharing.
 - **Timing**: Collect heap dumps when memory usage is high or after OOM events for best results.

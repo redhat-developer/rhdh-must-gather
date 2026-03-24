@@ -167,7 +167,12 @@ Usage: ./$(basename "$0") [params...]
                                 If the primary method fails, configure NODE_OPTIONS for the fallback:
                                   NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
 
-                                Warning: May take several minutes and generate large files (100MB-1GB+ per pod)
+                                WARNING: The application will be PAUSED while the heap snapshot is being
+                                written. For large heaps (1GB+), this can take 30-60+ seconds during which
+                                the application will not respond to requests. Plan accordingly.
+
+                                WARNING: May take several minutes and generate large files (100MB-1GB+ per pod).
+                                For very large heaps, increase HEAP_DUMP_TIMEOUT (default: 600 seconds).
 
   Examples:
   # Default collection (includes Namespace inspect for OMC compatibility)
