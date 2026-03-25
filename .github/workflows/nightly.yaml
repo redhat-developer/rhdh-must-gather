@@ -90,8 +90,13 @@ jobs:
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
           if [ "${{ matrix.method }}" = "default" ]; then
+            # Default method: test all instances
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true
+          elif [ "${{ matrix.method }}" = "sigusr2" ]; then
+            # SIGUSR2 method: only test RHDHSUPP-308 (only manifest with NODE_OPTIONS configured)
+            make test-e2e LOCAL=false HEAP_DUMP_METHOD=sigusr2
           else
+            # Inspector method: test all instances
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }}
           fi
 
