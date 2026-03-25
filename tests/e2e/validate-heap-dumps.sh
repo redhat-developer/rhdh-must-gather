@@ -155,15 +155,41 @@ for pod_dir in $pod_dirs; do
 
                 # Check for heap snapshot file OR collection-failed.txt
                 # (One of these should exist - either collection succeeded or we have failure info)
-                heap_snapshot=$(find "$container_dir" -maxdepth 1 -name '*.heapsnapshot' -type f 2>/dev/null | head -1)
+                # Priority: regular .heapsnapshot > .fallback.heapsnapshot > .PARTIAL.heapsnapshot
+                heap_snapshot=""
+                heap_snapshot_type=""
+
+                # Look for regular heap snapshot first
+                regular_snapshot=$(find "$container_dir" -maxdepth 1 -name '*.heapsnapshot' ! -name '*.fallback.heapsnapshot' ! -name '*.PARTIAL.heapsnapshot' -type f 2>/dev/null | head -1)
+                fallback_snapshot=$(find "$container_dir" -maxdepth 1 -name '*.fallback.heapsnapshot' -type f 2>/dev/null | head -1)
+                partial_snapshot=$(find "$container_dir" -maxdepth 1 -name '*.PARTIAL.heapsnapshot' -type f 2>/dev/null | head -1)
+
+                if [ -n "$regular_snapshot" ] && [ -f "$regular_snapshot" ]; then
+                    heap_snapshot="$regular_snapshot"
+                    heap_snapshot_type="regular"
+                elif [ -n "$fallback_snapshot" ] && [ -f "$fallback_snapshot" ]; then
+                    heap_snapshot="$fallback_snapshot"
+                    heap_snapshot_type="fallback"
+                elif [ -n "$partial_snapshot" ] && [ -f "$partial_snapshot" ]; then
+                    heap_snapshot="$partial_snapshot"
+                    heap_snapshot_type="partial"
+                fi
+
                 collection_failed="$container_dir/collection-failed.txt"
 
                 if [ -n "$heap_snapshot" ] && [ -f "$heap_snapshot" ]; then
-                    log_info "Found heap snapshot: $(basename "$heap_snapshot")"
+                    log_info "Found heap snapshot: $(basename "$heap_snapshot") (type: $heap_snapshot_type)"
                     # Verify the heap snapshot is not empty and has reasonable size
                     snapshot_size=$(stat -c%s "$heap_snapshot" 2>/dev/null || echo 0)
                     if [ "$snapshot_size" -gt 1000 ]; then
                         log_info "Heap snapshot size: $snapshot_size bytes"
+                        if [ "$heap_snapshot_type" = "fallback" ]; then
+                            log_info "Fallback snapshot collected via v8.writeHeapSnapshot()"
+                        elif [ "$heap_snapshot_type" = "partial" ]; then
+                            log_error "Only partial snapshot exists - streaming failed and fallback did not succeed"
+                            log_error "Partial snapshots are incomplete and cannot be loaded in analysis tools"
+                            ((ERRORS++))
+                        fi
                     else
                         log_error "Heap snapshot is too small ($snapshot_size bytes), may be corrupted"
                         ((ERRORS++))
