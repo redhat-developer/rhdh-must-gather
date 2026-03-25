@@ -41,7 +41,8 @@ WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 # websocat uses different naming: x86_64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin
-WEBSOCAT_ARCH := $(shell uname -m)-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
+# Note: Apple Silicon returns 'arm64' but websocat uses 'aarch64'
+WEBSOCAT_ARCH := $(shell uname -m | sed 's/arm64/aarch64/')-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
 
 default: run-local
 
