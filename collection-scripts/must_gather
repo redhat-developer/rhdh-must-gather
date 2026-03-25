@@ -226,9 +226,9 @@ Usage: ./$(basename "$0") [params...]
                                                             this must match --diagnostic-dir in NODE_OPTIONS.
 
   --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
-                                (default: all instances). Matches against:
-                                  - Helm release names (e.g., "my-rhdh")
-                                  - Backstage CR names (e.g., "developer-hub")
+                                (default: all instances). Uses flexible matching (exact, prefix, or contains):
+                                  - Helm release names (e.g., "my-rhdh" matches "my-rhdh-backstage")
+                                  - Backstage CR names (e.g., "my-cr" matches "backstage-my-cr")
                                   - Deployment names (e.g., "backstage-developer-hub")
 
                                 Examples:

@@ -879,19 +879,30 @@ collect_heap_dumps_for_pods() {
 
   # Check instance filter if specified
   # Match against deploy_name OR instance_name (Helm release or CR name)
+  # Supports exact match, prefix match (e.g., "my-rhdh" matches "my-rhdh-backstage"), or contains match
   if [[ -n "${RHDH_HEAP_DUMP_INSTANCES:-}" ]]; then
     local match_found=false
     IFS=',' read -ra INSTANCES <<< "$RHDH_HEAP_DUMP_INSTANCES"
     for instance in "${INSTANCES[@]}"; do
       # Trim whitespace
       instance=$(echo "$instance" | xargs)
-      if [[ -n "$deploy_name" && "$deploy_name" == "$instance" ]]; then
-        match_found=true
-        break
+      # Check deploy_name: exact match, prefix match, or contains
+      if [[ -n "$deploy_name" ]]; then
+        if [[ "$deploy_name" == "$instance" ]] || \
+           [[ "$deploy_name" == "$instance"-* ]] || \
+           [[ "$deploy_name" == *"$instance"* ]]; then
+          match_found=true
+          break
+        fi
       fi
-      if [[ -n "$instance_name" && "$instance_name" == "$instance" ]]; then
-        match_found=true
-        break
+      # Check instance_name: exact match, prefix match, or contains
+      if [[ -n "$instance_name" ]]; then
+        if [[ "$instance_name" == "$instance" ]] || \
+           [[ "$instance_name" == "$instance"-* ]] || \
+           [[ "$instance_name" == *"$instance"* ]]; then
+          match_found=true
+          break
+        fi
       fi
     done
     if [[ "$match_found" != "true" ]]; then
