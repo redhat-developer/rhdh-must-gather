@@ -623,58 +623,91 @@ collect_heap_dump_via_inspector() {
     sleep 2
   fi
 
-  # Step 3: Start port-forward in background
-  log_debug "Starting port-forward to $pod:$inspector_port on local port $local_port"
-  echo "Starting port-forward: localhost:$local_port -> $pod:$inspector_port" >> "$log_file"
+  # Step 3: Start port-forward in background (with retry logic)
+  local port_forward_attempts=0
+  local max_port_forward_attempts=2
+  local port_forward_success=false
 
-  $KUBECTL_CMD port-forward -n "$ns" "pod/$pod" "$local_port:$inspector_port" >> "$log_file" 2>&1 &
-  port_forward_pid=$!
+  while [[ $port_forward_attempts -lt $max_port_forward_attempts && "$port_forward_success" != "true" ]]; do
+    port_forward_attempts=$((port_forward_attempts + 1))
 
-  # Wait for port-forward to be ready
-  local wait_count=0
-  while ! curl -s "http://localhost:$local_port/json" >/dev/null 2>&1; do
-    sleep 0.5
-    wait_count=$((wait_count + 1))
-    if [[ $wait_count -gt 20 ]]; then
-      {
-        echo "Timeout waiting for port-forward to be ready (waited 10 seconds)"
-        echo ""
-        echo "=== Port-forward diagnostics ==="
-        echo "Local port: $local_port"
-        echo "Target: $pod:$inspector_port"
-        echo ""
-        echo "Curl error (last attempt):"
-        curl -s "http://localhost:$local_port/json" 2>&1 || true
-        echo ""
-        echo "Possible causes:"
-        echo "  - Inspector not listening on port $inspector_port"
-        echo "  - Node.js process doesn't support SIGUSR1 inspector activation"
-        echo "  - Network policy blocking the connection"
-        echo "  - Inspector bound to 127.0.0.1 instead of 0.0.0.0"
-      } >> "$log_file"
-      log_warn "Port-forward failed to establish connection to inspector"
-      cleanup_port_forward
-      return 1
+    # On retry, force SIGUSR1 to reactivate inspector
+    if [[ $port_forward_attempts -gt 1 ]]; then
+      echo "" >> "$log_file"
+      echo "=== Retry attempt $port_forward_attempts ===" >> "$log_file"
+      log_info "Retrying with SIGUSR1 to reactivate inspector..."
+      $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -USR1 "$node_pid" 2>> "$log_file" || true
+      sleep 2
+      # Get a new local port for retry
+      local_port=$((local_port + 1))
     fi
-    # Check if port-forward process is still running
-    if ! kill -0 "$port_forward_pid" 2>/dev/null; then
-      {
-        echo "Port-forward process died unexpectedly"
-        echo ""
-        echo "=== Port-forward diagnostics ==="
-        echo "The kubectl port-forward process terminated before connection was established."
-        echo "This usually means the target port ($inspector_port) is not open in the container."
-        echo ""
-        echo "Possible causes:"
-        echo "  - Inspector not enabled (Node.js not started with --inspect)"
-        echo "  - SIGUSR1 failed to activate the inspector"
-        echo "  - Container security context prevents port binding"
-      } >> "$log_file"
-      log_warn "Port-forward process terminated"
+
+    log_debug "Starting port-forward to $pod:$inspector_port on local port $local_port"
+    echo "Starting port-forward: localhost:$local_port -> $pod:$inspector_port" >> "$log_file"
+
+    $KUBECTL_CMD port-forward -n "$ns" "pod/$pod" "$local_port:$inspector_port" >> "$log_file" 2>&1 &
+    port_forward_pid=$!
+
+    # Wait for port-forward to be ready
+    local wait_count=0
+    local port_forward_failed=false
+
+    while ! curl -s "http://localhost:$local_port/json" >/dev/null 2>&1; do
+      sleep 0.5
+      wait_count=$((wait_count + 1))
+      if [[ $wait_count -gt 20 ]]; then
+        {
+          echo "Timeout waiting for port-forward to be ready (waited 10 seconds)"
+          echo ""
+          echo "=== Port-forward diagnostics ==="
+          echo "Local port: $local_port"
+          echo "Target: $pod:$inspector_port"
+          echo ""
+          echo "Curl error (last attempt):"
+          curl -s "http://localhost:$local_port/json" 2>&1 || true
+          echo ""
+          echo "Possible causes:"
+          echo "  - Inspector not listening on port $inspector_port"
+          echo "  - Node.js process doesn't support SIGUSR1 inspector activation"
+          echo "  - Network policy blocking the connection"
+          echo "  - Inspector bound to 127.0.0.1 instead of 0.0.0.0"
+        } >> "$log_file"
+        port_forward_failed=true
+        break
+      fi
+      # Check if port-forward process is still running
+      if ! kill -0 "$port_forward_pid" 2>/dev/null; then
+        {
+          echo "Port-forward process died unexpectedly"
+          echo ""
+          echo "=== Port-forward diagnostics ==="
+          echo "The kubectl port-forward process terminated before connection was established."
+          echo "This usually means the target port ($inspector_port) is not open in the container."
+          echo ""
+          echo "Possible causes:"
+          echo "  - Inspector not enabled (Node.js not started with --inspect)"
+          echo "  - SIGUSR1 failed to activate the inspector"
+          echo "  - Container security context prevents port binding"
+        } >> "$log_file"
+        port_forward_failed=true
+        break
+      fi
+    done
+
+    if [[ "$port_forward_failed" == "true" ]]; then
       cleanup_port_forward
-      return 1
+      if [[ $port_forward_attempts -lt $max_port_forward_attempts ]]; then
+        log_warn "Port-forward failed, will retry with SIGUSR1..."
+      fi
+    else
+      port_forward_success=true
     fi
   done
+
+  if [[ "$port_forward_success" != "true" ]]; then
+    log_warn "Port-forward failed after $port_forward_attempts attempts"
+    return 1
+  fi
 
   echo "Port-forward established successfully" >> "$log_file"
 
