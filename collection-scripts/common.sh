@@ -749,12 +749,14 @@ collect_heap_dump_via_inspector() {
   done
 
   if [[ "$ping_received" != "true" ]]; then
-    echo "Ping test FAILED - no response received after ${ping_wait}s" >> "$log_file"
-    echo "This indicates WebSocket responses are not coming back." >> "$log_file"
-    echo "Possible causes:" >> "$log_file"
-    echo "  - Network proxy/mesh intercepting WebSocket traffic" >> "$log_file"
-    echo "  - Firewall or network policy blocking responses" >> "$log_file"
-    echo "  - Inspector in unexpected state" >> "$log_file"
+    {
+      echo "Ping test FAILED - no response received after ${ping_wait}s"
+      echo "This indicates WebSocket responses are not coming back."
+      echo "Possible causes:"
+      echo "  - Network proxy/mesh intercepting WebSocket traffic"
+      echo "  - Firewall or network policy blocking responses"
+      echo "  - Inspector in unexpected state"
+    } >> "$log_file"
     log_warn "WebSocket ping test failed - two-way communication broken"
     exec 3>&-
     kill "$websocat_pid" 2>/dev/null || true
@@ -773,9 +775,11 @@ collect_heap_dump_via_inspector() {
   : > "$outfile"
 
   # Step 5b: Enable HeapProfiler domain
-  echo "" >> "$log_file"
-  echo "=== Heap Dump Collection ===" >> "$log_file"
-  echo "Enabling HeapProfiler domain..." >> "$log_file"
+  {
+    echo ""
+    echo "=== Heap Dump Collection ==="
+    echo "Enabling HeapProfiler domain..."
+  } >> "$log_file"
   echo '{"id":1,"method":"HeapProfiler.enable"}' >&3
   sleep 0.5
 
@@ -791,7 +795,6 @@ collect_heap_dump_via_inspector() {
   local max_wait=$inspector_timeout
   local snapshot_complete=false
   local last_reported_pct=-1
-  local last_line_count=0
 
   while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
     sleep 1
@@ -911,21 +914,25 @@ collect_heap_dump_via_inspector() {
   # Count chunks for logging (use grep -o to count all occurrences, not just lines)
   chunks_received=$(grep -ao '"HeapProfiler.addHeapSnapshotChunk"' "$outfile" 2>/dev/null | wc -l || echo 0)
 
-  echo "" >> "$log_file"
-  echo "=== Collection Summary ===" >> "$log_file"
-  echo "Chunks received: $chunks_received" >> "$log_file"
-  echo "Time elapsed: ${wait_time}s" >> "$log_file"
+  {
+    echo ""
+    echo "=== Collection Summary ==="
+    echo "Chunks received: $chunks_received"
+    echo "Time elapsed: ${wait_time}s"
+  } >> "$log_file"
 
   # Verify we got actual data
   local heap_size
   heap_size=$(stat -c%s "$heapfile" 2>/dev/null || echo "0")
 
   if [[ "$heap_size" -lt 1000 ]]; then
-    echo "Heap snapshot file too small ($heap_size bytes)" >> "$log_file"
-    echo "This may indicate:" >> "$log_file"
-    echo "  - WebSocket connection issues (chunks not received)" >> "$log_file"
-    echo "  - Inspector protocol errors" >> "$log_file"
-    echo "  - Empty heap (unlikely for Backstage)" >> "$log_file"
+    {
+      echo "Heap snapshot file too small ($heap_size bytes)"
+      echo "This may indicate:"
+      echo "  - WebSocket connection issues (chunks not received)"
+      echo "  - Inspector protocol errors"
+      echo "  - Empty heap (unlikely for Backstage)"
+    } >> "$log_file"
     log_warn "Heap snapshot appears empty or corrupted"
     cleanup_port_forward
     rm -f "$fifo" "$outfile" "$heapfile"
@@ -1105,10 +1112,10 @@ _process_container_heap_dump() {
       
       local container_dir="$pod_dir/container=$container"
       ensure_directory "$container_dir"
-      
-      local timestamp=$(date +%Y%m%d-%H%M%S)
+
+      local timestamp
+      timestamp=$(date +%Y%m%d-%H%M%S)
       local heap_file="heapdump-${timestamp}.heapsnapshot"
-      local remote_path="/tmp/${heap_file}"
       
       # Log the Node.js PID
       log_info "Node.js process PID: $node_pid"
