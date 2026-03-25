@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+export LOG_LEVEL="${LOG_LEVEL:-info}"
+if [[ "$LOG_LEVEL" == "trace" ]]; then
+  set -x
+fi
+
 # Only log ERR trap in debug mode to avoid confusing users with expected failures
 # (e.g., resource not found errors). Script-level failures are handled by must_gather.
 trap 'if [[ "$LOG_LEVEL" == "debug" || "$LOG_LEVEL" == "trace" ]]; then log "DEBUG" "Command failed at line $LINENO (this may be expected)"; fi' ERR
@@ -20,11 +25,6 @@ export GREEN='\033[0;32m'
 export YELLOW='\033[1;33m'
 export BLUE='\033[0;34m'
 export NC='\033[0m' # No Color
-
-export LOG_LEVEL="${LOG_LEVEL:-info}"
-if [[ "$LOG_LEVEL" == "trace" ]]; then
-  set -x
-fi
 
 # Logging functions
 log() {
