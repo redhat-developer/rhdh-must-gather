@@ -536,15 +536,23 @@ collect_heap_dump_via_inspector() {
   local ws_buffer_size="${HEAP_DUMP_BUFFER_SIZE:-16777216}"  # 16MB default
   local port_forward_pid=""
 
-  # Cleanup function
-  cleanup_port_forward() {
-    if [[ -n "$port_forward_pid" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
+  # Cleanup function - ensures port-forward and temp files are cleaned up
+  # even on unexpected exits (via trap)
+  cleanup_inspector() {
+    if [[ -n "${port_forward_pid:-}" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
       kill "$port_forward_pid" 2>/dev/null || true
       wait "$port_forward_pid" 2>/dev/null || true
     fi
-    # Clean up temp files
-    rm -f "/tmp/inspector_fifo_$$" "/tmp/inspector_out_$$" 2>/dev/null || true
+    # Clean up all temp files
+    rm -f "/tmp/inspector_fifo_$$" "/tmp/inspector_out_$$" "/tmp/heapdump_chunks_$$" \
+          "/tmp/inspector_cleaned_$$" "/tmp/inspector_fallback_fifo_$$" \
+          "/tmp/inspector_fallback_out_$$" 2>/dev/null || true
   }
+  # Alias for backward compatibility within this function
+  cleanup_port_forward() { cleanup_inspector; }
+
+  # Set trap to ensure cleanup on any exit from this function
+  trap cleanup_inspector RETURN
 
   log_info "Attempting heap dump via inspector protocol for $pod/$container (PID: $node_pid)"
 
@@ -739,9 +747,18 @@ collect_heap_dump_via_inspector() {
   local fifo="/tmp/inspector_fifo_$$"
   local outfile="/tmp/inspector_out_$$"
   local heapfile="/tmp/heapdump_chunks_$$"
-  rm -f "$fifo" "$outfile" "$heapfile"
-  mkfifo "$fifo"
-  touch "$outfile" "$heapfile"
+  rm -f "$fifo" "$outfile" "$heapfile" 2>/dev/null || true
+
+  if ! mkfifo "$fifo" 2>> "$log_file"; then
+    echo "Failed to create FIFO: $fifo" >> "$log_file"
+    log_warn "Failed to create FIFO for inspector communication"
+    return 1
+  fi
+  if ! touch "$outfile" "$heapfile" 2>> "$log_file"; then
+    echo "Failed to create temp files" >> "$log_file"
+    log_warn "Failed to create temp files for inspector communication"
+    return 1
+  fi
 
   # Start websocat in background
   # Flags:
@@ -988,7 +1005,11 @@ collect_heap_dump_via_inspector() {
   # WebSocket output may contain leading null bytes from buffer initialization.
   # Strip them before JSON parsing. The messages are already newline-separated.
   local cleaned_file="/tmp/inspector_cleaned_$$"
-  tr -d '\0' < "$outfile" > "$cleaned_file"
+  if ! tr -d '\0' < "$outfile" > "$cleaned_file" 2>> "$log_file"; then
+    echo "Failed to strip null bytes from output" >> "$log_file"
+    log_warn "Failed to process WebSocket output"
+    return 1
+  fi
 
   local cleaned_size
   cleaned_size=$(stat -c%s "$cleaned_file" 2>/dev/null || echo 0)
@@ -1041,7 +1062,11 @@ collect_heap_dump_via_inspector() {
   fi
 
   # Move the heap file to output location
-  mv "$heapfile" "$output_file"
+  if ! mv "$heapfile" "$output_file" 2>> "$log_file"; then
+    echo "Failed to move heap file to output location" >> "$log_file"
+    log_warn "Failed to save heap snapshot"
+    return 1
+  fi
 
   local human_size
   human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
@@ -1049,7 +1074,10 @@ collect_heap_dump_via_inspector() {
   if [[ "$timed_out" == "true" ]]; then
     # Rename to indicate partial snapshot
     local partial_file="${output_file%.heapsnapshot}.PARTIAL.heapsnapshot"
-    mv "$output_file" "$partial_file"
+    if ! mv "$output_file" "$partial_file" 2>> "$log_file"; then
+      echo "Failed to rename to partial file" >> "$log_file"
+      # Continue anyway - the file is already saved
+    fi
     echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
     echo "WARNING: This snapshot may be incomplete and could fail to load in analysis tools" >> "$log_file"
     log_warn "Partial heap dump saved ($human_size) - may be incomplete"
@@ -1063,9 +1091,13 @@ collect_heap_dump_via_inspector() {
     local remote_heap_file="${HEAP_DUMP_REMOTE_DIR:-/tmp}/heapdump-fallback-$$.heapsnapshot"
     local fallback_fifo="/tmp/inspector_fallback_fifo_$$"
     local fallback_out="/tmp/inspector_fallback_out_$$"
-    rm -f "$fallback_fifo" "$fallback_out"
-    mkfifo "$fallback_fifo"
-    touch "$fallback_out"
+    rm -f "$fallback_fifo" "$fallback_out" 2>/dev/null || true
+
+    if ! mkfifo "$fallback_fifo" 2>> "$log_file" || ! touch "$fallback_out" 2>> "$log_file"; then
+      echo "Failed to create fallback temp files" >> "$log_file"
+      log_warn "Fallback failed: could not create temp files"
+      return 0  # Return success since partial file was saved
+    fi
 
     # Start new websocat connection for fallback
     websocat -t -B "$ws_buffer_size" "$ws_url" < "$fallback_fifo" > "$fallback_out" 2>> "$log_file" &
