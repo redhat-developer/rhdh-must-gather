@@ -180,7 +180,8 @@ Each heap dump collection includes metadata files:
 
 ### Important Warnings
 
-- **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. Plan heap dump collection during maintenance windows or low-traffic periods.
+- **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. The application **automatically resumes** after the heap snapshot is written. Plan heap dump collection during maintenance windows or low-traffic periods.
+- **Inspector remains active**: When using the inspector method, SIGUSR1 activates the Node.js inspector which remains active after heap dump collection. This is harmless but means the inspector port stays open until the pod is restarted.
 - **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
 
 ### Overriding HEAP_DUMP_TIMEOUT
