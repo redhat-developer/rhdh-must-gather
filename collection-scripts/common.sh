@@ -1047,40 +1047,28 @@ collect_heap_dump_via_inspector() {
   local heap_size
   heap_size=$(stat -c%s "$heapfile" 2>/dev/null || echo "0")
 
-  if [[ "$heap_size" -lt 1000 ]]; then
-    {
-      echo "Heap snapshot file too small ($heap_size bytes)"
-      echo "This may indicate:"
-      echo "  - WebSocket connection issues (chunks not received)"
-      echo "  - Inspector protocol errors"
-      echo "  - Empty heap (unlikely for Backstage)"
-    } >> "$log_file"
-    log_warn "Heap snapshot appears empty or corrupted"
-    cleanup_port_forward
-    rm -f "$fifo" "$outfile" "$heapfile"
-    return 1
-  fi
-
-  # Move the heap file to output location
-  if ! mv "$heapfile" "$output_file" 2>> "$log_file"; then
-    echo "Failed to move heap file to output location" >> "$log_file"
-    log_warn "Failed to save heap snapshot"
-    return 1
-  fi
-
-  local human_size
-  human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
-
+  # If we timed out, try fallback regardless of whether we got partial data
   if [[ "$timed_out" == "true" ]]; then
-    # Rename to indicate partial snapshot
-    local partial_file="${output_file%.heapsnapshot}.PARTIAL.heapsnapshot"
-    if ! mv "$output_file" "$partial_file" 2>> "$log_file"; then
-      echo "Failed to rename to partial file" >> "$log_file"
-      # Continue anyway - the file is already saved
+    if [[ "$heap_size" -lt 1000 ]]; then
+      {
+        echo "Heap snapshot file too small ($heap_size bytes)"
+        echo "This may indicate:"
+        echo "  - WebSocket connection issues (chunks not received)"
+        echo "  - Inspector protocol errors"
+        echo "Attempting fallback method..."
+      } >> "$log_file"
+      log_warn "No heap data received via streaming - trying fallback"
+    else
+      # Save partial snapshot
+      if mv "$heapfile" "$output_file" 2>> "$log_file"; then
+        local partial_file="${output_file%.heapsnapshot}.PARTIAL.heapsnapshot"
+        mv "$output_file" "$partial_file" 2>> "$log_file" || true
+        local human_size
+        human_size=$(du -h "$partial_file" 2>/dev/null | cut -f1)
+        echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
+        log_warn "Partial heap dump saved ($human_size) - may be incomplete"
+      fi
     fi
-    echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
-    echo "WARNING: This snapshot may be incomplete and could fail to load in analysis tools" >> "$log_file"
-    log_warn "Partial heap dump saved ($human_size) - may be incomplete"
 
     # Fallback: Try v8.writeHeapSnapshot() via Runtime.evaluate
     # This writes directly to a file in the container, bypassing WebSocket streaming
@@ -1190,13 +1178,33 @@ collect_heap_dump_via_inspector() {
     cleanup_port_forward
     rm -f "$fifo" "$outfile"
     return 0
-  else
-    echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
-    log_success "Heap dump collected via inspector protocol ($human_size)"
-    cleanup_port_forward
-    rm -f "$fifo" "$outfile"
-    return 0
   fi
+
+  # Success case: streaming completed without timeout
+  if [[ "$heap_size" -lt 1000 ]]; then
+    {
+      echo "Heap snapshot file too small ($heap_size bytes)"
+      echo "This may indicate:"
+      echo "  - WebSocket connection issues (chunks not received)"
+      echo "  - Inspector protocol errors"
+      echo "  - Empty heap (unlikely for Backstage)"
+    } >> "$log_file"
+    log_warn "Heap snapshot appears empty or corrupted"
+    return 1
+  fi
+
+  # Move the heap file to output location
+  if ! mv "$heapfile" "$output_file" 2>> "$log_file"; then
+    echo "Failed to move heap file to output location" >> "$log_file"
+    log_warn "Failed to save heap snapshot"
+    return 1
+  fi
+
+  local human_size
+  human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
+  echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
+  log_success "Heap dump collected via inspector protocol ($human_size)"
+  return 0
 }
 
 collect_heap_dumps_for_pods() {
