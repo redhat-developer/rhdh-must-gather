@@ -132,6 +132,9 @@ See [secret-collection-and-sanitization.md](./docs/secret-collection-and-sanitiz
 | `CMD_TIMEOUT`            | `30`            | Timeout for individual kubectl/helm commands (seconds) |
 | `MUST_GATHER_SINCE`      | -               | Relative time for log collection (e.g., "2h", "30m")   |
 | `MUST_GATHER_SINCE_TIME` | -               | Absolute timestamp for log collection (RFC3339)        |
+| `HEAP_DUMP_TIMEOUT`      | `600`           | Timeout for heap dump collection in seconds            |
+| `HEAP_DUMP_BUFFER_SIZE`  | `16777216`      | WebSocket buffer size in bytes (16MB) for inspector method |
+| `HEAP_DUMP_REMOTE_DIR`   | `/tmp`          | Directory in container for heap dumps (SIGUSR2 method) |
 
 ### Command Line Options
 

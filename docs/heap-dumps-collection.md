@@ -48,6 +48,20 @@ The inspector protocol method **works out of the box** for most RHDH deployments
 - Provides direct feedback on collection success/failure
 - Heap dump location is controlled by the must-gather tool (default: `/tmp`)
 
+**Troubleshooting Large Heaps:**
+
+The inspector method streams heap snapshot data over WebSocket. For very large heaps, you may need to increase the buffer size:
+
+```bash
+# Increase WebSocket buffer to 32MB (default: 16MB)
+HEAP_DUMP_BUFFER_SIZE=33554432 ./gather --with-heap-dumps
+
+# Or 64MB for very large heaps
+HEAP_DUMP_BUFFER_SIZE=67108864 ./gather --with-heap-dumps
+```
+
+If heap dump collection shows progress reaching 100% but then stalls without completing, try increasing the buffer size. This can happen when Node.js tries to send a very large chunk that exceeds the buffer.
+
 **Custom Heap Dump Location:**
 
 By default, heap dumps are written to `/tmp` in the container. If `/tmp` is not writable or has limited space, you can override this:
@@ -217,7 +231,15 @@ Each heap dump collection includes metadata files:
 - **Inspector remains active**: When using the inspector method, SIGUSR1 activates the Node.js inspector which remains active after heap dump collection. This is harmless but means the inspector port stays open until the pod is restarted.
 - **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
 
-### Overriding HEAP_DUMP_TIMEOUT
+### Environment Variables
+
+The following environment variables can be used to configure heap dump collection:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HEAP_DUMP_TIMEOUT` | `600` | Timeout in seconds for heap dump collection |
+| `HEAP_DUMP_BUFFER_SIZE` | `16777216` | WebSocket buffer size in bytes (16MB) for inspector method |
+| `HEAP_DUMP_REMOTE_DIR` | `/tmp` | Directory in container where heap dumps are written |
 
 For very large heaps that take longer than 10 minutes to serialize, you can increase the timeout:
 

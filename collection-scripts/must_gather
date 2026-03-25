@@ -220,10 +220,13 @@ Usage: ./$(basename "$0") [params...]
                                               Set HEAP_DUMP_REMOTE_DIR to match --diagnostic-dir.
 
                                 Environment variables for heap dump collection:
-                                  HEAP_DUMP_TIMEOUT=600     Timeout in seconds (default: 600)
-                                  HEAP_DUMP_REMOTE_DIR=/tmp Directory in the container where heap dumps
-                                                            are written (default: /tmp). Only used by SIGUSR2 method;
-                                                            must match --diagnostic-dir in NODE_OPTIONS.
+                                  HEAP_DUMP_TIMEOUT=600       Timeout in seconds (default: 600)
+                                  HEAP_DUMP_BUFFER_SIZE=16777216
+                                                              WebSocket buffer size in bytes (default: 16MB).
+                                                              Increase if heap dump stalls with large heaps.
+                                  HEAP_DUMP_REMOTE_DIR=/tmp   Directory in the container where heap dumps
+                                                              are written (default: /tmp). Only used by SIGUSR2 method;
+                                                              must match --diagnostic-dir in NODE_OPTIONS.
 
   --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
                                 (default: all instances). Uses flexible matching (exact, prefix, or contains):

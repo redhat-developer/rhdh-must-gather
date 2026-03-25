@@ -533,6 +533,7 @@ collect_heap_dump_via_inspector() {
   local log_file="$6"
 
   local inspector_timeout="${HEAP_DUMP_TIMEOUT:-600}"
+  local ws_buffer_size="${HEAP_DUMP_BUFFER_SIZE:-16777216}"  # 16MB default
   local port_forward_pid=""
 
   # Cleanup function
@@ -711,9 +712,9 @@ collect_heap_dump_via_inspector() {
 
   # Start websocat in background
   # Flags:
-  #   -B 1048576  - increase buffer to 1MB (heap snapshot chunks can be 100KB+)
+  #   -B <size>   - buffer size for large heap snapshot chunks (default: 16MB)
   #   -t          - text mode (not binary)
-  websocat -t -B 1048576 "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
+  websocat -t -B "$ws_buffer_size" "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
   local websocat_pid=$!
 
   # Give websocat a moment to connect
@@ -795,6 +796,20 @@ collect_heap_dump_via_inspector() {
   local max_wait=$inspector_timeout
   local snapshot_complete=false
   local last_reported_pct=-1
+  local last_size=0
+  local last_cpu_time=0
+  local stall_time=0
+  local cpu_stall_time=0
+
+  # Helper to get CPU time (utime + stime) from /proc/<pid>/stat
+  get_cpu_time() {
+    $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- \
+      sh -c "cat /proc/$node_pid/stat 2>/dev/null | awk '{print \$14+\$15}'" 2>/dev/null || echo "0"
+  }
+
+  # Get initial CPU time
+  last_cpu_time=$(get_cpu_time)
+  echo "Initial CPU time: $last_cpu_time" >> "$log_file"
 
   while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
     sleep 1
@@ -844,10 +859,55 @@ collect_heap_dump_via_inspector() {
       fi
     fi
 
-    # Show periodic status based on file size growth
-    if [[ $((wait_time % 10)) -eq 0 && $wait_time -gt 0 ]]; then
-      local current_size
-      current_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+    # Monitor for stalled connections (no data flowing)
+    local current_size
+    current_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+
+    if [[ "$current_size" -eq "$last_size" ]]; then
+      stall_time=$((stall_time + 1))
+
+      # Check CPU activity every 10 seconds when data is stalled
+      if [[ $((stall_time % 10)) -eq 0 ]]; then
+        local current_cpu_time
+        current_cpu_time=$(get_cpu_time)
+
+        # Compare against PREVIOUS reading (not initial), detect any change
+        if [[ "$current_cpu_time" -ne "$last_cpu_time" ]]; then
+          # CPU time changed - process is active
+          local cpu_delta=$((current_cpu_time - last_cpu_time))
+          echo "CPU active: delta=${cpu_delta} ticks (prev: $last_cpu_time, now: $current_cpu_time) - V8 is working" >> "$log_file"
+          log_debug "No data for ${stall_time}s but CPU active (delta=${cpu_delta} ticks) - V8 is working"
+          cpu_stall_time=0
+        else
+          # CPU time unchanged - process may be idle
+          cpu_stall_time=$((cpu_stall_time + 10))
+          echo "CPU unchanged for ${cpu_stall_time}s (time: $current_cpu_time)" >> "$log_file"
+        fi
+        # Always update last_cpu_time for next comparison
+        last_cpu_time=$current_cpu_time
+      fi
+
+      # Log warnings at key intervals but don't abort - wait for full timeout
+      if [[ $stall_time -eq 60 ]]; then
+        if [[ $cpu_stall_time -ge 60 ]]; then
+          log_warn "No data for 60s and CPU unchanged - possible stall (will keep waiting)"
+        else
+          log_info "No data for 60s but CPU active - V8 is working (will keep waiting)"
+        fi
+      elif [[ $stall_time -eq 180 ]]; then
+        log_warn "No data for 3 minutes - heap serialization may be slow or connection stalled"
+      elif [[ $stall_time -eq 300 ]]; then
+        log_warn "No data for 5 minutes - consider increasing HEAP_DUMP_TIMEOUT if this completes"
+      fi
+    else
+      # Data is flowing - reset all stall counters
+      stall_time=0
+      cpu_stall_time=0
+      last_size=$current_size
+    fi
+
+    # Show periodic status based on file size
+    if [[ $((wait_time % 30)) -eq 0 && $wait_time -gt 0 ]]; then
       local human_size
       if [[ $current_size -gt 1048576 ]]; then
         human_size="$((current_size / 1048576))MB"
