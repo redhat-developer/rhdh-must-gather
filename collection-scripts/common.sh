@@ -1130,9 +1130,11 @@ collect_heap_dump_via_inspector() {
       exec 4>"$fallback_fifo"
 
       # Use Runtime.evaluate to write heap snapshot to file
+      # includeCommandLineAPI:true provides a require() function in the inspector context
+      # that works regardless of whether the app uses CommonJS or ESM
       local write_cmd="require('v8').writeHeapSnapshot('$remote_heap_file')"
       echo "Sending: Runtime.evaluate with $write_cmd" >> "$log_file"
-      echo "{\"id\":10,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"$write_cmd\",\"returnByValue\":true}}" >&4
+      echo "{\"id\":10,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"$write_cmd\",\"includeCommandLineAPI\":true,\"returnByValue\":true}}" >&4
 
       # Wait for response (honor configured timeout)
       local fallback_wait=0
