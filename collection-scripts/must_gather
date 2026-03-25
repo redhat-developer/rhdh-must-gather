@@ -25,6 +25,8 @@ excluded_scripts=()
 target_namespaces=""
 with_secrets="false"
 with_heap_dumps="false"
+heap_dump_method="inspector"
+heap_dump_instances=""
 
 function main() {
 
@@ -86,6 +88,46 @@ function parse_flags {
         ;;
       --with-heap-dumps)
         with_heap_dumps="true"
+        ;;
+      --heap-dump-method)
+        if [[ -n "${2:-}" ]]; then
+          case "$2" in
+            inspector|sigusr2)
+              heap_dump_method="$2"
+              ;;
+            *)
+              log_error "--heap-dump-method must be 'inspector' or 'sigusr2'"
+              exit 1
+              ;;
+          esac
+          shift
+        else
+          log_error "--heap-dump-method requires a value (inspector or sigusr2)"
+          exit 1
+        fi
+        ;;
+      --heap-dump-method=*)
+        case "${1#*=}" in
+          inspector|sigusr2)
+            heap_dump_method="${1#*=}"
+            ;;
+          *)
+            log_error "--heap-dump-method must be 'inspector' or 'sigusr2'"
+            exit 1
+            ;;
+        esac
+        ;;
+      --heap-dump-instances)
+        if [[ -n "${2:-}" ]]; then
+          heap_dump_instances="$2"
+          shift
+        else
+          log_error "--heap-dump-instances requires a comma-separated list of instance names"
+          exit 1
+        fi
+        ;;
+      --heap-dump-instances=*)
+        heap_dump_instances="${1#*=}"
         ;;
       --namespaces)
         if [[ -n "${2:-}" ]]; then
@@ -155,19 +197,46 @@ Usage: ./$(basename "$0") [params...]
   --with-heap-dumps             Collect heap dumps from running backstage-backend processes (opt-in, disabled by default)
                                 Heap dumps are collected immediately after pod logs for each deployment/CR
                                 Useful for troubleshooting memory leaks and performance issues
-                                
-                                IMPORTANT: Requires NODE_OPTIONS environment variable:
-                                  NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-                                
-                                Why these flags?
-                                  • --heapsnapshot-signal=SIGUSR2: Built into Node.js v12.0.0+, enables heap dumps
-                                  • --diagnostic-dir=/tmp: REQUIRED for read-only root filesystems
-                                
-                                No image rebuild or source code changes needed!
-                                
-                                Collection method: SIGUSR2 signal sent directly via kubectl exec
-                                Works with any Kubernetes version, no special RBAC permissions needed
-                                Warning: May take several minutes and generate large files (100MB-1GB+ per pod)
+
+                                NO CONFIGURATION REQUIRED for most deployments!
+                                The tool automatically activates the Node.js inspector via SIGUSR1.
+
+                                WARNING: The application will be PAUSED while the heap snapshot is being
+                                written. For large heaps (1GB+), this can take 30-60+ seconds during which
+                                the application will not respond to requests. Plan accordingly.
+
+                                WARNING: May take several minutes and generate large files (100MB-1GB+ per pod).
+                                For very large heaps, override HEAP_DUMP_TIMEOUT (default: 600 seconds):
+                                  HEAP_DUMP_TIMEOUT=900 ./gather --with-heap-dumps
+
+  --heap-dump-method <method>   Choose the heap dump collection method (default: inspector)
+                                  inspector - Activates Node.js inspector via SIGUSR1, then uses
+                                              HeapProfiler.takeHeapSnapshot via Chrome DevTools Protocol.
+                                              Streams heap data directly over WebSocket with progress reporting.
+                                              Works without configuration for most deployments.
+                                  sigusr2   - Sends SIGUSR2 signal to trigger heap snapshot.
+                                              Requires NODE_OPTIONS configuration in your deployment:
+                                              NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+                                              Set HEAP_DUMP_REMOTE_DIR to match --diagnostic-dir.
+
+                                Environment variables for heap dump collection:
+                                  HEAP_DUMP_TIMEOUT=600       Timeout in seconds (default: 600)
+                                  HEAP_DUMP_BUFFER_SIZE=16777216
+                                                              WebSocket buffer size in bytes (default: 16MB).
+                                                              Increase if heap dump stalls with large heaps.
+                                  HEAP_DUMP_REMOTE_DIR=/tmp   Directory in the container where heap dumps
+                                                              are written (default: /tmp). Only used by SIGUSR2 method;
+                                                              must match --diagnostic-dir in NODE_OPTIONS.
+
+  --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
+                                (default: all instances). Uses flexible matching (exact, prefix, or contains):
+                                  - Helm release names (e.g., 'my-rhdh' matches 'my-rhdh-backstage')
+                                  - Backstage CR names (e.g., 'my-cr' matches 'backstage-my-cr')
+                                  - Deployment names (e.g., 'backstage-developer-hub')
+
+                                Examples:
+                                  --heap-dump-instances my-rhdh
+                                  --heap-dump-instances my-rhdh,developer-hub
 
   Examples:
   # Default collection (includes Namespace inspect for OMC compatibility)
@@ -194,8 +263,7 @@ Usage: ./$(basename "$0") [params...]
   # Include secrets in collection (for detailed troubleshooting - secrets will be sanitized)
   ./$(basename "$0") --with-secrets
 
-  # Collect heap dumps for memory troubleshooting (requires app configured with NODE_OPTIONS)
-  # Prerequisites: Add NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp" to the backstage-backend container
+  # Collect heap dumps for memory troubleshooting
   ./$(basename "$0") --with-heap-dumps
 
   # Full diagnostic collection (secrets + heap dumps - generates large output)
@@ -231,10 +299,17 @@ function run_scripts {
     log_info "Secret collection disabled by default (use --with-secrets to enable)"
   fi
 
-  # Export heap dump collection flag
+  # Export heap dump collection flag, method, and instance filter
   export RHDH_WITH_HEAP_DUMPS="${with_heap_dumps:-}"
+  export RHDH_HEAP_DUMP_METHOD="${heap_dump_method:-inspector}"
+  export RHDH_HEAP_DUMP_INSTANCES="${heap_dump_instances:-}"
   if [[ "${RHDH_WITH_HEAP_DUMPS}" == "true" ]]; then
-    log_warn "Heap dump collection enabled - this may take several minutes and generate large files"
+    local heap_timeout="${HEAP_DUMP_TIMEOUT:-600}"
+    if [[ -n "${RHDH_HEAP_DUMP_INSTANCES}" ]]; then
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, timeout: ${heap_timeout}s, instances: ${RHDH_HEAP_DUMP_INSTANCES})"
+    else
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, timeout: ${heap_timeout}s, all instances)"
+    fi
   fi
 
   for script in "${requested_scripts[@]}";

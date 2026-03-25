@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+export LOG_LEVEL="${LOG_LEVEL:-info}"
+if [[ "$LOG_LEVEL" == "trace" ]]; then
+  set -x
+fi
+
 # Only log ERR trap in debug mode to avoid confusing users with expected failures
 # (e.g., resource not found errors). Script-level failures are handled by must_gather.
 trap 'if [[ "$LOG_LEVEL" == "debug" || "$LOG_LEVEL" == "trace" ]]; then log "DEBUG" "Command failed at line $LINENO (this may be expected)"; fi' ERR
@@ -20,11 +25,6 @@ export GREEN='\033[0;32m'
 export YELLOW='\033[1;33m'
 export BLUE='\033[0;34m'
 export NC='\033[0m' # No Color
-
-export LOG_LEVEL="${LOG_LEVEL:-info}"
-if [[ "$LOG_LEVEL" == "trace" ]]; then
-  set -x
-fi
 
 # Logging functions
 log() {
@@ -510,24 +510,823 @@ collect_container_processes() {
   return 0
 }
 
+# Send a signal to a process in a container
+# Tries 'kill' command first, falls back to Node.js if kill is not available
+# Arguments: ns, pod, container, pid, signal (e.g., USR1, USR2)
+# Returns: 0 on success, 1 on failure
+send_signal_to_process() {
+  local ns="$1"
+  local pod="$2"
+  local container="$3"
+  local pid="$4"
+  local signal="$5"
+
+  # Try kill command first (works in most containers)
+  if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -"$signal" "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  # Fall back to Node.js process.kill() if kill command not available
+  # This works because we know Node.js is running in the container
+  if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- \
+      node -e "process.kill($pid, 'SIG$signal')" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Collect heap dump via Node.js inspector protocol
+# This is more reliable than SIGUSR2 because:
+# 1. SIGUSR1 can activate inspector even if --inspect wasn't passed at startup
+# 2. The inspector protocol provides feedback on success/failure
+# 3. Heap dump location is controlled by the script, not by Node.js defaults
+#
+# Prerequisites:
+# - Node.js process must be running
+# - For best results, start with NODE_OPTIONS="--inspect=0.0.0.0:9229"
+#   (without --inspect, we send SIGUSR1 to activate inspector dynamically)
+#
+# Returns:
+# - 0 if heap dump was successfully collected
+# - 1 if collection failed (caller should try fallback method)
+collect_heap_dump_via_inspector() {
+  local ns="$1"
+  local pod="$2"
+  local container="$3"
+  local node_pid="$4"
+  local output_file="$5"
+  local log_file="$6"
+
+  local inspector_timeout="${HEAP_DUMP_TIMEOUT:-600}"
+  local ws_buffer_size="${HEAP_DUMP_BUFFER_SIZE:-16777216}"  # 16MB default
+  local port_forward_pid=""
+
+  # Cleanup function - ensures port-forward and temp files are cleaned up
+  # even on unexpected exits (via trap)
+  cleanup_inspector() {
+    if [[ -n "${port_forward_pid:-}" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
+      kill "$port_forward_pid" 2>/dev/null || true
+      wait "$port_forward_pid" 2>/dev/null || true
+    fi
+    # Clean up all temp files
+    rm -f "/tmp/inspector_fifo_$$" "/tmp/inspector_out_$$" "/tmp/heapdump_chunks_$$" \
+          "/tmp/inspector_cleaned_$$" "/tmp/inspector_fallback_fifo_$$" \
+          "/tmp/inspector_fallback_out_$$" 2>/dev/null || true
+  }
+  # Alias for backward compatibility within this function
+  cleanup_port_forward() { cleanup_inspector; }
+
+  # Set trap to ensure cleanup on any exit from this function
+  trap cleanup_inspector RETURN
+
+  log_info "Attempting heap dump via inspector protocol for $pod/$container (PID: $node_pid)"
+
+  {
+    echo "=== Inspector Protocol Heap Dump Collection ==="
+    echo "Timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    echo "Pod: $pod"
+    echo "Container: $container"
+    echo "Node.js PID: $node_pid"
+    echo ""
+  } >> "$log_file"
+
+  # Detect inspector port from process command line or environment
+  # Default is 9229, but user may have configured a different port via --inspect=host:port
+  local inspector_port=9229
+  local detected_port=""
+
+  # Try to detect port from cmdline (--inspect=0.0.0.0:9230 or --inspect=:9230 or --inspect=9230)
+  detected_port=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
+    # Check cmdline for --inspect or --inspect-brk with custom port
+    cmdline=\$(cat /proc/$node_pid/cmdline 2>/dev/null | tr '\0' ' ')
+    # Match --inspect=host:port, --inspect=:port, or --inspect=port
+    echo \"\$cmdline\" | grep -oE '\\-\\-inspect(-brk)?=[^[:space:]]*' | head -1 | grep -oE '[0-9]+\$'
+  " 2>/dev/null) || true
+
+  if [[ -n "$detected_port" && "$detected_port" =~ ^[0-9]+$ ]]; then
+    inspector_port="$detected_port"
+    echo "Detected custom inspector port from cmdline: $inspector_port" >> "$log_file"
+  else
+    # Try to detect from NODE_OPTIONS environment variable
+    detected_port=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
+      env_opts=\$(cat /proc/$node_pid/environ 2>/dev/null | tr '\0' '\n' | grep '^NODE_OPTIONS=' | head -1)
+      echo \"\$env_opts\" | grep -oE '\\-\\-inspect(-brk)?=[^[:space:]]*' | head -1 | grep -oE '[0-9]+\$'
+    " 2>/dev/null) || true
+
+    if [[ -n "$detected_port" && "$detected_port" =~ ^[0-9]+$ ]]; then
+      inspector_port="$detected_port"
+      echo "Detected custom inspector port from NODE_OPTIONS: $inspector_port" >> "$log_file"
+    else
+      echo "Using default inspector port: $inspector_port" >> "$log_file"
+    fi
+  fi
+
+  local local_port=$((inspector_port + RANDOM % 1000))  # Avoid port conflicts
+
+  # Step 1: Check if inspector is already enabled by looking for the port
+  # Convert port to hex for /proc/net/tcp lookup (e.g., 9229 -> 2411)
+  local port_hex
+  port_hex=$(printf '%04X' "$inspector_port")
+
+  log_debug "Checking if inspector is already active on port $inspector_port (hex: $port_hex)..."
+  local inspector_active=false
+  if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "
+    # Check if the inspector port is in use by looking at /proc/net/tcp
+    # Port is in hex format in the local_address column (second field after colon)
+    grep -qi ':$port_hex' /proc/net/tcp 2>/dev/null || \
+    grep -qi ':$port_hex' /proc/net/tcp6 2>/dev/null
+  " 2>/dev/null; then
+    inspector_active=true
+    echo "Inspector appears to be already active (port $inspector_port in use)" >> "$log_file"
+  fi
+
+  # Step 2: If inspector not active, send SIGUSR1 to activate it
+  if [[ "$inspector_active" != "true" ]]; then
+    log_info "Sending SIGUSR1 to activate inspector..."
+    echo "Sending SIGUSR1 to PID $node_pid to activate inspector..." >> "$log_file"
+
+    if ! send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file"; then
+      echo "Failed to send SIGUSR1 signal (neither kill nor node available)" >> "$log_file"
+      log_warn "Failed to send SIGUSR1 to activate inspector"
+      return 1
+    fi
+
+    # Wait for inspector to start
+    echo "Waiting for inspector to start..." >> "$log_file"
+    sleep 2
+  fi
+
+  # Step 3: Start port-forward in background (with retry logic)
+  local port_forward_attempts=0
+  local max_port_forward_attempts=2
+  local port_forward_success=false
+
+  while [[ $port_forward_attempts -lt $max_port_forward_attempts && "$port_forward_success" != "true" ]]; do
+    port_forward_attempts=$((port_forward_attempts + 1))
+
+    # On retry, force SIGUSR1 to reactivate inspector
+    if [[ $port_forward_attempts -gt 1 ]]; then
+      echo "" >> "$log_file"
+      echo "=== Retry attempt $port_forward_attempts ===" >> "$log_file"
+      log_info "Retrying with SIGUSR1 to reactivate inspector..."
+      send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file" || true
+      sleep 2
+      # Get a new local port for retry
+      local_port=$((local_port + 1))
+    fi
+
+    log_debug "Starting port-forward to $pod:$inspector_port on local port $local_port"
+    echo "Starting port-forward: localhost:$local_port -> $pod:$inspector_port" >> "$log_file"
+
+    $KUBECTL_CMD port-forward -n "$ns" "pod/$pod" "$local_port:$inspector_port" >> "$log_file" 2>&1 &
+    port_forward_pid=$!
+
+    # Wait for port-forward to be ready
+    local wait_count=0
+    local port_forward_failed=false
+
+    while ! curl -s "http://localhost:$local_port/json" >/dev/null 2>&1; do
+      sleep 0.5
+      wait_count=$((wait_count + 1))
+      if [[ $wait_count -gt 20 ]]; then
+        {
+          echo "Timeout waiting for port-forward to be ready (waited 10 seconds)"
+          echo ""
+          echo "=== Port-forward diagnostics ==="
+          echo "Local port: $local_port"
+          echo "Target: $pod:$inspector_port"
+          echo ""
+          echo "Curl error (last attempt):"
+          curl -s "http://localhost:$local_port/json" 2>&1 || true
+          echo ""
+          echo "Possible causes:"
+          echo "  - Inspector not listening on port $inspector_port"
+          echo "  - Node.js process doesn't support SIGUSR1 inspector activation"
+          echo "  - Network policy blocking the connection"
+          echo "  - Inspector bound to 127.0.0.1 instead of 0.0.0.0"
+        } >> "$log_file"
+        port_forward_failed=true
+        break
+      fi
+      # Check if port-forward process is still running
+      if ! kill -0 "$port_forward_pid" 2>/dev/null; then
+        {
+          echo "Port-forward process died unexpectedly"
+          echo ""
+          echo "=== Port-forward diagnostics ==="
+          echo "The kubectl port-forward process terminated before connection was established."
+          echo "This usually means the target port ($inspector_port) is not open in the container."
+          echo ""
+          echo "Possible causes:"
+          echo "  - Inspector not enabled (Node.js not started with --inspect)"
+          echo "  - SIGUSR1 failed to activate the inspector"
+          echo "  - Container security context prevents port binding"
+        } >> "$log_file"
+        port_forward_failed=true
+        break
+      fi
+    done
+
+    if [[ "$port_forward_failed" == "true" ]]; then
+      cleanup_port_forward
+      if [[ $port_forward_attempts -lt $max_port_forward_attempts ]]; then
+        log_warn "Port-forward failed, will retry with SIGUSR1..."
+      fi
+    else
+      port_forward_success=true
+    fi
+  done
+
+  if [[ "$port_forward_success" != "true" ]]; then
+    log_warn "Port-forward failed after $port_forward_attempts attempts"
+    return 1
+  fi
+
+  echo "Port-forward established successfully" >> "$log_file"
+
+  # Step 4: Get WebSocket URL from inspector
+  log_debug "Fetching inspector WebSocket URL..."
+  local ws_url
+  ws_url=$(curl -s "http://localhost:$local_port/json" | jq -r '.[0].webSocketDebuggerUrl' 2>/dev/null)
+
+  if [[ -z "$ws_url" || "$ws_url" == "null" ]]; then
+    echo "Failed to get WebSocket URL from inspector" >> "$log_file"
+    echo "Inspector /json response:" >> "$log_file"
+    curl -s "http://localhost:$local_port/json" >> "$log_file" 2>&1 || true
+    log_warn "Failed to get inspector WebSocket URL"
+    cleanup_port_forward
+    return 1
+  fi
+
+  # Replace the remote address with localhost since we're using port-forward
+  ws_url=$(echo "$ws_url" | sed "s|ws://[^:]*:|ws://localhost:|" | sed "s|:$inspector_port/|:$local_port/|")
+  echo "WebSocket URL: $ws_url" >> "$log_file"
+
+  # Step 5: Use HeapProfiler.takeHeapSnapshot via WebSocket
+  # This approach provides progress reporting and streams the snapshot data directly.
+  log_info "Triggering heap dump via inspector protocol..."
+  echo "" >> "$log_file"
+  echo "=== Inspector Protocol Communication ===" >> "$log_file"
+
+  # Create temp files for communication
+  local fifo="/tmp/inspector_fifo_$$"
+  local outfile="/tmp/inspector_out_$$"
+  local heapfile="/tmp/heapdump_chunks_$$"
+  rm -f "$fifo" "$outfile" "$heapfile" 2>/dev/null || true
+
+  if ! mkfifo "$fifo" 2>> "$log_file"; then
+    echo "Failed to create FIFO: $fifo" >> "$log_file"
+    log_warn "Failed to create FIFO for inspector communication"
+    return 1
+  fi
+  if ! touch "$outfile" "$heapfile" 2>> "$log_file"; then
+    echo "Failed to create temp files" >> "$log_file"
+    log_warn "Failed to create temp files for inspector communication"
+    return 1
+  fi
+
+  # Start websocat in background
+  # Flags:
+  #   -B <size>   - buffer size for large heap snapshot chunks (default: 16MB)
+  #   -t          - text mode (not binary)
+  websocat -t -B "$ws_buffer_size" "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
+  local websocat_pid=$!
+
+  # Give websocat a moment to connect
+  sleep 0.5
+
+  # Check if websocat is still running (connection succeeded)
+  if ! kill -0 "$websocat_pid" 2>/dev/null; then
+    echo "Websocat failed to connect to inspector WebSocket" >> "$log_file"
+    log_warn "Failed to establish WebSocket connection to inspector"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile" "$heapfile"
+    return 1
+  fi
+
+  # Open fifo for writing
+  exec 3>"$fifo"
+
+  # Step 5a: Ping test - verify two-way WebSocket communication
+  echo "=== Ping Test ===" >> "$log_file"
+  echo "Testing two-way WebSocket communication..." >> "$log_file"
+  local ping_command='{"id":0,"method":"Runtime.evaluate","params":{"expression":"JSON.stringify({v:process.version,pid:process.pid,time:Date.now()})","returnByValue":true}}'
+  echo "$ping_command" >&3
+
+  # Wait for ping response (max 10 seconds)
+  local ping_wait=0
+  local ping_received=false
+  while [[ "$ping_received" != "true" && $ping_wait -lt 10 ]]; do
+    sleep 1
+    ping_wait=$((ping_wait + 1))
+    if grep -qa '"id":0' "$outfile" 2>/dev/null; then
+      ping_received=true
+    fi
+  done
+
+  if [[ "$ping_received" != "true" ]]; then
+    {
+      echo "Ping test FAILED - no response received after ${ping_wait}s"
+      echo "This indicates WebSocket responses are not coming back."
+      echo "Possible causes:"
+      echo "  - Network proxy/mesh intercepting WebSocket traffic"
+      echo "  - Firewall or network policy blocking responses"
+      echo "  - Inspector in unexpected state"
+    } >> "$log_file"
+    log_warn "WebSocket ping test failed - two-way communication broken"
+    exec 3>&-
+    kill "$websocat_pid" 2>/dev/null || true
+    wait "$websocat_pid" 2>/dev/null || true
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile" "$heapfile"
+    return 1
+  fi
+
+  local ping_response
+  ping_response=$(grep '"id":0' "$outfile" | head -1)
+  echo "Ping response: $ping_response" >> "$log_file"
+  log_debug "WebSocket ping test passed - two-way communication confirmed"
+
+  # Clear the output file for heap dump collection
+  : > "$outfile"
+
+  # Step 5b: Enable HeapProfiler domain
+  {
+    echo ""
+    echo "=== Heap Dump Collection ==="
+    echo "Enabling HeapProfiler domain..."
+  } >> "$log_file"
+  echo '{"id":1,"method":"HeapProfiler.enable"}' >&3
+  sleep 0.5
+
+  # Step 5c: Start heap snapshot with progress reporting
+  echo "Starting heap snapshot with progress reporting..." >> "$log_file"
+  log_info "Taking heap snapshot (this may take several minutes for large heaps)..."
+  echo '{"id":2,"method":"HeapProfiler.takeHeapSnapshot","params":{"reportProgress":true}}' >&3
+
+  # Wait for completion, checking progress periodically
+  # Note: We don't process chunks during collection to avoid race conditions.
+  # All chunk extraction happens after websocat completes.
+  local wait_time=0
+  local max_wait=$inspector_timeout
+  local snapshot_complete=false
+  local last_reported_pct=-1
+  local last_size=0
+  local last_cpu_time=0
+  local stall_time=0
+  local cpu_stall_time=0
+
+  # Helper to get CPU time (utime + stime) from /proc/<pid>/stat
+  get_cpu_time() {
+    $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- \
+      sh -c "cat /proc/$node_pid/stat 2>/dev/null | awk '{print \$14+\$15}'" 2>/dev/null || echo "0"
+  }
+
+  # Get initial CPU time
+  last_cpu_time=$(get_cpu_time)
+  echo "Initial CPU time: $last_cpu_time" >> "$log_file"
+
+  while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
+    sleep 1
+    wait_time=$((wait_time + 1))
+
+    # Check if websocat is still running
+    if ! kill -0 "$websocat_pid" 2>/dev/null; then
+      echo "Websocat process ended after ${wait_time}s" >> "$log_file"
+      break
+    fi
+
+    # Check for completion or progress (read-only, don't modify the file)
+    if grep -qa '"id":2' "$outfile" 2>/dev/null; then
+      if grep -q '"result":{}' "$outfile" 2>/dev/null; then
+        snapshot_complete=true
+        echo "HeapProfiler.takeHeapSnapshot completed successfully" >> "$log_file"
+      elif grep -q '"error"' "$outfile" 2>/dev/null; then
+        local error_line error_msg
+        error_line=$(grep -a '"id":2' "$outfile" | grep -a '"error"' | head -1)
+        error_msg=$(echo "$error_line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+        echo "HeapProfiler.takeHeapSnapshot failed: $error_msg" >> "$log_file"
+        log_warn "Heap snapshot failed: $error_msg"
+        exec 3>&-
+        kill "$websocat_pid" 2>/dev/null || true
+        wait "$websocat_pid" 2>/dev/null || true
+        cleanup_port_forward
+        rm -f "$fifo" "$outfile" "$heapfile"
+        return 1
+      fi
+    fi
+
+    # Check for progress events in recent lines (use tail to avoid reading huge file)
+    local latest_progress
+    latest_progress=$(tail -100 "$outfile" 2>/dev/null | grep -a '"HeapProfiler.reportHeapSnapshotProgress"' | tail -1)
+    if [[ -n "$latest_progress" ]]; then
+      local done_val total_val pct
+      done_val=$(echo "$latest_progress" | jq -r '.params.done // 0' 2>/dev/null)
+      total_val=$(echo "$latest_progress" | jq -r '.params.total // 1' 2>/dev/null)
+      if [[ "$total_val" -gt 0 ]]; then
+        pct=$((done_val * 100 / total_val))
+        # Only log every 10% to avoid spam
+        if [[ $((pct / 10)) -gt $((last_reported_pct / 10)) ]]; then
+          log_info "Heap snapshot progress: ${pct}% (${done_val}/${total_val})"
+          echo "Progress: ${pct}% (${done_val}/${total_val})" >> "$log_file"
+          last_reported_pct=$pct
+        fi
+      fi
+    fi
+
+    # Monitor for stalled connections (no data flowing)
+    local current_size
+    current_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+
+    if [[ "$current_size" -eq "$last_size" ]]; then
+      stall_time=$((stall_time + 1))
+
+      # Check CPU activity every 10 seconds when data is stalled
+      if [[ $((stall_time % 10)) -eq 0 ]]; then
+        local current_cpu_time
+        current_cpu_time=$(get_cpu_time)
+
+        # Compare against PREVIOUS reading (not initial), detect any change
+        if [[ "$current_cpu_time" -ne "$last_cpu_time" ]]; then
+          # CPU time changed - process is active
+          local cpu_delta=$((current_cpu_time - last_cpu_time))
+          echo "CPU active: delta=${cpu_delta} ticks (prev: $last_cpu_time, now: $current_cpu_time) - V8 is working" >> "$log_file"
+          log_debug "No data for ${stall_time}s but CPU active (delta=${cpu_delta} ticks) - V8 is working"
+          cpu_stall_time=0
+        else
+          # CPU time unchanged - process may be idle
+          cpu_stall_time=$((cpu_stall_time + 10))
+          echo "CPU unchanged for ${cpu_stall_time}s (time: $current_cpu_time)" >> "$log_file"
+        fi
+        # Always update last_cpu_time for next comparison
+        last_cpu_time=$current_cpu_time
+      fi
+
+      # Log warnings at key intervals but don't abort - wait for full timeout
+      if [[ $stall_time -eq 60 ]]; then
+        if [[ $cpu_stall_time -ge 60 ]]; then
+          log_warn "No data for 60s and CPU unchanged - possible stall (will keep waiting)"
+        else
+          log_info "No data for 60s but CPU active - V8 is working (will keep waiting)"
+        fi
+      elif [[ $stall_time -eq 180 ]]; then
+        log_warn "No data for 3 minutes - heap serialization may be slow or connection stalled"
+      elif [[ $stall_time -eq 300 ]]; then
+        log_warn "No data for 5 minutes - consider increasing HEAP_DUMP_TIMEOUT if this completes"
+      fi
+    else
+      # Data is flowing - reset all stall counters
+      stall_time=0
+      cpu_stall_time=0
+      last_size=$current_size
+    fi
+
+    # Show periodic status based on file size
+    if [[ $((wait_time % 30)) -eq 0 && $wait_time -gt 0 ]]; then
+      local human_size
+      if [[ $current_size -gt 1048576 ]]; then
+        human_size="$((current_size / 1048576))MB"
+      elif [[ $current_size -gt 1024 ]]; then
+        human_size="$((current_size / 1024))KB"
+      else
+        human_size="${current_size}B"
+      fi
+      log_info "Collecting heap data... ${wait_time}s elapsed, ${human_size} received"
+    fi
+  done
+
+  # Close fifo
+  exec 3>&-
+
+  # Kill websocat if still running
+  if kill -0 "$websocat_pid" 2>/dev/null; then
+    kill "$websocat_pid" 2>/dev/null || true
+    wait "$websocat_pid" 2>/dev/null || true
+  fi
+
+  local timed_out=false
+  if [[ "$snapshot_complete" != "true" ]]; then
+    timed_out=true
+    echo "" >> "$log_file"
+    echo "Timeout waiting for heap snapshot (waited ${wait_time}s)" >> "$log_file"
+    log_warn "Heap snapshot via inspector timed out after ${wait_time}s - attempting partial extraction"
+  fi
+
+  # Step 6: Extract heap snapshot chunks from the collected data
+  # Try extraction even on timeout - we may have partial but useful data
+  echo "" >> "$log_file"
+  echo "=== Extracting Heap Snapshot ===" >> "$log_file"
+  if [[ "$timed_out" == "true" ]]; then
+    log_info "Attempting to extract partial heap snapshot data..."
+  else
+    log_info "Extracting heap snapshot data..."
+  fi
+
+  local chunks_received=0
+  local raw_size
+  raw_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+  echo "Raw WebSocket data size: $raw_size bytes" >> "$log_file"
+
+  # WebSocket output may contain leading null bytes from buffer initialization.
+  # Strip them before JSON parsing. The messages are already newline-separated.
+  local cleaned_file="/tmp/inspector_cleaned_$$"
+  if ! tr -d '\0' < "$outfile" > "$cleaned_file" 2>> "$log_file"; then
+    echo "Failed to strip null bytes from output" >> "$log_file"
+    log_warn "Failed to process WebSocket output"
+    return 1
+  fi
+
+  local cleaned_size
+  cleaned_size=$(stat -c%s "$cleaned_file" 2>/dev/null || echo 0)
+  echo "Cleaned data size (null bytes removed): $cleaned_size bytes" >> "$log_file"
+
+  # Use -rj: -r for raw string output (chunks are already valid JSON content),
+  #         -j to join outputs without adding newlines between chunks.
+  if ! jq -rj 'select(.method == "HeapProfiler.addHeapSnapshotChunk") | .params.chunk // empty' "$cleaned_file" > "$heapfile" 2>> "$log_file"; then
+    echo "jq extraction failed" >> "$log_file"
+    echo "First 200 bytes after cleaning:" >> "$log_file"
+    head -c 200 "$cleaned_file" | xxd >> "$log_file" 2>&1 || true
+    log_warn "Failed to extract heap snapshot chunks"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile" "$heapfile" "$cleaned_file"
+    return 1
+  fi
+  rm -f "$cleaned_file"
+
+  # Count chunks for logging (use grep -o to count all occurrences, not just lines)
+  chunks_received=$(grep -ao '"HeapProfiler.addHeapSnapshotChunk"' "$outfile" 2>/dev/null | wc -l || echo 0)
+
+  {
+    echo ""
+    echo "=== Collection Summary ==="
+    echo "Chunks received: $chunks_received"
+    echo "Time elapsed: ${wait_time}s"
+    if [[ "$timed_out" == "true" ]]; then
+      echo "Status: PARTIAL (timed out before completion)"
+    else
+      echo "Status: COMPLETE"
+    fi
+  } >> "$log_file"
+
+  # Verify we got actual data
+  local heap_size
+  heap_size=$(stat -c%s "$heapfile" 2>/dev/null || echo "0")
+
+  # If we timed out, try fallback regardless of whether we got partial data
+  if [[ "$timed_out" == "true" ]]; then
+    if [[ "$heap_size" -lt 1000 ]]; then
+      {
+        echo "Heap snapshot file too small ($heap_size bytes)"
+        echo "This may indicate:"
+        echo "  - WebSocket connection issues (chunks not received)"
+        echo "  - Inspector protocol errors"
+        echo "Attempting fallback method..."
+      } >> "$log_file"
+      log_warn "No heap data received via streaming - trying fallback"
+    else
+      # Save partial snapshot
+      if mv "$heapfile" "$output_file" 2>> "$log_file"; then
+        local partial_file="${output_file%.heapsnapshot}.PARTIAL.heapsnapshot"
+        mv "$output_file" "$partial_file" 2>> "$log_file" || true
+        local human_size
+        human_size=$(du -h "$partial_file" 2>/dev/null | cut -f1)
+        echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
+        log_warn "Partial heap dump saved ($human_size) - may be incomplete"
+      fi
+    fi
+
+    # Fallback: Try v8.writeHeapSnapshot() via Runtime.evaluate
+    # This writes directly to a file in the container, bypassing WebSocket streaming
+    echo "" >> "$log_file"
+    echo "=== Fallback: v8.writeHeapSnapshot() ===" >> "$log_file"
+    log_info "Attempting fallback: writing heap dump directly to container filesystem..."
+
+    # Re-establish port-forward (inspector connection may have died)
+    echo "Re-establishing inspector connection for fallback..." >> "$log_file"
+    cleanup_port_forward
+
+    # Send SIGUSR1 to ensure inspector is active
+    log_debug "Sending SIGUSR1 to reactivate inspector..."
+    send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file" || true
+    sleep 2
+
+    # Start new port-forward on a different port
+    local fallback_port=$((local_port + 100))
+    $KUBECTL_CMD port-forward -n "$ns" "pod/$pod" "$fallback_port:$inspector_port" >> "$log_file" 2>&1 &
+    port_forward_pid=$!
+
+    # Wait for port-forward to be ready
+    local pf_wait=0
+    while ! curl -s "http://localhost:$fallback_port/json" >/dev/null 2>&1; do
+      sleep 0.5
+      pf_wait=$((pf_wait + 1))
+      if [[ $pf_wait -gt 20 ]] || ! kill -0 "$port_forward_pid" 2>/dev/null; then
+        echo "Failed to re-establish port-forward for fallback" >> "$log_file"
+        log_warn "Fallback failed: could not re-establish inspector connection"
+        cleanup_port_forward
+        return 0
+      fi
+    done
+    echo "Port-forward re-established on port $fallback_port" >> "$log_file"
+
+    # Get new WebSocket URL
+    local fallback_ws_url
+    fallback_ws_url=$(curl -s "http://localhost:$fallback_port/json" | jq -r '.[0].webSocketDebuggerUrl' 2>/dev/null)
+    fallback_ws_url=$(echo "$fallback_ws_url" | sed "s|ws://[^:]*:|ws://localhost:|" | sed "s|:$inspector_port/|:$fallback_port/|")
+    echo "Fallback WebSocket URL: $fallback_ws_url" >> "$log_file"
+
+    local remote_heap_file="${HEAP_DUMP_REMOTE_DIR:-/tmp}/heapdump-fallback-$$.heapsnapshot"
+    local fallback_fifo="/tmp/inspector_fallback_fifo_$$"
+    local fallback_out="/tmp/inspector_fallback_out_$$"
+    rm -f "$fallback_fifo" "$fallback_out" 2>/dev/null || true
+
+    if ! mkfifo "$fallback_fifo" 2>> "$log_file" || ! touch "$fallback_out" 2>> "$log_file"; then
+      echo "Failed to create fallback temp files" >> "$log_file"
+      log_warn "Fallback failed: could not create temp files"
+      return 0  # Return success since partial file was saved
+    fi
+
+    # Start new websocat connection for fallback
+    websocat -t -B "$ws_buffer_size" "$fallback_ws_url" < "$fallback_fifo" > "$fallback_out" 2>> "$log_file" &
+    local fallback_ws_pid=$!
+    sleep 0.5
+
+    if kill -0 "$fallback_ws_pid" 2>/dev/null; then
+      exec 4>"$fallback_fifo"
+
+      # Use Runtime.evaluate to write heap snapshot to file
+      # includeCommandLineAPI:true provides a require() function in the inspector context
+      # that works regardless of whether the app uses CommonJS or ESM
+      local write_cmd="require('v8').writeHeapSnapshot('$remote_heap_file')"
+      echo "Sending: Runtime.evaluate with $write_cmd" >> "$log_file"
+      echo "{\"id\":10,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"$write_cmd\",\"includeCommandLineAPI\":true,\"returnByValue\":true}}" >&4
+
+      # Wait for response (honor configured timeout)
+      local fallback_wait=0
+      local fallback_max=$inspector_timeout
+      local fallback_done=false
+
+      while [[ "$fallback_done" != "true" && $fallback_wait -lt $fallback_max ]]; do
+        sleep 1
+        fallback_wait=$((fallback_wait + 1))
+
+        if grep -qa '"id":10' "$fallback_out" 2>/dev/null; then
+          fallback_done=true
+        fi
+
+        # Log progress every 30s
+        if [[ $((fallback_wait % 30)) -eq 0 ]]; then
+          log_info "Waiting for v8.writeHeapSnapshot()... ${fallback_wait}s"
+        fi
+      done
+
+      exec 4>&-
+      kill "$fallback_ws_pid" 2>/dev/null || true
+      wait "$fallback_ws_pid" 2>/dev/null || true
+
+      if [[ "$fallback_done" == "true" ]]; then
+        # Check if the file was created and copy it
+        local response
+        response=$(grep -a '"id":10' "$fallback_out" | head -1)
+        echo "Response: $response" >> "$log_file"
+
+        # Check for errors in response
+        if echo "$response" | grep -q '"error"'; then
+          local err_msg
+          err_msg=$(echo "$response" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+          echo "v8.writeHeapSnapshot() failed: $err_msg" >> "$log_file"
+          log_warn "Fallback failed: $err_msg"
+        else
+          # Extract the returned filename (v8.writeHeapSnapshot returns the path)
+          local returned_path
+          returned_path=$(echo "$response" | jq -r '.result.result.value // empty' 2>/dev/null)
+          if [[ -n "$returned_path" ]]; then
+            remote_heap_file="$returned_path"
+          fi
+          echo "Heap snapshot written to: $remote_heap_file" >> "$log_file"
+
+          # Copy the file from the container
+          local fallback_output="${output_file%.heapsnapshot}.fallback.heapsnapshot"
+          log_info "Copying heap dump from container..."
+          if $KUBECTL_CMD cp -n "$ns" "${pod}:${remote_heap_file}" "$fallback_output" -c "$container" >> "$log_file" 2>&1; then
+            local fallback_size
+            fallback_size=$(du -h "$fallback_output" 2>/dev/null | cut -f1)
+            echo "Fallback heap snapshot copied: $fallback_output ($fallback_size)" >> "$log_file"
+            log_success "Fallback heap dump collected via v8.writeHeapSnapshot ($fallback_size)"
+
+            # Clean up remote file
+            $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$remote_heap_file" 2>/dev/null || true
+
+            # Remove the partial file since we have a complete one
+            if [[ -n "${partial_file:-}" && -f "$partial_file" ]]; then
+              rm -f "$partial_file"
+            fi
+          else
+            echo "Failed to copy heap snapshot from container" >> "$log_file"
+            log_warn "Fallback failed: could not copy file from container"
+          fi
+        fi
+      else
+        echo "Timeout waiting for v8.writeHeapSnapshot() (${fallback_wait}s)" >> "$log_file"
+        log_warn "Fallback timed out after ${fallback_wait}s"
+      fi
+
+      rm -f "$fallback_fifo" "$fallback_out"
+    else
+      echo "Failed to establish WebSocket connection for fallback" >> "$log_file"
+      log_warn "Fallback failed: could not connect to inspector"
+      rm -f "$fallback_fifo" "$fallback_out"
+    fi
+
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 0
+  fi
+
+  # Success case: streaming completed without timeout
+  if [[ "$heap_size" -lt 1000 ]]; then
+    {
+      echo "Heap snapshot file too small ($heap_size bytes)"
+      echo "This may indicate:"
+      echo "  - WebSocket connection issues (chunks not received)"
+      echo "  - Inspector protocol errors"
+      echo "  - Empty heap (unlikely for Backstage)"
+    } >> "$log_file"
+    log_warn "Heap snapshot appears empty or corrupted"
+    return 1
+  fi
+
+  # Move the heap file to output location
+  if ! mv "$heapfile" "$output_file" 2>> "$log_file"; then
+    echo "Failed to move heap file to output location" >> "$log_file"
+    log_warn "Failed to save heap snapshot"
+    return 1
+  fi
+
+  local human_size
+  human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
+  echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
+  log_success "Heap dump collected via inspector protocol ($human_size)"
+  return 0
+}
+
 collect_heap_dumps_for_pods() {
   local ns="$1"
   local labels="$2"
   local output_dir="$3"
-  
+  local deploy_name="${4:-}"      # Deployment/StatefulSet name
+  local instance_name="${5:-}"    # Helm release name or CR name (optional)
+
   # Only collect heap dumps if explicitly enabled
   if [[ "${RHDH_WITH_HEAP_DUMPS:-false}" != "true" ]]; then
     log_debug "Heap dump collection disabled (use --with-heap-dumps to enable)"
     return 0
   fi
-  
+
+  # Check instance filter if specified
+  # Match against deploy_name OR instance_name (Helm release or CR name)
+  # Supports exact match, prefix match (e.g., "my-rhdh" matches "my-rhdh-backstage"), or contains match
+  if [[ -n "${RHDH_HEAP_DUMP_INSTANCES:-}" ]]; then
+    local match_found=false
+    IFS=',' read -ra INSTANCES <<< "$RHDH_HEAP_DUMP_INSTANCES"
+    for instance in "${INSTANCES[@]}"; do
+      # Trim whitespace
+      instance=$(echo "$instance" | xargs)
+      # Check deploy_name: exact match, prefix match, or contains
+      if [[ -n "$deploy_name" ]]; then
+        if [[ "$deploy_name" == "$instance" ]] || \
+           [[ "$deploy_name" == "$instance"-* ]] || \
+           [[ "$deploy_name" == *"$instance"* ]]; then
+          match_found=true
+          break
+        fi
+      fi
+      # Check instance_name: exact match, prefix match, or contains
+      if [[ -n "$instance_name" ]]; then
+        if [[ "$instance_name" == "$instance" ]] || \
+           [[ "$instance_name" == "$instance"-* ]] || \
+           [[ "$instance_name" == *"$instance"* ]]; then
+          match_found=true
+          break
+        fi
+      fi
+    done
+    if [[ "$match_found" != "true" ]]; then
+      local names="${deploy_name}"
+      [[ -n "$instance_name" && "$instance_name" != "$deploy_name" ]] && names="$names, $instance_name"
+      log_debug "Skipping heap dump for instance(s) '$names' (not in filter: $RHDH_HEAP_DUMP_INSTANCES)"
+      return 0
+    fi
+  fi
+
   log_info "Collecting heap dumps for pods with labels: $labels in namespace: $ns"
   
   local heap_dump_dir="$output_dir/heap-dumps"
   ensure_directory "$heap_dump_dir"
   
   # Timeout for heap dump generation (per pod)
-  local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-120}"
+  local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-600}"
   
   # Get list of running pods matching the labels
   local pods
@@ -558,8 +1357,29 @@ collect_heap_dumps_for_pods() {
         log_debug "Skipping container $container (only collecting from backstage-backend)"
         continue
       fi
-      
+
       log_info "Processing backstage-backend container in pod: $pod"
+
+      # Wrap entire container processing in error handling to ensure we continue on failure
+      # This is a safety net for any unexpected errors
+      if ! _process_container_heap_dump "$ns" "$pod" "$container" "$pod_dir" "$HEAP_DUMP_TIMEOUT"; then
+        log_warn "Heap dump collection encountered an error for $pod/$container, continuing to next container"
+        continue
+      fi
+    done
+  done
+
+  log_success "Heap dump collection completed for namespace: $ns"
+}
+
+# Internal function to process heap dump for a single container
+# Separated to allow proper error handling without affecting the main loop
+_process_container_heap_dump() {
+  local ns="$1"
+  local pod="$2"
+  local container="$3"
+  local pod_dir="$4"
+  local HEAP_DUMP_TIMEOUT="$5"
       
       # Find the Node.js process PID in the backstage-backend container
       # Using /proc filesystem as it's always available in Linux containers
@@ -594,7 +1414,7 @@ collect_heap_dumps_for_pods() {
           echo "${_pid_err:-No error output captured}"
         } > "$container_dir/no-node-process.txt"
         node_pid=""
-        continue
+        return 1
       fi
 
       if [[ -z "$node_pid" ]]; then
@@ -604,17 +1424,17 @@ collect_heap_dumps_for_pods() {
         echo "No Node.js process found in backstage-backend container" > "$container_dir/no-node-process.txt"
         echo "Searched /proc filesystem for node process" >> "$container_dir/no-node-process.txt"
         echo "This usually means the container is not running a Node.js application" >> "$container_dir/no-node-process.txt"
-        continue
+        return 1
       fi
       
       log_info "Found Node.js process (PID: $node_pid) in backstage-backend container"
       
       local container_dir="$pod_dir/container=$container"
       ensure_directory "$container_dir"
-      
-      local timestamp=$(date +%Y%m%d-%H%M%S)
+
+      local timestamp
+      timestamp=$(date +%Y%m%d-%H%M%S)
       local heap_file="heapdump-${timestamp}.heapsnapshot"
-      local remote_path="/tmp/${heap_file}"
       
       # Log the Node.js PID
       log_info "Node.js process PID: $node_pid"
@@ -644,74 +1464,117 @@ collect_heap_dumps_for_pods() {
         $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- df -h 2>/dev/null || echo "Could not get disk space"
       } > "$container_dir/process-info.txt"
       
-      # Send SIGUSR2 signal directly to the Node.js process
-      # This works if Node.js was started with --heapsnapshot-signal=SIGUSR2 (recommended)
-      # or if the app has heapdump module or custom SIGUSR2 handler
-      log_info "Sending SIGUSR2 signal to trigger heap dump..."
-      
-      {
-        echo "Sending SIGUSR2 signal to Node.js process (PID: $node_pid)..."
-        if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "kill -USR2 $node_pid" 2>&1; then
-          echo "✓ SIGUSR2 sent successfully to PID $node_pid"
+      # Track whether heap dump was successfully collected
+      local heap_collected=false
+      local heap_dump_method="${RHDH_HEAP_DUMP_METHOD:-inspector}"
+
+      log_info "Using heap dump method: $heap_dump_method"
+
+      if [[ "$heap_dump_method" == "inspector" ]]; then
+        # =====================================================================
+        # Inspector Protocol Method
+        # =====================================================================
+        # Uses SIGUSR1 to activate inspector + Chrome DevTools Protocol
+        # Benefits:
+        # - Works even without --inspect flag (SIGUSR1 activates it dynamically)
+        # - Provides feedback on success/failure
+        # - Heap dump is collected directly via protocol
+
+        log_info "Attempting heap dump collection via inspector protocol..."
+        local inspector_heap_file="$container_dir/${heap_file}"
+
+        if collect_heap_dump_via_inspector "$ns" "$pod" "$container" "$node_pid" \
+             "$inspector_heap_file" "$container_dir/heap-dump.log" 2>&1; then
+          heap_collected=true
+          log_success "Heap dump collected via inspector protocol"
         else
-          echo "✗ Failed to send SIGUSR2 signal"
+          local inspector_error=$?
+          log_warn "Inspector protocol method failed (exit code: $inspector_error)"
+          echo "Inspector protocol failed with exit code: $inspector_error" >> "$container_dir/heap-dump.log"
         fi
-        
-        # Wait for heap dump file to be created
-        echo ""
-        echo "Waiting ${HEAP_DUMP_TIMEOUT}s for heap dump to be generated..."
-        sleep "${HEAP_DUMP_TIMEOUT}"
-        
-        # Look for heap dump files in common locations
-        echo "Searching for heap dump files..."
-        local found_dumps
-        found_dumps=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-          "find /tmp /app /opt/app-root/src . -maxdepth 2 \( -name '*.heapsnapshot' -o -name 'Heap.*.heapsnapshot' -o -name 'heapdump-*.heapsnapshot' \) 2>/dev/null | head -5" 2>/dev/null || true)
-        
-        if [[ -n "$found_dumps" ]]; then
-          echo "✓ Found heap dump file(s):"
-          echo "$found_dumps"
-        else
-          echo "✗ No heap dump files found in /tmp, /app, /opt/app-root/src, or current directory"
-        fi
-      } >> "$container_dir/heap-dump.log" 2>&1
-      
-      # Try to copy any heap dump file we can find
-      local copied=false
-      local search_paths="/tmp /app /opt/app-root/src"
-      
-      for search_path in $search_paths; do
-        local heap_files
-        heap_files=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-          "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
-        
-        if [[ -n "$heap_files" ]]; then
-          log_info "Found heap dump file: $heap_files"
-          
-          local local_path="$container_dir/${heap_file}"
-          if $KUBECTL_CMD cp -n "$ns" "${pod}:${heap_files}" "$local_path" -c "$container" >> "$container_dir/heap-dump.log" 2>&1; then
-            local file_size=$(du -h "$local_path" 2>/dev/null | cut -f1)
-            log_success "Heap dump copied to $local_path (${file_size})"
-            echo "Heap dump collected: ${heap_file} (${file_size})" >> "$container_dir/heap-dump.log"
-            
-            # Clean up remote file
-            $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$heap_files" 2>/dev/null || true
-            
-            copied=true
-            break
+
+      elif [[ "$heap_dump_method" == "sigusr2" ]]; then
+        # =====================================================================
+        # SIGUSR2 Signal Method
+        # =====================================================================
+        # This works if Node.js was started with --heapsnapshot-signal=SIGUSR2
+        # or if the app has heapdump module or custom SIGUSR2 handler
+
+        log_info "Sending SIGUSR2 signal to trigger heap dump..."
+
+        {
+          echo "Sending SIGUSR2 signal to Node.js process (PID: $node_pid)..."
+          if send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR2" 2>&1; then
+            echo "SIGUSR2 sent successfully to PID $node_pid"
+          else
+            echo "Failed to send SIGUSR2 signal"
           fi
-        fi
-      done
-      
-      if [[ "$copied" != "true" ]]; then
-        log_warn "Failed to collect heap dump for $pod/$container"
-        log_info "The application is not instrumented to generate heap dumps on SIGUSR2"
+
+          # Wait for heap dump file to be created
+          echo ""
+          echo "Waiting ${HEAP_DUMP_TIMEOUT}s for heap dump to be generated..."
+          sleep "${HEAP_DUMP_TIMEOUT}"
+
+          # Look for heap dump files in common locations
+          # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
+          local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
+          echo "Searching for heap dump files (primary: $remote_dir)..."
+          local found_dumps
+          found_dumps=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
+            "find $remote_dir /tmp /app /opt/app-root/src . -maxdepth 2 \( -name '*.heapsnapshot' -o -name 'Heap.*.heapsnapshot' -o -name 'heapdump-*.heapsnapshot' \) 2>/dev/null | head -5" 2>/dev/null || true)
+
+          if [[ -n "$found_dumps" ]]; then
+            echo "Found heap dump file(s):"
+            echo "$found_dumps"
+          else
+            echo "No heap dump files found in $remote_dir, /tmp, /app, /opt/app-root/src, or current directory"
+          fi
+        } >> "$container_dir/heap-dump.log" 2>&1
+
+        # Try to copy any heap dump file we can find
+        # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
+        local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
+        local search_paths="$remote_dir /tmp /app /opt/app-root/src"
+
+        for search_path in $search_paths; do
+          local heap_files
+          heap_files=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
+            "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
+
+          if [[ -n "$heap_files" ]]; then
+            log_info "Found heap dump file: $heap_files"
+
+            local local_path="$container_dir/${heap_file}"
+            if $KUBECTL_CMD cp -n "$ns" "${pod}:${heap_files}" "$local_path" -c "$container" >> "$container_dir/heap-dump.log" 2>&1; then
+              local file_size
+              file_size=$(du -h "$local_path" 2>/dev/null | cut -f1)
+              log_success "Heap dump copied to $local_path (${file_size})"
+              echo "Heap dump collected: ${heap_file} (${file_size})" >> "$container_dir/heap-dump.log"
+
+              # Clean up remote file
+              $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$heap_files" 2>/dev/null || true
+
+              heap_collected=true
+              break
+            fi
+          fi
+        done
+      else
+        log_error "Unknown heap dump method: $heap_dump_method"
+        echo "Unknown heap dump method: $heap_dump_method" >> "$container_dir/heap-dump.log"
+      fi
+
+      # =====================================================================
+      # Collection failed - provide guidance
+      # =====================================================================
+      if [[ "$heap_collected" != "true" ]]; then
+        log_warn "Failed to collect heap dump for $pod/$container using method: $heap_dump_method"
         {
           echo "==================================================================="
           echo "Heap Dump Collection Failed"
           echo "==================================================================="
           echo ""
-          echo "All collection methods were attempted, but no heap dump was generated."
+          echo "Method used: $heap_dump_method"
           echo ""
           echo "Node.js Process Information:"
           echo "  PID: $node_pid"
@@ -719,65 +1582,55 @@ collect_heap_dumps_for_pods() {
           echo "  Pod: $pod"
           echo "  Namespace: $ns"
           echo ""
-          echo "Method Attempted:"
-          echo "  ✓ SIGUSR2 signal sent directly to backstage-backend container (PID: $node_pid)"
-          echo ""
-          echo "Result: No heap dump files were created in /tmp, /app, /opt/app-root/src, or current directory"
-          echo ""
-          echo "==================================================================="
-          echo "Why This Happened"
-          echo "==================================================================="
-          echo ""
-          echo "The Backstage application is not currently instrumented to handle"
-          echo "SIGUSR2 signals for heap dump generation. This is the default state"
-          echo "for most Node.js applications."
-          echo ""
-          echo "==================================================================="
-          echo "How to Enable Heap Dumps"
-          echo "==================================================================="
-          echo ""
-          echo "⭐ Node.js Built-in Flag (RECOMMENDED)"
-          echo "---------------------------------------------------------"
-          echo "Built into Node.js v12.0.0+, no image rebuild or dependencies required!"
-          echo ""
-          echo "Add to your Deployment or Backstage CR:"
-          echo "  spec:"
-          echo "    template:"
-          echo "      spec:"
-          echo "        containers:"
-          echo "        - name: backstage-backend"
-          echo "          env:"
-          echo "          - name: NODE_OPTIONS"
-          echo "            value: \"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
-          echo ""
-          echo "⚠️  IMPORTANT:"
-          echo "   • --heapsnapshot-signal=SIGUSR2 enables automatic heap dump on signal"
-          echo "   • --diagnostic-dir=/tmp is REQUIRED for read-only root filesystems"
-          echo "     (common security best practice). Without it, heap dumps will fail!"
-          echo ""
-          echo "Advantages:"
-          echo "  ✅ Built into Node.js - zero dependencies!"
-          echo "  ✅ No image rebuild required"
-          echo "  ✅ No source code changes needed"
-          echo "  ✅ Works immediately after pod restart"
-          echo ""
-          echo "Collection method: SIGUSR2 signal sent via kubectl exec"
-          echo "Works with any Kubernetes version, no special RBAC permissions needed"
-          echo ""
-          echo "Reference: https://nodejs.org/docs/latest/api/cli.html#--heapsnapshot-signalsignal"
-          echo ""
-          echo "==================================================================="
-          echo "Next Steps"
-          echo "==================================================================="
-          echo ""
-          echo "1. Update your Deployment/CR with NODE_OPTIONS as shown above"
-          echo "2. Redeploy and wait for the pod to restart"
-          echo "3. Run must-gather again with --with-heap-dumps:"
-          echo ""
-          echo "   oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- \\"
-          echo "     /usr/bin/gather --with-heap-dumps"
-          echo ""
-          echo "The heap dump will be automatically collected and included in the output."
+
+          if [[ "$heap_dump_method" == "inspector" ]]; then
+            echo "==================================================================="
+            echo "Why Inspector Protocol Failed"
+            echo "==================================================================="
+            echo ""
+            echo "Common reasons for failure:"
+            echo ""
+            echo "  - NODE_OPTIONS contains --disable-sigusr1 (prevents inspector activation)"
+            echo "  - process.mainModule is not available (rare, ES modules edge case)"
+            echo "  - Security policies blocking the inspector port"
+            echo "  - Container doesn't have write access to /tmp"
+            echo ""
+            echo "Check heap-dump.log for detailed error messages."
+            echo ""
+            echo "==================================================================="
+            echo "How to Fix"
+            echo "==================================================================="
+            echo ""
+            echo "If --disable-sigusr1 is set, remove it or add --inspect explicitly:"
+            echo ""
+            echo "  env:"
+            echo "  - name: NODE_OPTIONS"
+            echo "    value: \"--inspect=0.0.0.0:9229\""
+            echo ""
+            echo "Alternatively, try the SIGUSR2 method:"
+            echo ""
+            echo "  ./gather --with-heap-dumps --heap-dump-method sigusr2"
+            echo ""
+            echo "Note: SIGUSR2 method requires NODE_OPTIONS configuration:"
+            echo "  NODE_OPTIONS=\"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
+          else
+            echo "==================================================================="
+            echo "Why SIGUSR2 Method Failed"
+            echo "==================================================================="
+            echo ""
+            echo "SIGUSR2 method requires NODE_OPTIONS configuration:"
+            echo ""
+            echo "  env:"
+            echo "  - name: NODE_OPTIONS"
+            echo "    value: \"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\""
+            echo ""
+            echo "(--diagnostic-dir=/tmp is required for read-only root filesystems)"
+            echo ""
+            echo "Alternatively, try the inspector method (default, usually works without config):"
+            echo ""
+            echo "  ./gather --with-heap-dumps --heap-dump-method inspector"
+          fi
+
           echo ""
           echo "==================================================================="
           echo "Diagnostic Logs"
@@ -787,13 +1640,12 @@ collect_heap_dumps_for_pods() {
           echo "For process info: process-info.txt"
           echo ""
         } > "$container_dir/collection-failed.txt"
-        
+
         log_info "Created guidance file: $container_dir/collection-failed.txt"
       fi
-    done
-  done
-  
-  log_success "Heap dump collection completed for namespace: $ns"
+
+  # Return success - heap dump collection completed (whether successful or not)
+  return 0
 }
 
 collect_rhdh_data() {
@@ -801,6 +1653,7 @@ collect_rhdh_data() {
   local deploy="$2"
   local statefulset="$3"
   local output_dir="$4"
+  local instance_name="${5:-}"  # Optional: Helm release name or CR name for heap dump filtering
 
   log_debug "deploy=$deploy"
   if [[ -n "$deploy" ]]; then
@@ -832,7 +1685,9 @@ collect_rhdh_data() {
       collect_rhdh_info_from_running_pods "$ns" "$labels" "$deploy_dir"
 
       # Collect heap dumps right after collecting logs (if enabled)
-      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir"
+      # Use || true to ensure heap dump failures don't stop the entire collection
+      # Pass deploy name and instance name for filtering (instance_name may be Helm release or CR name)
+      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir" "$deploy" "$instance_name" || true
 
       pods_dir="$deploy_dir/pods"
       ensure_directory "$pods_dir"

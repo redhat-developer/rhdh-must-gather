@@ -9,6 +9,10 @@ rules:
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["create"]
+# Heap dump collection via inspector protocol requires port-forward
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]
 - apiGroups: ["apps", "extensions"]
   resources: ["*"]
   verbs: ["get", "list"]
