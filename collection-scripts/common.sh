@@ -510,6 +510,32 @@ collect_container_processes() {
   return 0
 }
 
+# Send a signal to a process in a container
+# Tries 'kill' command first, falls back to Node.js if kill is not available
+# Arguments: ns, pod, container, pid, signal (e.g., USR1, USR2)
+# Returns: 0 on success, 1 on failure
+send_signal_to_process() {
+  local ns="$1"
+  local pod="$2"
+  local container="$3"
+  local pid="$4"
+  local signal="$5"
+
+  # Try kill command first (works in most containers)
+  if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -"$signal" "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  # Fall back to Node.js process.kill() if kill command not available
+  # This works because we know Node.js is running in the container
+  if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- \
+      node -e "process.kill($pid, 'SIG$signal')" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
 # Collect heap dump via Node.js inspector protocol
 # This is more reliable than SIGUSR2 because:
 # 1. SIGUSR1 can activate inspector even if --inspect wasn't passed at startup
@@ -620,8 +646,8 @@ collect_heap_dump_via_inspector() {
     log_info "Sending SIGUSR1 to activate inspector..."
     echo "Sending SIGUSR1 to PID $node_pid to activate inspector..." >> "$log_file"
 
-    if ! $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -USR1 "$node_pid" 2>> "$log_file"; then
-      echo "Failed to send SIGUSR1 signal" >> "$log_file"
+    if ! send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file"; then
+      echo "Failed to send SIGUSR1 signal (neither kill nor node available)" >> "$log_file"
       log_warn "Failed to send SIGUSR1 to activate inspector"
       return 1
     fi
@@ -644,7 +670,7 @@ collect_heap_dump_via_inspector() {
       echo "" >> "$log_file"
       echo "=== Retry attempt $port_forward_attempts ===" >> "$log_file"
       log_info "Retrying with SIGUSR1 to reactivate inspector..."
-      $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -USR1 "$node_pid" 2>> "$log_file" || true
+      send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file" || true
       sleep 2
       # Get a new local port for retry
       local_port=$((local_port + 1))
@@ -1082,7 +1108,7 @@ collect_heap_dump_via_inspector() {
 
     # Send SIGUSR1 to ensure inspector is active
     log_debug "Sending SIGUSR1 to reactivate inspector..."
-    $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -USR1 "$node_pid" 2>> "$log_file" || true
+    send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR1" 2>> "$log_file" || true
     sleep 2
 
     # Start new port-forward on a different port
@@ -1478,7 +1504,7 @@ _process_container_heap_dump() {
 
         {
           echo "Sending SIGUSR2 signal to Node.js process (PID: $node_pid)..."
-          if $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c "kill -USR2 $node_pid" 2>&1; then
+          if send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR2" 2>&1; then
             echo "SIGUSR2 sent successfully to PID $node_pid"
           else
             echo "Failed to send SIGUSR2 signal"
