@@ -695,26 +695,19 @@ collect_heap_dump_via_inspector() {
   ws_url=$(echo "$ws_url" | sed "s|ws://[^:]*:|ws://localhost:|" | sed "s|:$inspector_port/|:$local_port/|")
   echo "WebSocket URL: $ws_url" >> "$log_file"
 
-  # Step 5: Use websocat to trigger heap dump via Runtime.evaluate
-  # This approach uses v8.writeHeapSnapshot() which writes directly to the container filesystem,
-  # avoiding the need to stream and reassemble chunks over WebSocket.
+  # Step 5: Use HeapProfiler.takeHeapSnapshot via WebSocket
+  # This approach provides progress reporting and streams the snapshot data directly.
   log_info "Triggering heap dump via inspector protocol..."
   echo "" >> "$log_file"
   echo "=== Inspector Protocol Communication ===" >> "$log_file"
 
-  # Generate a unique filename for the heap dump inside the container
-  # HEAP_DUMP_REMOTE_DIR can be overridden if /tmp is not writable or has limited space
-  local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
-  local timestamp
-  timestamp=$(date +%Y%m%d-%H%M%S)
-  local remote_heap_file="${remote_dir}/heapdump-${timestamp}-$$.heapsnapshot"
-
   # Create temp files for communication
   local fifo="/tmp/inspector_fifo_$$"
   local outfile="/tmp/inspector_out_$$"
-  rm -f "$fifo" "$outfile"
+  local heapfile="/tmp/heapdump_chunks_$$"
+  rm -f "$fifo" "$outfile" "$heapfile"
   mkfifo "$fifo"
-  touch "$outfile"
+  touch "$outfile" "$heapfile"
 
   # Start websocat in background
   websocat "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
@@ -728,53 +721,156 @@ collect_heap_dump_via_inspector() {
     echo "Websocat failed to connect to inspector WebSocket" >> "$log_file"
     log_warn "Failed to establish WebSocket connection to inspector"
     cleanup_port_forward
-    rm -f "$fifo" "$outfile"
+    rm -f "$fifo" "$outfile" "$heapfile"
     return 1
   fi
 
   # Open fifo for writing
   exec 3>"$fifo"
 
-  # Build the Runtime.evaluate command
-  # We use v8.writeHeapSnapshot() which writes the heap dump directly to a file
-  # and returns the filename on success.
-  #
-  # Note: The inspector's Runtime.evaluate doesn't have `require` or dynamic import()
-  # in scope by default. We access require through process.mainModule which works
-  # for CommonJS applications like Backstage.
-  local eval_expression="process.mainModule.require('v8').writeHeapSnapshot('${remote_heap_file}')"
-  local eval_command="{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"${eval_expression}\",\"returnByValue\":true}}"
+  # Step 5a: Ping test - verify two-way WebSocket communication
+  echo "=== Ping Test ===" >> "$log_file"
+  echo "Testing two-way WebSocket communication..." >> "$log_file"
+  local ping_command='{"id":0,"method":"Runtime.evaluate","params":{"expression":"JSON.stringify({v:process.version,pid:process.pid,time:Date.now()})","returnByValue":true}}'
+  echo "$ping_command" >&3
 
-  echo "Sending Runtime.evaluate command: $eval_expression" >> "$log_file"
-  echo "$eval_command" >&3
+  # Wait for ping response (max 10 seconds)
+  local ping_wait=0
+  local ping_received=false
+  while [[ "$ping_received" != "true" && $ping_wait -lt 10 ]]; do
+    sleep 1
+    ping_wait=$((ping_wait + 1))
+    if grep -q '"id":0' "$outfile" 2>/dev/null; then
+      ping_received=true
+    fi
+  done
 
-  # Wait for the response
+  if [[ "$ping_received" != "true" ]]; then
+    echo "Ping test FAILED - no response received after ${ping_wait}s" >> "$log_file"
+    echo "This indicates WebSocket responses are not coming back." >> "$log_file"
+    echo "Possible causes:" >> "$log_file"
+    echo "  - Network proxy/mesh intercepting WebSocket traffic" >> "$log_file"
+    echo "  - Firewall or network policy blocking responses" >> "$log_file"
+    echo "  - Inspector in unexpected state" >> "$log_file"
+    log_warn "WebSocket ping test failed - two-way communication broken"
+    exec 3>&-
+    kill "$websocat_pid" 2>/dev/null || true
+    wait "$websocat_pid" 2>/dev/null || true
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile" "$heapfile"
+    return 1
+  fi
+
+  local ping_response
+  ping_response=$(grep '"id":0' "$outfile" | head -1)
+  echo "Ping response: $ping_response" >> "$log_file"
+  log_debug "WebSocket ping test passed - two-way communication confirmed"
+
+  # Clear the output file for heap dump collection
+  : > "$outfile"
+
+  # Step 5b: Enable HeapProfiler domain
+  echo "" >> "$log_file"
+  echo "=== Heap Dump Collection ===" >> "$log_file"
+  echo "Enabling HeapProfiler domain..." >> "$log_file"
+  echo '{"id":1,"method":"HeapProfiler.enable"}' >&3
+  sleep 0.5
+
+  # Step 5c: Start heap snapshot with progress reporting
+  echo "Starting heap snapshot with progress reporting..." >> "$log_file"
+  log_info "Taking heap snapshot (this may take several minutes for large heaps)..."
+  echo '{"id":2,"method":"HeapProfiler.takeHeapSnapshot","params":{"reportProgress":true}}' >&3
+
+  # Process the response stream - look for progress events and snapshot chunks
   local wait_time=0
   local max_wait=$inspector_timeout
-  local response_received=false
+  local snapshot_complete=false
+  local last_progress=""
+  local chunks_received=0
+  local total_size=0
+  local last_reported_pct=-1
 
-  while [[ "$response_received" != "true" && $wait_time -lt $max_wait ]]; do
+  # Background process to read and parse responses
+  while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
     sleep 1
     wait_time=$((wait_time + 1))
-
-    # Check if we got a response with id:1
-    if grep -q '"id":1' "$outfile" 2>/dev/null; then
-      response_received=true
-    fi
 
     # Check if websocat is still running
     if ! kill -0 "$websocat_pid" 2>/dev/null; then
       echo "Websocat process ended after ${wait_time}s" >> "$log_file"
-      # Check if we got a response before it ended
-      if grep -q '"id":1' "$outfile" 2>/dev/null; then
-        response_received=true
-      fi
       break
     fi
 
-    if [[ $((wait_time % 10)) -eq 0 ]]; then
-      log_debug "Waiting for heap snapshot to be written... ($wait_time/$max_wait seconds)"
+    # Process any new lines in the output file
+    while IFS= read -r line; do
+      # Check for progress events
+      if echo "$line" | grep -q '"method":"HeapProfiler.reportHeapSnapshotProgress"'; then
+        local done_val total_val finished pct
+        done_val=$(echo "$line" | jq -r '.params.done // 0' 2>/dev/null)
+        total_val=$(echo "$line" | jq -r '.params.total // 1' 2>/dev/null)
+        finished=$(echo "$line" | jq -r '.params.finished // false' 2>/dev/null)
+
+        if [[ "$total_val" -gt 0 ]]; then
+          pct=$((done_val * 100 / total_val))
+          # Only log every 10% to avoid spam
+          if [[ $((pct / 10)) -gt $((last_reported_pct / 10)) ]]; then
+            log_info "Heap snapshot progress: ${pct}% (${done_val}/${total_val})"
+            echo "Progress: ${pct}% (${done_val}/${total_val})" >> "$log_file"
+            last_reported_pct=$pct
+          fi
+        fi
+
+        if [[ "$finished" == "true" ]]; then
+          echo "Heap snapshot serialization finished" >> "$log_file"
+        fi
+      fi
+
+      # Check for snapshot chunks
+      if echo "$line" | grep -q '"method":"HeapProfiler.addHeapSnapshotChunk"'; then
+        local chunk
+        chunk=$(echo "$line" | jq -r '.params.chunk // empty' 2>/dev/null)
+        if [[ -n "$chunk" ]]; then
+          printf '%s' "$chunk" >> "$heapfile"
+          chunks_received=$((chunks_received + 1))
+          total_size=$((total_size + ${#chunk}))
+        fi
+      fi
+
+      # Check for completion response (id:2 with result)
+      if echo "$line" | grep -q '"id":2'; then
+        if echo "$line" | grep -q '"result":{}'; then
+          snapshot_complete=true
+          echo "HeapProfiler.takeHeapSnapshot completed successfully" >> "$log_file"
+        elif echo "$line" | grep -q '"error"'; then
+          local error_msg
+          error_msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+          echo "HeapProfiler.takeHeapSnapshot failed: $error_msg" >> "$log_file"
+          log_warn "Heap snapshot failed: $error_msg"
+          exec 3>&-
+          kill "$websocat_pid" 2>/dev/null || true
+          wait "$websocat_pid" 2>/dev/null || true
+          cleanup_port_forward
+          rm -f "$fifo" "$outfile" "$heapfile"
+          return 1
+        fi
+      fi
+    done < <(cat "$outfile" 2>/dev/null)
+
+    # Clear processed lines and show periodic status
+    if [[ $((wait_time % 30)) -eq 0 && $wait_time -gt 0 ]]; then
+      local human_size
+      if [[ $total_size -gt 1048576 ]]; then
+        human_size="$((total_size / 1048576))MB"
+      elif [[ $total_size -gt 1024 ]]; then
+        human_size="$((total_size / 1024))KB"
+      else
+        human_size="${total_size}B"
+      fi
+      log_debug "Still collecting... ${wait_time}s elapsed, ${chunks_received} chunks, ${human_size} received"
     fi
+
+    # Truncate already-processed content to prevent re-reading
+    : > "$outfile"
   done
 
   # Close fifo
@@ -787,81 +883,42 @@ collect_heap_dump_via_inspector() {
   fi
 
   echo "" >> "$log_file"
-  echo "=== Inspector Response ===" >> "$log_file"
-  cat "$outfile" >> "$log_file" 2>/dev/null || true
-  echo "" >> "$log_file"
+  echo "=== Collection Summary ===" >> "$log_file"
+  echo "Chunks received: $chunks_received" >> "$log_file"
+  echo "Total data size: $total_size bytes" >> "$log_file"
+  echo "Time elapsed: ${wait_time}s" >> "$log_file"
 
-  if [[ "$response_received" != "true" ]]; then
-    echo "Timeout waiting for Runtime.evaluate response (waited ${wait_time}s)" >> "$log_file"
-    log_warn "Heap snapshot via inspector timed out"
+  if [[ "$snapshot_complete" != "true" ]]; then
+    echo "Timeout waiting for heap snapshot (waited ${wait_time}s)" >> "$log_file"
+    log_warn "Heap snapshot via inspector timed out after ${wait_time}s"
     cleanup_port_forward
-    rm -f "$fifo" "$outfile"
+    rm -f "$fifo" "$outfile" "$heapfile"
     return 1
   fi
 
-  # Parse the response to check for success or error
-  local response
-  response=$(cat "$outfile" 2>/dev/null)
+  # Verify we got actual data
+  local heap_size
+  heap_size=$(stat -c%s "$heapfile" 2>/dev/null || echo "0")
 
-  # Check for exception/error in response
-  if echo "$response" | grep -q '"exceptionDetails"'; then
-    local error_msg
-    error_msg=$(echo "$response" | jq -r '.result.exceptionDetails.exception.description // .result.exceptionDetails.text // "unknown error"' 2>/dev/null || echo "unknown error")
-    echo "Runtime.evaluate failed with exception: $error_msg" >> "$log_file"
-    log_warn "Heap snapshot failed: $error_msg"
+  if [[ "$heap_size" -lt 1000 ]]; then
+    echo "Heap snapshot file too small ($heap_size bytes)" >> "$log_file"
+    log_warn "Heap snapshot appears empty or corrupted"
     cleanup_port_forward
-    rm -f "$fifo" "$outfile"
+    rm -f "$fifo" "$outfile" "$heapfile"
     return 1
   fi
 
-  # Check if we got a successful result (the filename should be returned)
-  local result_value
-  result_value=$(echo "$response" | jq -r '.result.result.value // empty' 2>/dev/null)
+  # Move the heap file to output location
+  mv "$heapfile" "$output_file"
 
-  if [[ -z "$result_value" ]]; then
-    echo "Runtime.evaluate did not return expected result" >> "$log_file"
-    echo "Response: $response" >> "$log_file"
-    log_warn "Heap snapshot command did not return filename"
-    cleanup_port_forward
-    rm -f "$fifo" "$outfile"
-    return 1
-  fi
+  local human_size
+  human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
+  echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
+  log_success "Heap dump collected via inspector protocol ($human_size)"
 
-  echo "Heap snapshot written to container: $result_value" >> "$log_file"
-  log_info "Heap snapshot created at $result_value, copying to output..."
-
-  # Clean up WebSocket resources
   cleanup_port_forward
   rm -f "$fifo" "$outfile"
-
-  # Copy the heap dump file from the container
-  if $KUBECTL_CMD cp -n "$ns" "${pod}:${result_value}" "$output_file" -c "$container" >> "$log_file" 2>&1; then
-    local file_size
-    file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
-
-    if [[ "$file_size" -gt 1000 ]]; then
-      local human_size
-      human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
-      echo "Heap snapshot copied successfully: $output_file ($human_size)" >> "$log_file"
-      log_success "Heap dump collected via inspector protocol ($human_size)"
-
-      # Clean up remote file
-      $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$result_value" 2>/dev/null || true
-
-      return 0
-    else
-      echo "Copied file too small ($file_size bytes), may be corrupted" >> "$log_file"
-      rm -f "$output_file"
-    fi
-  else
-    echo "Failed to copy heap snapshot from container" >> "$log_file"
-  fi
-
-  # Try to clean up remote file even on failure
-  $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$result_value" 2>/dev/null || true
-
-  log_warn "Failed to retrieve heap snapshot from container"
-  return 1
+  return 0
 }
 
 collect_heap_dumps_for_pods() {
