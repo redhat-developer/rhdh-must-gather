@@ -929,20 +929,23 @@ collect_heap_dump_via_inspector() {
     wait "$websocat_pid" 2>/dev/null || true
   fi
 
+  local timed_out=false
   if [[ "$snapshot_complete" != "true" ]]; then
+    timed_out=true
     echo "" >> "$log_file"
     echo "Timeout waiting for heap snapshot (waited ${wait_time}s)" >> "$log_file"
-    log_warn "Heap snapshot via inspector timed out after ${wait_time}s"
-    cleanup_port_forward
-    rm -f "$fifo" "$outfile" "$heapfile"
-    return 1
+    log_warn "Heap snapshot via inspector timed out after ${wait_time}s - attempting partial extraction"
   fi
 
   # Step 6: Extract heap snapshot chunks from the collected data
-  # Use jq directly to handle large chunks (multi-MB per line) that bash can't handle
+  # Try extraction even on timeout - we may have partial but useful data
   echo "" >> "$log_file"
   echo "=== Extracting Heap Snapshot ===" >> "$log_file"
-  log_info "Extracting heap snapshot data..."
+  if [[ "$timed_out" == "true" ]]; then
+    log_info "Attempting to extract partial heap snapshot data..."
+  else
+    log_info "Extracting heap snapshot data..."
+  fi
 
   local chunks_received=0
   local raw_size
@@ -979,6 +982,11 @@ collect_heap_dump_via_inspector() {
     echo "=== Collection Summary ==="
     echo "Chunks received: $chunks_received"
     echo "Time elapsed: ${wait_time}s"
+    if [[ "$timed_out" == "true" ]]; then
+      echo "Status: PARTIAL (timed out before completion)"
+    else
+      echo "Status: COMPLETE"
+    fi
   } >> "$log_file"
 
   # Verify we got actual data
@@ -1004,12 +1012,24 @@ collect_heap_dump_via_inspector() {
 
   local human_size
   human_size=$(du -h "$output_file" 2>/dev/null | cut -f1)
-  echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
-  log_success "Heap dump collected via inspector protocol ($human_size)"
 
-  cleanup_port_forward
-  rm -f "$fifo" "$outfile"
-  return 0
+  if [[ "$timed_out" == "true" ]]; then
+    # Rename to indicate partial snapshot
+    local partial_file="${output_file%.heapsnapshot}.PARTIAL.heapsnapshot"
+    mv "$output_file" "$partial_file"
+    echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
+    echo "WARNING: This snapshot may be incomplete and could fail to load in analysis tools" >> "$log_file"
+    log_warn "Partial heap dump saved ($human_size) - may be incomplete"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 0  # Return success so we keep the partial file
+  else
+    echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
+    log_success "Heap dump collected via inspector protocol ($human_size)"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile"
+    return 0
+  fi
 }
 
 collect_heap_dumps_for_pods() {
