@@ -710,7 +710,10 @@ collect_heap_dump_via_inspector() {
   touch "$outfile" "$heapfile"
 
   # Start websocat in background
-  websocat "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
+  # Flags:
+  #   -B 1048576  - increase buffer to 1MB (heap snapshot chunks can be 100KB+)
+  #   -t          - text mode (not binary)
+  websocat -t -B 1048576 "$ws_url" < "$fifo" > "$outfile" 2>> "$log_file" &
   local websocat_pid=$!
 
   # Give websocat a moment to connect
@@ -740,7 +743,7 @@ collect_heap_dump_via_inspector() {
   while [[ "$ping_received" != "true" && $ping_wait -lt 10 ]]; do
     sleep 1
     ping_wait=$((ping_wait + 1))
-    if grep -q '"id":0' "$outfile" 2>/dev/null; then
+    if grep -qa '"id":0' "$outfile" 2>/dev/null; then
       ping_received=true
     fi
   done
@@ -781,16 +784,15 @@ collect_heap_dump_via_inspector() {
   log_info "Taking heap snapshot (this may take several minutes for large heaps)..."
   echo '{"id":2,"method":"HeapProfiler.takeHeapSnapshot","params":{"reportProgress":true}}' >&3
 
-  # Process the response stream - look for progress events and snapshot chunks
+  # Wait for completion, checking progress periodically
+  # Note: We don't process chunks during collection to avoid race conditions.
+  # All chunk extraction happens after websocat completes.
   local wait_time=0
   local max_wait=$inspector_timeout
   local snapshot_complete=false
-  local last_progress=""
-  local chunks_received=0
-  local total_size=0
   local last_reported_pct=-1
+  local last_line_count=0
 
-  # Background process to read and parse responses
   while [[ "$snapshot_complete" != "true" && $wait_time -lt $max_wait ]]; do
     sleep 1
     wait_time=$((wait_time + 1))
@@ -801,76 +803,58 @@ collect_heap_dump_via_inspector() {
       break
     fi
 
-    # Process any new lines in the output file
-    while IFS= read -r line; do
-      # Check for progress events
-      if echo "$line" | grep -q '"method":"HeapProfiler.reportHeapSnapshotProgress"'; then
-        local done_val total_val finished pct
-        done_val=$(echo "$line" | jq -r '.params.done // 0' 2>/dev/null)
-        total_val=$(echo "$line" | jq -r '.params.total // 1' 2>/dev/null)
-        finished=$(echo "$line" | jq -r '.params.finished // false' 2>/dev/null)
-
-        if [[ "$total_val" -gt 0 ]]; then
-          pct=$((done_val * 100 / total_val))
-          # Only log every 10% to avoid spam
-          if [[ $((pct / 10)) -gt $((last_reported_pct / 10)) ]]; then
-            log_info "Heap snapshot progress: ${pct}% (${done_val}/${total_val})"
-            echo "Progress: ${pct}% (${done_val}/${total_val})" >> "$log_file"
-            last_reported_pct=$pct
-          fi
-        fi
-
-        if [[ "$finished" == "true" ]]; then
-          echo "Heap snapshot serialization finished" >> "$log_file"
-        fi
+    # Check for completion or progress (read-only, don't modify the file)
+    if grep -qa '"id":2' "$outfile" 2>/dev/null; then
+      if grep -q '"result":{}' "$outfile" 2>/dev/null; then
+        snapshot_complete=true
+        echo "HeapProfiler.takeHeapSnapshot completed successfully" >> "$log_file"
+      elif grep -q '"error"' "$outfile" 2>/dev/null; then
+        local error_line error_msg
+        error_line=$(grep -a '"id":2' "$outfile" | grep -a '"error"' | head -1)
+        error_msg=$(echo "$error_line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+        echo "HeapProfiler.takeHeapSnapshot failed: $error_msg" >> "$log_file"
+        log_warn "Heap snapshot failed: $error_msg"
+        exec 3>&-
+        kill "$websocat_pid" 2>/dev/null || true
+        wait "$websocat_pid" 2>/dev/null || true
+        cleanup_port_forward
+        rm -f "$fifo" "$outfile" "$heapfile"
+        return 1
       fi
-
-      # Check for snapshot chunks
-      if echo "$line" | grep -q '"method":"HeapProfiler.addHeapSnapshotChunk"'; then
-        local chunk
-        chunk=$(echo "$line" | jq -r '.params.chunk // empty' 2>/dev/null)
-        if [[ -n "$chunk" ]]; then
-          printf '%s' "$chunk" >> "$heapfile"
-          chunks_received=$((chunks_received + 1))
-          total_size=$((total_size + ${#chunk}))
-        fi
-      fi
-
-      # Check for completion response (id:2 with result)
-      if echo "$line" | grep -q '"id":2'; then
-        if echo "$line" | grep -q '"result":{}'; then
-          snapshot_complete=true
-          echo "HeapProfiler.takeHeapSnapshot completed successfully" >> "$log_file"
-        elif echo "$line" | grep -q '"error"'; then
-          local error_msg
-          error_msg=$(echo "$line" | jq -r '.error.message // "unknown error"' 2>/dev/null)
-          echo "HeapProfiler.takeHeapSnapshot failed: $error_msg" >> "$log_file"
-          log_warn "Heap snapshot failed: $error_msg"
-          exec 3>&-
-          kill "$websocat_pid" 2>/dev/null || true
-          wait "$websocat_pid" 2>/dev/null || true
-          cleanup_port_forward
-          rm -f "$fifo" "$outfile" "$heapfile"
-          return 1
-        fi
-      fi
-    done < <(cat "$outfile" 2>/dev/null)
-
-    # Clear processed lines and show periodic status
-    if [[ $((wait_time % 30)) -eq 0 && $wait_time -gt 0 ]]; then
-      local human_size
-      if [[ $total_size -gt 1048576 ]]; then
-        human_size="$((total_size / 1048576))MB"
-      elif [[ $total_size -gt 1024 ]]; then
-        human_size="$((total_size / 1024))KB"
-      else
-        human_size="${total_size}B"
-      fi
-      log_debug "Still collecting... ${wait_time}s elapsed, ${chunks_received} chunks, ${human_size} received"
     fi
 
-    # Truncate already-processed content to prevent re-reading
-    : > "$outfile"
+    # Check for progress events in recent lines (use tail to avoid reading huge file)
+    local latest_progress
+    latest_progress=$(tail -100 "$outfile" 2>/dev/null | grep -a '"HeapProfiler.reportHeapSnapshotProgress"' | tail -1)
+    if [[ -n "$latest_progress" ]]; then
+      local done_val total_val pct
+      done_val=$(echo "$latest_progress" | jq -r '.params.done // 0' 2>/dev/null)
+      total_val=$(echo "$latest_progress" | jq -r '.params.total // 1' 2>/dev/null)
+      if [[ "$total_val" -gt 0 ]]; then
+        pct=$((done_val * 100 / total_val))
+        # Only log every 10% to avoid spam
+        if [[ $((pct / 10)) -gt $((last_reported_pct / 10)) ]]; then
+          log_info "Heap snapshot progress: ${pct}% (${done_val}/${total_val})"
+          echo "Progress: ${pct}% (${done_val}/${total_val})" >> "$log_file"
+          last_reported_pct=$pct
+        fi
+      fi
+    fi
+
+    # Show periodic status based on file size growth
+    if [[ $((wait_time % 10)) -eq 0 && $wait_time -gt 0 ]]; then
+      local current_size
+      current_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+      local human_size
+      if [[ $current_size -gt 1048576 ]]; then
+        human_size="$((current_size / 1048576))MB"
+      elif [[ $current_size -gt 1024 ]]; then
+        human_size="$((current_size / 1024))KB"
+      else
+        human_size="${current_size}B"
+      fi
+      log_info "Collecting heap data... ${wait_time}s elapsed, ${human_size} received"
+    fi
   done
 
   # Close fifo
@@ -882,13 +866,8 @@ collect_heap_dump_via_inspector() {
     wait "$websocat_pid" 2>/dev/null || true
   fi
 
-  echo "" >> "$log_file"
-  echo "=== Collection Summary ===" >> "$log_file"
-  echo "Chunks received: $chunks_received" >> "$log_file"
-  echo "Total data size: $total_size bytes" >> "$log_file"
-  echo "Time elapsed: ${wait_time}s" >> "$log_file"
-
   if [[ "$snapshot_complete" != "true" ]]; then
+    echo "" >> "$log_file"
     echo "Timeout waiting for heap snapshot (waited ${wait_time}s)" >> "$log_file"
     log_warn "Heap snapshot via inspector timed out after ${wait_time}s"
     cleanup_port_forward
@@ -896,12 +875,45 @@ collect_heap_dump_via_inspector() {
     return 1
   fi
 
+  # Step 6: Extract heap snapshot chunks from the collected data
+  # Use jq directly to handle large chunks (multi-MB per line) that bash can't handle
+  echo "" >> "$log_file"
+  echo "=== Extracting Heap Snapshot ===" >> "$log_file"
+  log_info "Extracting heap snapshot data..."
+
+  local chunks_received=0
+  local raw_size
+  raw_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
+  echo "Raw WebSocket data size: $raw_size bytes" >> "$log_file"
+
+  # Use jq with -j (no newline) to extract and concatenate all chunks
+  # This handles arbitrarily large chunks that bash's read command cannot
+  if ! jq -j 'select(.method == "HeapProfiler.addHeapSnapshotChunk") | .params.chunk // empty' "$outfile" > "$heapfile" 2>> "$log_file"; then
+    echo "jq extraction failed" >> "$log_file"
+    log_warn "Failed to extract heap snapshot chunks"
+    cleanup_port_forward
+    rm -f "$fifo" "$outfile" "$heapfile"
+    return 1
+  fi
+
+  # Count chunks for logging
+  chunks_received=$(grep -ac '"HeapProfiler.addHeapSnapshotChunk"' "$outfile" 2>/dev/null || echo 0)
+
+  echo "" >> "$log_file"
+  echo "=== Collection Summary ===" >> "$log_file"
+  echo "Chunks received: $chunks_received" >> "$log_file"
+  echo "Time elapsed: ${wait_time}s" >> "$log_file"
+
   # Verify we got actual data
   local heap_size
   heap_size=$(stat -c%s "$heapfile" 2>/dev/null || echo "0")
 
   if [[ "$heap_size" -lt 1000 ]]; then
     echo "Heap snapshot file too small ($heap_size bytes)" >> "$log_file"
+    echo "This may indicate:" >> "$log_file"
+    echo "  - WebSocket connection issues (chunks not received)" >> "$log_file"
+    echo "  - Inspector protocol errors" >> "$log_file"
+    echo "  - Empty heap (unlikely for Backstage)" >> "$log_file"
     log_warn "Heap snapshot appears empty or corrupted"
     cleanup_port_forward
     rm -f "$fifo" "$outfile" "$heapfile"
