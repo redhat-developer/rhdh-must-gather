@@ -10,6 +10,7 @@
 #   --deployment <name>  Name of the RHDH deployment (required)
 #   --type <type>        Deployment type: "standalone" or "operator" (default: standalone)
 #   --cr <name>          Backstage CR name (required if type=operator)
+#   --require-success    Fail validation if heap dump collection failed (instead of just warning)
 #
 # Exit codes:
 #   0 - All validations passed
@@ -28,6 +29,7 @@ OUTPUT_DIR=""
 DEPLOYMENT_NAME=""
 DEPLOYMENT_TYPE="standalone"
 CR_NAME=""
+REQUIRE_SUCCESS=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -56,6 +58,10 @@ while [[ $# -gt 0 ]]; do
             CR_NAME="$2"
             shift 2
             ;;
+        --require-success)
+            REQUIRE_SUCCESS=true
+            shift
+            ;;
         *)
             log_error "Unknown option: $1"
             exit 1
@@ -64,7 +70,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$MODE" != "validate" ]; then
-    log_error "Usage: $0 --validate --output-dir <dir> --namespace <ns> --deployment <name> [--type standalone|operator] [--cr <name>]"
+    log_error "Usage: $0 --validate --output-dir <dir> --namespace <ns> --deployment <name> [--type standalone|operator] [--cr <name>] [--require-success]"
     exit 1
 fi
 
@@ -163,10 +169,17 @@ for pod_dir in $pod_dirs; do
                         ((ERRORS++))
                     fi
                 elif [ -f "$collection_failed" ]; then
-                    # Collection failed but we have diagnostic info - this is acceptable for E2E
-                    # (the actual collection might fail due to Node.js configuration in test environment)
-                    log_warn "Heap dump collection failed (see $collection_failed)"
-                    log_warn "This may be expected if Node.js inspector couldn't be activated"
+                    # Collection failed but we have diagnostic info
+                    if [ "$REQUIRE_SUCCESS" = true ]; then
+                        # In strict mode, this is an error
+                        log_error "Heap dump collection failed (see $collection_failed)"
+                        log_error "Use --require-success=false to allow collection failures"
+                        ((ERRORS++))
+                    else
+                        # In lenient mode, just warn (collection might fail due to Node.js configuration)
+                        log_warn "Heap dump collection failed (see $collection_failed)"
+                        log_warn "This may be expected if Node.js inspector couldn't be activated"
+                    fi
                     # Check that the failure file has useful content
                     if [ -s "$collection_failed" ]; then
                         log_info "collection-failed.txt contains diagnostic information"

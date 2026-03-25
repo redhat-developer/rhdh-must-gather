@@ -709,7 +709,8 @@ if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
     --output-dir "$OUTPUT_DIR" \
     --namespace "$NS_RHDHSUPP308" \
     --deployment "$RHDHSUPP308_DEPLOY" \
-    --type standalone; then
+    --type standalone \
+    --require-success; then
     log_error "Heap dump validation failed for RHDHSUPP-308!"
     ((VALIDATION_FAILURES++))
 fi
@@ -724,7 +725,8 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
             --output-dir "$OUTPUT_DIR" \
             --namespace "$NS_STANDALONE" \
             --deployment "$STANDALONE_DEPLOY" \
-            --type standalone; then
+            --type standalone \
+            --require-success; then
             log_error "Heap dump validation failed for standalone Helm!"
             ((VALIDATION_FAILURES++))
         fi
@@ -739,7 +741,8 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
             --namespace "$NS_OPERATOR" \
             --deployment "backstage-$BACKSTAGE_CR" \
             --type operator \
-            --cr "$BACKSTAGE_CR"; then
+            --cr "$BACKSTAGE_CR" \
+            --require-success; then
             log_error "Heap dump validation failed for Operator CR $BACKSTAGE_CR!"
             ((VALIDATION_FAILURES++))
         fi
@@ -754,7 +757,8 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
             --namespace "$NS_STATEFULSET" \
             --deployment "backstage-$BACKSTAGE_CR_STATEFULSET" \
             --type operator \
-            --cr "$BACKSTAGE_CR_STATEFULSET"; then
+            --cr "$BACKSTAGE_CR_STATEFULSET" \
+            --require-success; then
             log_error "Heap dump validation failed for Operator CR $BACKSTAGE_CR_STATEFULSET!"
             ((VALIDATION_FAILURES++))
         fi
