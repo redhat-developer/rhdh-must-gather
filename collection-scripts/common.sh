@@ -1193,7 +1193,9 @@ collect_heap_dump_via_inspector() {
             $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$remote_heap_file" 2>/dev/null || true
 
             # Remove the partial file since we have a complete one
-            rm -f "$partial_file"
+            if [[ -n "${partial_file:-}" && -f "$partial_file" ]]; then
+              rm -f "$partial_file"
+            fi
           else
             echo "Failed to copy heap snapshot from container" >> "$log_file"
             log_warn "Fallback failed: could not copy file from container"
