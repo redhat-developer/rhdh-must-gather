@@ -227,9 +227,9 @@ Usage: ./$(basename "$0") [params...]
 
   --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
                                 (default: all instances). Uses flexible matching (exact, prefix, or contains):
-                                  - Helm release names (e.g., "my-rhdh" matches "my-rhdh-backstage")
-                                  - Backstage CR names (e.g., "my-cr" matches "backstage-my-cr")
-                                  - Deployment names (e.g., "backstage-developer-hub")
+                                  - Helm release names (e.g., 'my-rhdh' matches 'my-rhdh-backstage')
+                                  - Backstage CR names (e.g., 'my-cr' matches 'backstage-my-cr')
+                                  - Deployment names (e.g., 'backstage-developer-hub')
 
                                 Examples:
                                   --heap-dump-instances my-rhdh
