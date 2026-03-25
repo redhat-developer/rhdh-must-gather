@@ -347,6 +347,9 @@ spec:
                 secretKeyRef:
                   key: postgres-password
                   name: 'rhdhsupp-308-postgresql'
+            # Enable heap dump collection via SIGUSR2 signal for E2E tests
+            - name: NODE_OPTIONS
+              value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
           ports:
             - name: backend
               containerPort: 7007
