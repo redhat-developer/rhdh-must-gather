@@ -64,6 +64,10 @@ jobs:
           tar xzf openshift-client-linux.tar.gz
           sudo mv oc /usr/local/bin/
           rm -f openshift-client-linux.tar.gz kubectl
+          # Install websocat (needed for heap dump collection via inspector protocol)
+          curl -sLO https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl
+          chmod +x websocat.x86_64-unknown-linux-musl
+          sudo mv websocat.x86_64-unknown-linux-musl /usr/local/bin/websocat
 
       - name: Create Kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
