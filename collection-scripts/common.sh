@@ -1076,6 +1076,40 @@ collect_heap_dump_via_inspector() {
     echo "=== Fallback: v8.writeHeapSnapshot() ===" >> "$log_file"
     log_info "Attempting fallback: writing heap dump directly to container filesystem..."
 
+    # Re-establish port-forward (inspector connection may have died)
+    echo "Re-establishing inspector connection for fallback..." >> "$log_file"
+    cleanup_port_forward
+
+    # Send SIGUSR1 to ensure inspector is active
+    log_debug "Sending SIGUSR1 to reactivate inspector..."
+    $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- kill -USR1 "$node_pid" 2>> "$log_file" || true
+    sleep 2
+
+    # Start new port-forward on a different port
+    local fallback_port=$((local_port + 100))
+    $KUBECTL_CMD port-forward -n "$ns" "pod/$pod" "$fallback_port:$inspector_port" >> "$log_file" 2>&1 &
+    port_forward_pid=$!
+
+    # Wait for port-forward to be ready
+    local pf_wait=0
+    while ! curl -s "http://localhost:$fallback_port/json" >/dev/null 2>&1; do
+      sleep 0.5
+      pf_wait=$((pf_wait + 1))
+      if [[ $pf_wait -gt 20 ]] || ! kill -0 "$port_forward_pid" 2>/dev/null; then
+        echo "Failed to re-establish port-forward for fallback" >> "$log_file"
+        log_warn "Fallback failed: could not re-establish inspector connection"
+        cleanup_port_forward
+        return 0
+      fi
+    done
+    echo "Port-forward re-established on port $fallback_port" >> "$log_file"
+
+    # Get new WebSocket URL
+    local fallback_ws_url
+    fallback_ws_url=$(curl -s "http://localhost:$fallback_port/json" | jq -r '.[0].webSocketDebuggerUrl' 2>/dev/null)
+    fallback_ws_url=$(echo "$fallback_ws_url" | sed "s|ws://[^:]*:|ws://localhost:|" | sed "s|:$inspector_port/|:$fallback_port/|")
+    echo "Fallback WebSocket URL: $fallback_ws_url" >> "$log_file"
+
     local remote_heap_file="${HEAP_DUMP_REMOTE_DIR:-/tmp}/heapdump-fallback-$$.heapsnapshot"
     local fallback_fifo="/tmp/inspector_fallback_fifo_$$"
     local fallback_out="/tmp/inspector_fallback_out_$$"
@@ -1088,7 +1122,7 @@ collect_heap_dump_via_inspector() {
     fi
 
     # Start new websocat connection for fallback
-    websocat -t -B "$ws_buffer_size" "$ws_url" < "$fallback_fifo" > "$fallback_out" 2>> "$log_file" &
+    websocat -t -B "$ws_buffer_size" "$fallback_ws_url" < "$fallback_fifo" > "$fallback_out" 2>> "$log_file" &
     local fallback_ws_pid=$!
     sleep 0.5
 
@@ -1100,9 +1134,9 @@ collect_heap_dump_via_inspector() {
       echo "Sending: Runtime.evaluate with $write_cmd" >> "$log_file"
       echo "{\"id\":10,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"$write_cmd\",\"returnByValue\":true}}" >&4
 
-      # Wait for response (up to 5 minutes for large heaps)
+      # Wait for response (honor configured timeout)
       local fallback_wait=0
-      local fallback_max=300
+      local fallback_max=$inspector_timeout
       local fallback_done=false
 
       while [[ "$fallback_done" != "true" && $fallback_wait -lt $fallback_max ]]; do
