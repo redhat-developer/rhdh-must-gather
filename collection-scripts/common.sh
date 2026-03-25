@@ -886,18 +886,30 @@ collect_heap_dump_via_inspector() {
   raw_size=$(stat -c%s "$outfile" 2>/dev/null || echo 0)
   echo "Raw WebSocket data size: $raw_size bytes" >> "$log_file"
 
-  # Use jq with -j (no newline) to extract and concatenate all chunks
-  # This handles arbitrarily large chunks that bash's read command cannot
-  if ! jq -j 'select(.method == "HeapProfiler.addHeapSnapshotChunk") | .params.chunk // empty' "$outfile" > "$heapfile" 2>> "$log_file"; then
+  # WebSocket output may contain leading null bytes from buffer initialization.
+  # Strip them before JSON parsing. The messages are already newline-separated.
+  local cleaned_file="/tmp/inspector_cleaned_$$"
+  tr -d '\0' < "$outfile" > "$cleaned_file"
+
+  local cleaned_size
+  cleaned_size=$(stat -c%s "$cleaned_file" 2>/dev/null || echo 0)
+  echo "Cleaned data size (null bytes removed): $cleaned_size bytes" >> "$log_file"
+
+  # Use -rj: -r for raw string output (chunks are already valid JSON content),
+  #         -j to join outputs without adding newlines between chunks.
+  if ! jq -rj 'select(.method == "HeapProfiler.addHeapSnapshotChunk") | .params.chunk // empty' "$cleaned_file" > "$heapfile" 2>> "$log_file"; then
     echo "jq extraction failed" >> "$log_file"
+    echo "First 200 bytes after cleaning:" >> "$log_file"
+    head -c 200 "$cleaned_file" | xxd >> "$log_file" 2>&1 || true
     log_warn "Failed to extract heap snapshot chunks"
     cleanup_port_forward
-    rm -f "$fifo" "$outfile" "$heapfile"
+    rm -f "$fifo" "$outfile" "$heapfile" "$cleaned_file"
     return 1
   fi
+  rm -f "$cleaned_file"
 
-  # Count chunks for logging
-  chunks_received=$(grep -ac '"HeapProfiler.addHeapSnapshotChunk"' "$outfile" 2>/dev/null || echo 0)
+  # Count chunks for logging (use grep -o to count all occurrences, not just lines)
+  chunks_received=$(grep -ao '"HeapProfiler.addHeapSnapshotChunk"' "$outfile" 2>/dev/null | wc -l || echo 0)
 
   echo "" >> "$log_file"
   echo "=== Collection Summary ===" >> "$log_file"
