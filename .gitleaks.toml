@@ -12,6 +12,9 @@
     # sanitize.bats contains an asymmetric Private Key,
     # used as a sample data not actually a secret.
     '''tests\/sanitize.bats$''',
+
+    # Fake output
+    '''tests\/e2e\/testdata\/RHDHSUPP-308\/helm_template_output.test.yaml$''',
   ]
         
   # Ignore based on any subset of the line

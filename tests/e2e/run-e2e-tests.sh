@@ -18,8 +18,9 @@
 #   --skip-helm         Skip Helm release test
 #   --skip-helm-standalone Skip standalone Helm deployment test
 #   --skip-operator     Skip Operator test
-#   --with-heap-dumps   Enable heap dump collection and validation
-#   --heap-dump-method <method>  Heap dump method: 'inspector' (default) or 'sigusr2'
+#   --with-heap-dumps   Collect heap dumps from ALL instances (nightly mode).
+#                       Without this flag, heap dumps are only collected from RHDHSUPP-308 test instance.
+#   --heap-dump-method <method>  Heap dump method: 'inspector' (default) or 'sigusr2'. Only used with --with-heap-dumps.
 #   --help              Show this help message
 #
 # Examples:
@@ -192,10 +193,12 @@ if [ "$SKIP_OPERATOR" = true ]; then
     log_info "Skipping Operator test (--skip-operator)"
 fi
 if [ "$WITH_HEAP_DUMPS" = true ]; then
-    log_info "Heap dump collection enabled (--with-heap-dumps)"
+    log_info "Heap dump collection: ALL instances (--with-heap-dumps)"
     if [ -n "$HEAP_DUMP_METHOD" ]; then
         log_info "Heap dump method: $HEAP_DUMP_METHOD"
     fi
+else
+    log_info "Heap dump collection: RHDHSUPP-308 instance only"
 fi
 
 # Ensure we're in the project root
@@ -493,6 +496,52 @@ else
     log_info "Skipping Operator setup"
 fi
 
+# --- RHDHSUPP-308 Test Setup (standalone manifest from helm template) ---
+NS_RHDHSUPP308="test-e2e-rhdhsupp308-$TIMESTAMP"
+RHDHSUPP308_INSTANCE="rhdhsupp-308"
+RHDHSUPP308_DEPLOY="rhdhsupp-308-backstage"
+log_info "Creating namespace: $NS_RHDHSUPP308"
+kubectl create namespace "$NS_RHDHSUPP308"
+CLEANUP_TASKS+=("kubectl delete namespace $NS_RHDHSUPP308 --wait=false")
+ALL_NAMESPACES+=("$NS_RHDHSUPP308")
+
+log_info "Deploying RHDHSUPP-308 test manifest..."
+RHDHSUPP308_MANIFEST="$SCRIPT_DIR/testdata/RHDHSUPP-308/helm_template_output.test.yaml"
+if [ ! -f "$RHDHSUPP308_MANIFEST" ]; then
+    log_error "RHDHSUPP-308 test manifest not found: $RHDHSUPP308_MANIFEST"
+    exit 1
+fi
+kubectl apply -n "$NS_RHDHSUPP308" -f "$RHDHSUPP308_MANIFEST"
+
+# Wait for PostgreSQL to be ready first
+log_info "Waiting for PostgreSQL pod to be ready..."
+kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
+    -n "$NS_RHDHSUPP308" --timeout=180s 2>/dev/null || log_warn "PostgreSQL pod not ready, continuing..."
+
+# Wait for backstage pod to be running
+log_info "Waiting for RHDHSUPP-308 backstage pod to be running..."
+RHDHSUPP308_POD=""
+TIMEOUT=180
+until RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$RHDHSUPP308_POD" ]; do
+    sleep 2
+    TIMEOUT=$((TIMEOUT - 2))
+    if [ $TIMEOUT -le 0 ]; then
+        log_error "Timed out waiting for RHDHSUPP-308 backstage pod."
+        kubectl get pods -n "$NS_RHDHSUPP308"
+        exit 1
+    fi
+done
+log_info "Found RHDHSUPP-308 pod: $RHDHSUPP308_POD"
+if ! kubectl -n "$NS_RHDHSUPP308" wait --for=jsonpath='{.status.phase}'=Running pod/"$RHDHSUPP308_POD" --timeout=5m; then
+    log_error "RHDHSUPP-308 pod $RHDHSUPP308_POD did not reach Running state."
+    exit 1
+fi
+log_info "RHDHSUPP-308 pod $RHDHSUPP308_POD is running."
+
+# Wait a bit for Node.js to fully start (needed for heap dump collection)
+log_info "Waiting for Node.js process to start..."
+sleep 10
+
 # ============================================================================
 # RUN MUST-GATHER
 # ============================================================================
@@ -501,12 +550,15 @@ log_info "=========================================="
 log_info "Running must-gather"
 log_info "=========================================="
 
-GATHER_OPTS=""
+GATHER_OPTS="--with-heap-dumps"
 if [ "$WITH_HEAP_DUMPS" = true ]; then
-    GATHER_OPTS="--with-heap-dumps"
+    # Nightly mode: collect from all instances, with optional method override
     if [ -n "$HEAP_DUMP_METHOD" ]; then
         GATHER_OPTS="$GATHER_OPTS --heap-dump-method $HEAP_DUMP_METHOD"
     fi
+else
+    # Regular E2E: collect only from RHDHSUPP-308 instance to speed up testing
+    GATHER_OPTS="$GATHER_OPTS --heap-dump-instances $RHDHSUPP308_INSTANCE"
 fi
 
 if [ "$LOCAL_MODE" = true ]; then
@@ -637,18 +689,75 @@ if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
     fi
 fi
 
-# Heap dump validation (only when --with-heap-dumps is enabled)
-# Uses standalone Helm deployment since it has a running Node.js process
-if [ "$WITH_HEAP_DUMPS" = true ] && [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
-    log_info ""
-    log_info "Running heap dump validation..."
-    if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
-        --output-dir "$OUTPUT_DIR" \
-        --namespace "$NS_STANDALONE" \
-        --deployment "$STANDALONE_DEPLOY" \
-        --type standalone; then
-        log_error "Heap dump validation failed!"
-        ((VALIDATION_FAILURES++))
+# RHDHSUPP-308 standalone validation (always runs)
+log_info ""
+log_info "Running RHDHSUPP-308 standalone validation..."
+RHDHSUPP308_POSTGRES="rhdhsupp-308-postgresql"
+if ! "$SCRIPT_DIR/validate-helm-standalone.sh" --validate \
+    --output-dir "$OUTPUT_DIR" \
+    --namespace "$NS_RHDHSUPP308" \
+    --deployment "$RHDHSUPP308_DEPLOY" \
+    --postgres "$RHDHSUPP308_POSTGRES"; then
+    log_error "RHDHSUPP-308 standalone validation failed!"
+    ((VALIDATION_FAILURES++))
+fi
+
+# Heap dump validation for RHDHSUPP-308 instance (always runs since heap dumps are always collected)
+log_info ""
+log_info "Running heap dump validation for RHDHSUPP-308 instance..."
+if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
+    --output-dir "$OUTPUT_DIR" \
+    --namespace "$NS_RHDHSUPP308" \
+    --deployment "$RHDHSUPP308_DEPLOY" \
+    --type standalone; then
+    log_error "Heap dump validation failed for RHDHSUPP-308!"
+    ((VALIDATION_FAILURES++))
+fi
+
+# Additional heap dump validations (only in nightly mode with --with-heap-dumps)
+if [ "$WITH_HEAP_DUMPS" = true ]; then
+    # Standalone Helm heap dump validation
+    if [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
+        log_info ""
+        log_info "Running heap dump validation for standalone Helm deployment..."
+        if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
+            --output-dir "$OUTPUT_DIR" \
+            --namespace "$NS_STANDALONE" \
+            --deployment "$STANDALONE_DEPLOY" \
+            --type standalone; then
+            log_error "Heap dump validation failed for standalone Helm!"
+            ((VALIDATION_FAILURES++))
+        fi
+    fi
+
+    # Operator CR heap dump validation (Deployment)
+    if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
+        log_info ""
+        log_info "Running heap dump validation for Operator CR (Deployment)..."
+        if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
+            --output-dir "$OUTPUT_DIR" \
+            --namespace "$NS_OPERATOR" \
+            --deployment "backstage-$BACKSTAGE_CR" \
+            --type operator \
+            --cr "$BACKSTAGE_CR"; then
+            log_error "Heap dump validation failed for Operator CR $BACKSTAGE_CR!"
+            ((VALIDATION_FAILURES++))
+        fi
+    fi
+
+    # Operator CR heap dump validation (StatefulSet)
+    if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_STATEFULSET" ]; then
+        log_info ""
+        log_info "Running heap dump validation for Operator CR (StatefulSet)..."
+        if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
+            --output-dir "$OUTPUT_DIR" \
+            --namespace "$NS_STATEFULSET" \
+            --deployment "backstage-$BACKSTAGE_CR_STATEFULSET" \
+            --type operator \
+            --cr "$BACKSTAGE_CR_STATEFULSET"; then
+            log_error "Heap dump validation failed for Operator CR $BACKSTAGE_CR_STATEFULSET!"
+            ((VALIDATION_FAILURES++))
+        fi
     fi
 fi
 

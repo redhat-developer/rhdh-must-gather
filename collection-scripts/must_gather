@@ -26,6 +26,7 @@ target_namespaces=""
 with_secrets="false"
 with_heap_dumps="false"
 heap_dump_method="inspector"
+heap_dump_instances=""
 
 function main() {
 
@@ -116,6 +117,18 @@ function parse_flags {
             ;;
         esac
         ;;
+      --heap-dump-instances)
+        if [[ -n "${2:-}" ]]; then
+          heap_dump_instances="$2"
+          shift
+        else
+          log_error "--heap-dump-instances requires a comma-separated list of instance names"
+          exit 1
+        fi
+        ;;
+      --heap-dump-instances=*)
+        heap_dump_instances="${1#*=}"
+        ;;
       --namespaces)
         if [[ -n "${2:-}" ]]; then
           target_namespaces="$2"
@@ -204,6 +217,16 @@ Usage: ./$(basename "$0") [params...]
                                               Requires NODE_OPTIONS configuration:
                                               NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
 
+  --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
+                                (default: all instances). Matches against:
+                                  - Helm release names (e.g., "my-rhdh")
+                                  - Backstage CR names (e.g., "developer-hub")
+                                  - Deployment names (e.g., "backstage-developer-hub")
+
+                                Examples:
+                                  --heap-dump-instances my-rhdh
+                                  --heap-dump-instances my-rhdh,developer-hub
+
   Examples:
   # Default collection (includes Namespace inspect for OMC compatibility)
   ./$(basename "$0")
@@ -265,11 +288,16 @@ function run_scripts {
     log_info "Secret collection disabled by default (use --with-secrets to enable)"
   fi
 
-  # Export heap dump collection flag and method
+  # Export heap dump collection flag, method, and instance filter
   export RHDH_WITH_HEAP_DUMPS="${with_heap_dumps:-}"
   export RHDH_HEAP_DUMP_METHOD="${heap_dump_method:-inspector}"
+  export RHDH_HEAP_DUMP_INSTANCES="${heap_dump_instances:-}"
   if [[ "${RHDH_WITH_HEAP_DUMPS}" == "true" ]]; then
-    log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD})"
+    if [[ -n "${RHDH_HEAP_DUMP_INSTANCES}" ]]; then
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, instances: ${RHDH_HEAP_DUMP_INSTANCES})"
+    else
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, all instances)"
+    fi
   fi
 
   for script in "${requested_scripts[@]}";

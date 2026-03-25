@@ -142,7 +142,7 @@ for release_info in $releases; do
     # Collect app-specific info and track processed deployments
     deploy=$(yq -r 'select(.kind=="Deployment") | .metadata.name' < "$release_dir/manifest.yaml" || true)
     statefulset=$(yq -r 'select(.kind=="StatefulSet") | .metadata.name' < "$release_dir/manifest.yaml" || true)
-    collect_rhdh_data "$release_ns" "$deploy" "$statefulset" "$release_dir"
+    collect_rhdh_data "$release_ns" "$deploy" "$statefulset" "$release_dir" "$release_name"
 
     # Track processed deployments to avoid duplicates in Phase 2
     if [[ -n "$deploy" ]]; then
@@ -310,8 +310,8 @@ else
                 ' 2>/dev/null || echo "Could not extract metadata"
             } > "$workload_dir/helm-metadata.txt"
 
-            # Collect RHDH-specific data
-            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir"
+            # Collect RHDH-specific data (workload_name is the deployment name)
+            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir" "$workload_name"
         elif [[ "$workload_kind" == *"statefulset"* ]]; then
             safe_exec "$KUBECTL_CMD -n '$workload_ns' get statefulset '$workload_name' -o yaml" "$workload_dir/statefulset.yaml" "StatefulSet YAML"
             safe_exec "$KUBECTL_CMD -n '$workload_ns' describe statefulset '$workload_name'" "$workload_dir/statefulset.describe.txt" "StatefulSet description"
@@ -330,7 +330,7 @@ else
             } > "$workload_dir/helm-metadata.txt"
 
             # Collect RHDH-specific data (StatefulSet as deployment, no separate DB statefulset)
-            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir"
+            collect_rhdh_data "$workload_ns" "$workload_name" "" "$workload_dir" "$workload_name"
         fi
 
         # Collect dependent services (e.g., PostgreSQL) with the same app.kubernetes.io/instance label

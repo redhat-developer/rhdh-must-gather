@@ -19,6 +19,21 @@ You can choose the method using `--heap-dump-method`:
 ./gather --with-heap-dumps --heap-dump-method sigusr2
 ```
 
+To collect heap dumps from specific instances only, use `--heap-dump-instances`:
+
+```bash
+# Collect from a specific Helm release
+./gather --with-heap-dumps --heap-dump-instances my-rhdh
+
+# Collect from multiple instances (Helm releases, CR names, or deployment names)
+./gather --with-heap-dumps --heap-dump-instances my-rhdh,developer-hub
+
+# Collect from a specific deployment
+./gather --with-heap-dumps --heap-dump-instances backstage-developer-hub
+```
+
+By default (when `--heap-dump-instances` is not specified), heap dumps are collected from all instances.
+
 #### Method 1: Inspector Protocol (Default - No Configuration Required)
 
 The inspector protocol method **works out of the box** for most RHDH deployments without any configuration changes. The tool automatically:

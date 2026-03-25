@@ -182,10 +182,10 @@ function gather_backstage_crs() {
 
       safe_exec "$KUBECTL_CMD -n '$cr_ns' describe backstages.rhdh.redhat.com '$cr_name'" "$cr_dir/describe.txt" "Details of CR $cr_name"
 
-      # Collect app-specific info
+      # Collect app-specific info (pass CR name for heap dump filtering)
       deploy="backstage-$cr_name"
       statefulset="backstage-psql-$cr_name"
-      collect_rhdh_data "$cr_ns" "$deploy" "$statefulset" "$cr_dir"
+      collect_rhdh_data "$cr_ns" "$deploy" "$statefulset" "$cr_dir" "$cr_name"
   done
 }
 

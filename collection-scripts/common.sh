@@ -866,13 +866,40 @@ collect_heap_dumps_for_pods() {
   local ns="$1"
   local labels="$2"
   local output_dir="$3"
+  local deploy_name="${4:-}"      # Deployment/StatefulSet name
+  local instance_name="${5:-}"    # Helm release name or CR name (optional)
 
   # Only collect heap dumps if explicitly enabled
   if [[ "${RHDH_WITH_HEAP_DUMPS:-false}" != "true" ]]; then
     log_debug "Heap dump collection disabled (use --with-heap-dumps to enable)"
     return 0
   fi
-  
+
+  # Check instance filter if specified
+  # Match against deploy_name OR instance_name (Helm release or CR name)
+  if [[ -n "${RHDH_HEAP_DUMP_INSTANCES:-}" ]]; then
+    local match_found=false
+    IFS=',' read -ra INSTANCES <<< "$RHDH_HEAP_DUMP_INSTANCES"
+    for instance in "${INSTANCES[@]}"; do
+      # Trim whitespace
+      instance=$(echo "$instance" | xargs)
+      if [[ -n "$deploy_name" && "$deploy_name" == "$instance" ]]; then
+        match_found=true
+        break
+      fi
+      if [[ -n "$instance_name" && "$instance_name" == "$instance" ]]; then
+        match_found=true
+        break
+      fi
+    done
+    if [[ "$match_found" != "true" ]]; then
+      local names="${deploy_name}"
+      [[ -n "$instance_name" && "$instance_name" != "$deploy_name" ]] && names="$names, $instance_name"
+      log_debug "Skipping heap dump for instance(s) '$names' (not in filter: $RHDH_HEAP_DUMP_INSTANCES)"
+      return 0
+    fi
+  fi
+
   log_info "Collecting heap dumps for pods with labels: $labels in namespace: $ns"
   
   local heap_dump_dir="$output_dir/heap-dumps"
@@ -1202,6 +1229,7 @@ collect_rhdh_data() {
   local deploy="$2"
   local statefulset="$3"
   local output_dir="$4"
+  local instance_name="${5:-}"  # Optional: Helm release name or CR name for heap dump filtering
 
   log_debug "deploy=$deploy"
   if [[ -n "$deploy" ]]; then
@@ -1234,7 +1262,8 @@ collect_rhdh_data() {
 
       # Collect heap dumps right after collecting logs (if enabled)
       # Use || true to ensure heap dump failures don't stop the entire collection
-      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir" || true
+      # Pass deploy name and instance name for filtering (instance_name may be Helm release or CR name)
+      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir" "$deploy" "$instance_name" || true
 
       pods_dir="$deploy_dir/pods"
       ensure_directory "$pods_dir"
