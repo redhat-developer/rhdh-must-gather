@@ -703,9 +703,11 @@ collect_heap_dump_via_inspector() {
   echo "=== Inspector Protocol Communication ===" >> "$log_file"
 
   # Generate a unique filename for the heap dump inside the container
+  # HEAP_DUMP_REMOTE_DIR can be overridden if /tmp is not writable or has limited space
+  local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
   local timestamp
   timestamp=$(date +%Y%m%d-%H%M%S)
-  local remote_heap_file="/tmp/heapdump-${timestamp}-$$.heapsnapshot"
+  local remote_heap_file="${remote_dir}/heapdump-${timestamp}-$$.heapsnapshot"
 
   # Create temp files for communication
   local fifo="/tmp/inspector_fifo_$$"
@@ -1096,21 +1098,25 @@ _process_container_heap_dump() {
           sleep "${HEAP_DUMP_TIMEOUT}"
 
           # Look for heap dump files in common locations
-          echo "Searching for heap dump files..."
+          # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
+          local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
+          echo "Searching for heap dump files (primary: $remote_dir)..."
           local found_dumps
           found_dumps=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-            "find /tmp /app /opt/app-root/src . -maxdepth 2 \( -name '*.heapsnapshot' -o -name 'Heap.*.heapsnapshot' -o -name 'heapdump-*.heapsnapshot' \) 2>/dev/null | head -5" 2>/dev/null || true)
+            "find $remote_dir /tmp /app /opt/app-root/src . -maxdepth 2 \( -name '*.heapsnapshot' -o -name 'Heap.*.heapsnapshot' -o -name 'heapdump-*.heapsnapshot' \) 2>/dev/null | head -5" 2>/dev/null || true)
 
           if [[ -n "$found_dumps" ]]; then
             echo "Found heap dump file(s):"
             echo "$found_dumps"
           else
-            echo "No heap dump files found in /tmp, /app, /opt/app-root/src, or current directory"
+            echo "No heap dump files found in $remote_dir, /tmp, /app, /opt/app-root/src, or current directory"
           fi
         } >> "$container_dir/heap-dump.log" 2>&1
 
         # Try to copy any heap dump file we can find
-        local search_paths="/tmp /app /opt/app-root/src"
+        # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
+        local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
+        local search_paths="$remote_dir /tmp /app /opt/app-root/src"
 
         for search_path in $search_paths; do
           local heap_files

@@ -46,7 +46,16 @@ The inspector protocol method **works out of the box** for most RHDH deployments
 **Benefits:**
 - No configuration changes required in most cases
 - Provides direct feedback on collection success/failure
-- Heap dump location is controlled by the must-gather tool
+- Heap dump location is controlled by the must-gather tool (default: `/tmp`)
+
+**Custom Heap Dump Location:**
+
+By default, heap dumps are written to `/tmp` in the container. If `/tmp` is not writable or has limited space, you can override this:
+
+```bash
+# Write heap dumps to a different directory
+HEAP_DUMP_REMOTE_DIR=/opt/app-root/src/tmp ./gather --with-heap-dumps
+```
 
 **Optional: Pre-enable Inspector**
 
@@ -93,6 +102,15 @@ spec:
 ```
 
 **Important**: The `--diagnostic-dir=/tmp` flag is required because the root filesystem in RHDH containers is read-only. Without it, heap snapshots cannot be written to the default current working directory.
+
+**Custom Heap Dump Location:**
+
+If you use a different `--diagnostic-dir` in your NODE_OPTIONS, you must tell the must-gather tool where to look:
+
+```bash
+# If your NODE_OPTIONS uses --diagnostic-dir=/opt/app-root/src/tmp
+HEAP_DUMP_REMOTE_DIR=/opt/app-root/src/tmp ./gather --with-heap-dumps --heap-dump-method sigusr2
+```
 
 **Reference:** [Node.js CLI Documentation](https://nodejs.org/docs/latest-v22.x/api/cli.html#--heapsnapshot-signalsignal)
 

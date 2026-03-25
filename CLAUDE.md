@@ -149,3 +149,5 @@ Assisted-by: Claude
 | `RHDH_TARGET_NAMESPACES` | - | Comma-separated namespace filter |
 | `RHDH_WITH_SECRETS` | `false` | Include secrets in collection |
 | `RHDH_WITH_HEAP_DUMPS` | `false` | Collect heap dumps from Node.js processes |
+| `HEAP_DUMP_TIMEOUT` | `600` | Timeout for heap dump collection (seconds) |
+| `HEAP_DUMP_REMOTE_DIR` | `/tmp` | Directory in container where heap dumps are written |

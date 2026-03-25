@@ -213,9 +213,17 @@ Usage: ./$(basename "$0") [params...]
                                   inspector - Activates Node.js inspector via SIGUSR1, then uses
                                               v8.writeHeapSnapshot() via Chrome DevTools Protocol.
                                               Works without configuration for most deployments.
+                                              Writes heap dump to HEAP_DUMP_REMOTE_DIR (default: /tmp).
                                   sigusr2   - Sends SIGUSR2 signal to trigger heap snapshot.
-                                              Requires NODE_OPTIONS configuration:
+                                              Requires NODE_OPTIONS configuration in your deployment:
                                               NODE_OPTIONS="--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+                                              Set HEAP_DUMP_REMOTE_DIR to match --diagnostic-dir.
+
+                                Environment variables for heap dump collection:
+                                  HEAP_DUMP_TIMEOUT=600     Timeout in seconds (default: 600)
+                                  HEAP_DUMP_REMOTE_DIR=/tmp Directory in the container where heap dumps
+                                                            are written (default: /tmp). For SIGUSR2 method,
+                                                            this must match --diagnostic-dir in NODE_OPTIONS.
 
   --heap-dump-instances <list>  Comma-separated list of instance names to collect heap dumps from
                                 (default: all instances). Matches against:
