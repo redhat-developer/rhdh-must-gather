@@ -1020,9 +1020,111 @@ collect_heap_dump_via_inspector() {
     echo "PARTIAL heap snapshot saved: $partial_file ($human_size)" >> "$log_file"
     echo "WARNING: This snapshot may be incomplete and could fail to load in analysis tools" >> "$log_file"
     log_warn "Partial heap dump saved ($human_size) - may be incomplete"
+
+    # Fallback: Try v8.writeHeapSnapshot() via Runtime.evaluate
+    # This writes directly to a file in the container, bypassing WebSocket streaming
+    echo "" >> "$log_file"
+    echo "=== Fallback: v8.writeHeapSnapshot() ===" >> "$log_file"
+    log_info "Attempting fallback: writing heap dump directly to container filesystem..."
+
+    local remote_heap_file="${HEAP_DUMP_REMOTE_DIR:-/tmp}/heapdump-fallback-$$.heapsnapshot"
+    local fallback_fifo="/tmp/inspector_fallback_fifo_$$"
+    local fallback_out="/tmp/inspector_fallback_out_$$"
+    rm -f "$fallback_fifo" "$fallback_out"
+    mkfifo "$fallback_fifo"
+    touch "$fallback_out"
+
+    # Start new websocat connection for fallback
+    websocat -t -B "$ws_buffer_size" "$ws_url" < "$fallback_fifo" > "$fallback_out" 2>> "$log_file" &
+    local fallback_ws_pid=$!
+    sleep 0.5
+
+    if kill -0 "$fallback_ws_pid" 2>/dev/null; then
+      exec 4>"$fallback_fifo"
+
+      # Use Runtime.evaluate to write heap snapshot to file
+      local write_cmd="require('v8').writeHeapSnapshot('$remote_heap_file')"
+      echo "Sending: Runtime.evaluate with $write_cmd" >> "$log_file"
+      echo "{\"id\":10,\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"$write_cmd\",\"returnByValue\":true}}" >&4
+
+      # Wait for response (up to 5 minutes for large heaps)
+      local fallback_wait=0
+      local fallback_max=300
+      local fallback_done=false
+
+      while [[ "$fallback_done" != "true" && $fallback_wait -lt $fallback_max ]]; do
+        sleep 1
+        fallback_wait=$((fallback_wait + 1))
+
+        if grep -qa '"id":10' "$fallback_out" 2>/dev/null; then
+          fallback_done=true
+        fi
+
+        # Log progress every 30s
+        if [[ $((fallback_wait % 30)) -eq 0 ]]; then
+          log_info "Waiting for v8.writeHeapSnapshot()... ${fallback_wait}s"
+        fi
+      done
+
+      exec 4>&-
+      kill "$fallback_ws_pid" 2>/dev/null || true
+      wait "$fallback_ws_pid" 2>/dev/null || true
+
+      if [[ "$fallback_done" == "true" ]]; then
+        # Check if the file was created and copy it
+        local response
+        response=$(grep -a '"id":10' "$fallback_out" | head -1)
+        echo "Response: $response" >> "$log_file"
+
+        # Check for errors in response
+        if echo "$response" | grep -q '"error"'; then
+          local err_msg
+          err_msg=$(echo "$response" | jq -r '.error.message // "unknown error"' 2>/dev/null)
+          echo "v8.writeHeapSnapshot() failed: $err_msg" >> "$log_file"
+          log_warn "Fallback failed: $err_msg"
+        else
+          # Extract the returned filename (v8.writeHeapSnapshot returns the path)
+          local returned_path
+          returned_path=$(echo "$response" | jq -r '.result.result.value // empty' 2>/dev/null)
+          if [[ -n "$returned_path" ]]; then
+            remote_heap_file="$returned_path"
+          fi
+          echo "Heap snapshot written to: $remote_heap_file" >> "$log_file"
+
+          # Copy the file from the container
+          local fallback_output="${output_file%.heapsnapshot}.fallback.heapsnapshot"
+          log_info "Copying heap dump from container..."
+          if $KUBECTL_CMD cp -n "$ns" "${pod}:${remote_heap_file}" "$fallback_output" -c "$container" >> "$log_file" 2>&1; then
+            local fallback_size
+            fallback_size=$(du -h "$fallback_output" 2>/dev/null | cut -f1)
+            echo "Fallback heap snapshot copied: $fallback_output ($fallback_size)" >> "$log_file"
+            log_success "Fallback heap dump collected via v8.writeHeapSnapshot ($fallback_size)"
+
+            # Clean up remote file
+            $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$remote_heap_file" 2>/dev/null || true
+
+            # Remove the partial file since we have a complete one
+            rm -f "$partial_file"
+          else
+            echo "Failed to copy heap snapshot from container" >> "$log_file"
+            log_warn "Fallback failed: could not copy file from container"
+          fi
+        fi
+      else
+        echo "Timeout waiting for v8.writeHeapSnapshot() (${fallback_wait}s)" >> "$log_file"
+        log_warn "Fallback timed out after ${fallback_wait}s"
+      fi
+
+      rm -f "$fallback_fifo" "$fallback_out"
+    else
+      echo "Failed to establish WebSocket connection for fallback" >> "$log_file"
+      log_warn "Fallback failed: could not connect to inspector"
+      rm -f "$fallback_fifo" "$fallback_out"
+    fi
+
     cleanup_port_forward
     rm -f "$fifo" "$outfile"
-    return 0  # Return success so we keep the partial file
+    return 0
   else
     echo "Heap snapshot saved: $output_file ($human_size)" >> "$log_file"
     log_success "Heap dump collected via inspector protocol ($human_size)"
