@@ -61,9 +61,11 @@ jobs:
         env:
           # Map context to ENV to prevent injection into the 'run' script
           PR_NUM: ${{ github.event.pull_request.number }}
+          # Use PR head SHA, not the merge commit SHA that GitHub creates for pull_request events
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          SHORT_SHA=$(git rev-parse --short=9 HEAD)
-          VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
+          SHORT_SHA="${PR_HEAD_SHA:0:9}"
+          VERSION="0.0.0-${SHORT_SHA}"
 
           echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
           echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA} ${VERSION}-pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
