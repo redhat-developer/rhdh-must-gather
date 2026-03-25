@@ -304,10 +304,11 @@ function run_scripts {
   export RHDH_HEAP_DUMP_METHOD="${heap_dump_method:-inspector}"
   export RHDH_HEAP_DUMP_INSTANCES="${heap_dump_instances:-}"
   if [[ "${RHDH_WITH_HEAP_DUMPS}" == "true" ]]; then
+    local heap_timeout="${HEAP_DUMP_TIMEOUT:-600}"
     if [[ -n "${RHDH_HEAP_DUMP_INSTANCES}" ]]; then
-      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, instances: ${RHDH_HEAP_DUMP_INSTANCES})"
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, timeout: ${heap_timeout}s, instances: ${RHDH_HEAP_DUMP_INSTANCES})"
     else
-      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, all instances)"
+      log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, timeout: ${heap_timeout}s, all instances)"
     fi
   fi
 
