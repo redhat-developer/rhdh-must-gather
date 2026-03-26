@@ -304,8 +304,11 @@ spec:
             periodSeconds: 10
             successThreshold: 2
             timeoutSeconds: 4
+          # NOTE: Heap dump collection blocks the Node.js event loop, causing liveness
+          # probe failures. We increase failureThreshold to allow ~10 minutes (60 * 10s)
+          # for heap dump collection without pod restarts.
           livenessProbe:
-            failureThreshold: 3
+            failureThreshold: 60
             httpGet:
               path: /.backstage/health/v1/liveness
               port: backend

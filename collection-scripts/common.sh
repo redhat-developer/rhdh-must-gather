@@ -1340,13 +1340,16 @@ collect_heap_dumps_for_pods() {
   
   for pod in $pods; do
     log_info "Processing pod: $pod for heap dump collection"
-    
+
     local pod_dir="$heap_dump_dir/pod=$pod"
     ensure_directory "$pod_dir"
-    
+
     # Get pod spec
     $KUBECTL_CMD get pod -n "$ns" "$pod" -o yaml > "$pod_dir/pod-spec.yaml" 2>&1 || true
-    
+
+    # Pre-flight check: warn if liveness probe timeout is too short for heap dump collection
+    _warn_liveness_probe_timeout "$ns" "$pod" "$HEAP_DUMP_TIMEOUT"
+
     # Find backstage-backend container
     local containers
     containers=$($KUBECTL_CMD get pod -n "$ns" "$pod" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)
@@ -1370,6 +1373,46 @@ collect_heap_dumps_for_pods() {
   done
 
   log_success "Heap dump collection completed for namespace: $ns"
+}
+
+# Pre-flight check: warn if liveness probe timeout is too short for heap dump collection
+# Heap dumps block the Node.js event loop, which can cause liveness probe failures
+_warn_liveness_probe_timeout() {
+  local ns="$1"
+  local pod="$2"
+  local heap_timeout="$3"
+
+  # Get liveness probe configuration for backstage-backend container
+  local probe_json
+  probe_json=$($KUBECTL_CMD get pod -n "$ns" "$pod" -o jsonpath='{.spec.containers[?(@.name=="backstage-backend")].livenessProbe}' 2>/dev/null || true)
+
+  if [[ -z "$probe_json" || "$probe_json" == "{}" ]]; then
+    log_debug "No liveness probe configured for pod $pod"
+    return 0
+  fi
+
+  # Extract probe parameters (defaults per Kubernetes docs)
+  local failure_threshold period_seconds
+  failure_threshold=$(echo "$probe_json" | jq -r '.failureThreshold // 3' 2>/dev/null || echo "3")
+  period_seconds=$(echo "$probe_json" | jq -r '.periodSeconds // 10' 2>/dev/null || echo "10")
+
+  # Calculate effective timeout before pod restart
+  local probe_timeout=$((failure_threshold * period_seconds))
+
+  if [[ "$probe_timeout" -lt "$heap_timeout" ]]; then
+    # Calculate recommended failureThreshold: ceil(heap_timeout / period_seconds)
+    local recommended_threshold=$(( (heap_timeout + period_seconds - 1) / period_seconds ))
+
+    log_warn "Pod '$pod' may restart during heap dump collection!"
+    log_warn "  Current: failureThreshold=$failure_threshold × periodSeconds=${period_seconds}s = ${probe_timeout}s before restart"
+    log_warn "  Required: at least ${heap_timeout}s (HEAP_DUMP_TIMEOUT)"
+    log_warn ""
+    log_warn "  Heap snapshots block the Node.js event loop, causing liveness probe failures."
+    log_warn "  To prevent pod restarts, temporarily set failureThreshold >= $recommended_threshold before collecting:"
+    log_warn "    kubectl patch deployment <name> -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"backstage-backend\",\"livenessProbe\":{\"failureThreshold\":$recommended_threshold}}]}}}}'"
+    log_warn ""
+    log_warn "  See: https://github.com/redhat-developer/rhdh-must-gather/blob/main/docs/heap-dumps-collection.md#liveness-probe-considerations"
+  fi
 }
 
 # Internal function to process heap dump for a single container

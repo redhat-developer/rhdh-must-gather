@@ -310,6 +310,8 @@ function run_scripts {
     else
       log_warn "Heap dump collection enabled (method: ${RHDH_HEAP_DUMP_METHOD}, timeout: ${heap_timeout}s, all instances)"
     fi
+    log_warn "Heap snapshots block the Node.js event loop. Pods with short liveness probe timeouts may restart."
+    log_warn "Consider increasing failureThreshold or timeoutSeconds on liveness probes before collecting."
   fi
 
   for script in "${requested_scripts[@]}";
