@@ -228,8 +228,66 @@ Each heap dump collection includes metadata files:
 ### Important Warnings
 
 - **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. The application **automatically resumes** after the heap snapshot is written. Plan heap dump collection during maintenance windows or low-traffic periods.
+- **Liveness probe failures**: See [Liveness Probe Considerations](#liveness-probe-considerations) below for important guidance on preventing pod restarts during heap dump collection.
 - **Inspector remains active**: When using the inspector method, SIGUSR1 activates the Node.js inspector which remains active after heap dump collection. This is harmless but means the inspector port stays open until the pod is restarted.
 - **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
+
+### Liveness Probe Considerations
+
+Heap snapshots are **stop-the-world** operations - V8 must pause the entire JavaScript event loop to capture a consistent memory state. This is a fundamental limitation of how V8 heap snapshots work and cannot be avoided.
+
+**Why this matters:**
+
+When the event loop is paused:
+- The application cannot respond to HTTP requests
+- Liveness probe health checks will fail
+- If probes fail long enough, Kubernetes will restart the pod
+
+**Default RHDH probe configuration:**
+
+```yaml
+livenessProbe:
+  failureThreshold: 3
+  periodSeconds: 10
+  timeoutSeconds: 4
+```
+
+With these defaults, the pod will restart after ~30 seconds of unresponsiveness (`failureThreshold × periodSeconds = 3 × 10 = 30s`). For heaps larger than ~500MB, heap dump collection often exceeds this threshold.
+
+**The must-gather tool will warn you** if it detects that a pod's liveness probe timeout is shorter than the configured `HEAP_DUMP_TIMEOUT`:
+
+```
+[WARN] Pod 'backstage-xyz' may restart during heap dump collection!
+[WARN]   Current: failureThreshold=3 × periodSeconds=10s = 30s before restart
+[WARN]   Required: at least 600s (HEAP_DUMP_TIMEOUT)
+[WARN]
+[WARN]   Heap snapshots block the Node.js event loop, causing liveness probe failures.
+[WARN]   To prevent pod restarts, temporarily set failureThreshold >= 60 before collecting:
+[WARN]     kubectl patch deployment <name> -p '{"spec":{"template":{"spec":{"containers":[{"name":"backstage-backend","livenessProbe":{"failureThreshold":60}}]}}}}'
+```
+
+**Solution: Temporarily increase liveness probe threshold**
+
+Before collecting heap dumps, increase `failureThreshold` to allow enough time for the heap snapshot to complete. For example, to allow 10 minutes (60 × 10s = 600s):
+
+```bash
+# Increase failureThreshold to allow 10 minutes
+kubectl patch deployment backstage-developer-hub -p '{"spec":{"template":{"spec":{"containers":[{"name":"backstage-backend","livenessProbe":{"failureThreshold":60}}]}}}}'
+
+# Collect heap dumps
+oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather --with-heap-dumps
+
+# Restore original configuration
+kubectl patch deployment backstage-developer-hub -p '{"spec":{"template":{"spec":{"containers":[{"name":"backstage-backend","livenessProbe":{"failureThreshold":3}}]}}}}'
+```
+
+**For Operator-managed deployments**, patch the Backstage CR or the generated Deployment directly.
+
+**Why only the liveness probe?** The readiness probe does not need to be adjusted. When the readiness probe fails, the pod is removed from Service endpoints (stops receiving traffic) but continues running. This is expected during heap dump collection. Once the heap dump completes, the readiness probe passes again and traffic resumes. The liveness probe is what matters - if it fails, Kubernetes restarts the pod and you lose the heap dump.
+
+**Tip:** For multi-replica deployments, you may want to collect from one pod at a time using `--heap-dump-instances` to minimize impact. However, you still need to increase the liveness probe threshold - otherwise the pod will restart and you'll lose the heap dump.
+
+**Note:** There is no way to take a V8 heap snapshot without pausing the event loop. This is a fundamental constraint of how JavaScript memory snapshots work - the heap must be in a consistent state to be captured accurately.
 
 ### Environment Variables
 
