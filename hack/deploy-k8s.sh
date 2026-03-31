@@ -73,20 +73,31 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Extract image components
-# Handle images with or without registry prefix
-if [[ "${IMAGE}" == *"/"*"/"* ]]; then
-    # Full path: registry/repo/name:tag
-    IMAGE_REGISTRY="${IMAGE%%/*}"
-    IMAGE_REPO_TAG="${IMAGE#*/}"
-    IMAGE_REPO="${IMAGE_REPO_TAG%:*}"
+# Robust parsing that handles registry ports correctly:
+#   quay.io/ns/img:1.2.3      -> registry=quay.io, repo=ns/img, tag=1.2.3
+#   quay.io/ns/img            -> registry=quay.io, repo=ns/img, tag=latest
+#   localhost:5000/ns/img:dev -> registry=localhost:5000, repo=ns/img, tag=dev
+#   localhost:5000/ns/img     -> registry=localhost:5000, repo=ns/img, tag=latest
+
+# Extract tag from the last path segment (after last /)
+LAST_SEGMENT="${IMAGE##*/}"
+if [[ "${LAST_SEGMENT}" == *":"* ]]; then
+    IMAGE_TAG="${LAST_SEGMENT##*:}"
+    # Remove the tag suffix from the image (quote IMAGE_TAG to prevent pattern matching)
+    IMAGE_WITHOUT_TAG="${IMAGE%":${IMAGE_TAG}"}"
 else
-    # Short path: repo/name:tag (default registry)
-    IMAGE_REGISTRY=""
-    IMAGE_REPO="${IMAGE%:*}"
-fi
-IMAGE_TAG="${IMAGE##*:}"
-if [[ "${IMAGE_TAG}" == "${IMAGE}" ]] || [[ "${IMAGE_TAG}" == "${IMAGE_REPO}" ]]; then
     IMAGE_TAG="latest"
+    IMAGE_WITHOUT_TAG="${IMAGE}"
+fi
+
+# Extract registry (first component) and repository (everything after first /)
+if [[ "${IMAGE_WITHOUT_TAG}" == *"/"* ]]; then
+    IMAGE_REGISTRY="${IMAGE_WITHOUT_TAG%%/*}"
+    IMAGE_REPO="${IMAGE_WITHOUT_TAG#*/}"
+else
+    # No slash means just an image name (e.g., "nginx")
+    IMAGE_REGISTRY=""
+    IMAGE_REPO="${IMAGE_WITHOUT_TAG}"
 fi
 
 # Generate namespace (if not provided) and output file
@@ -115,8 +126,15 @@ if ! command -v helm &>/dev/null; then
     exit 1
 fi
 
-echo "Creating namespace: ${NAMESPACE}"
-kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+# Check if namespace already exists, create if needed
+CREATED_NAMESPACE=false
+if kubectl get namespace "${NAMESPACE}" &>/dev/null; then
+    echo "Using existing namespace: ${NAMESPACE}"
+else
+    echo "Creating namespace: ${NAMESPACE}"
+    kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    CREATED_NAMESPACE=true
+fi
 
 echo ""
 echo "Installing/upgrading must-gather Helm release: ${RELEASE_NAME}"
@@ -248,7 +266,9 @@ if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "app.kubernetes
     echo "Resources left in namespace ${NAMESPACE} for debugging."
     echo "To clean up manually, run:"
     echo "  helm uninstall ${RELEASE_NAME} -n ${NAMESPACE}"
-    echo "  kubectl delete namespace ${NAMESPACE}"
+    if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+        echo "  kubectl delete namespace ${NAMESPACE}"
+    fi
     exit 1
 fi
 echo "Gather completed successfully"
@@ -260,9 +280,15 @@ kubectl -n "${NAMESPACE}" exec "deploy/${RELEASE_NAME}" -c data-holder -- tar cz
 echo ""
 
 # Cleanup
-echo "Cleaning up Helm release and namespace..."
+if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+    echo "Cleaning up Helm release and namespace..."
+else
+    echo "Cleaning up Helm release (keeping existing namespace ${NAMESPACE})..."
+fi
 helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --wait 2>/dev/null || true
-kubectl delete namespace "${NAMESPACE}" --wait=false 2>/dev/null || true
+if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+    kubectl delete namespace "${NAMESPACE}" --wait=false 2>/dev/null || true
+fi
 echo ""
 
 echo "Must-gather data saved to: ${OUTPUT_FILE}"
