@@ -261,7 +261,7 @@ jobs:
             const registryOrg = process.env.REGISTRY_ORG;
             const imageName = process.env.IMAGE_NAME;
             
-            const baseUrl = `https://${registry}/${registryOrg}/${imageName}`;
+            const baseUrl = `${registry}/${registryOrg}/${imageName}`;
             const allTags = [mainTag, ...extraTags];
             const tagList = allTags.map(tag => `<li><code>${baseUrl}:${tag}</code></li>`).join('\n');
             
