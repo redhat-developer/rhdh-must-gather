@@ -319,23 +319,25 @@ oc adm must-gather \
   -- env HEAP_DUMP_TIMEOUT=900 /usr/bin/gather --with-heap-dumps
 ```
 
-#### Standard Kubernetes (Job-based deployment)
+#### Standard Kubernetes (Helm chart)
 
-Add the environment variable to your must-gather Job or Deployment:
+Set the environment variable via Helm values:
 
-```yaml
-# deploy/overlays/with-heap-dumps/kustomization.yaml or custom overlay
-apiVersion: apps/v1
-kind: Deployment
-spec:
-  template:
-    spec:
-      containers:
-      - name: must-gather
-        env:
-        - name: HEAP_DUMP_TIMEOUT
-          value: "900"  # 15 minutes
+```bash
+# Using a values file
+cat > values.yaml <<EOF
+gather:
+  withHeapDumps: true
+  extraEnvVars:
+    - name: HEAP_DUMP_TIMEOUT
+      value: "900"
+EOF
+helm install my-rhdh-must-gather rhdh-must-gather \
+  --repo https://redhat-developer.github.io/rhdh-chart \
+  -f values.yaml
 ```
+
+See the [chart documentation](https://github.com/redhat-developer/rhdh-chart/tree/main/charts/must-gather) for all available options.
 
 #### Local execution
 

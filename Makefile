@@ -11,7 +11,8 @@ IMAGE_TAG ?= latest
 FULL_IMAGE_NAME ?= $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 LOG_LEVEL ?= info
 OPTS ?= ## Additional options to pass to must-gather (e.g., --with-heap-dumps --with-secrets)
-OVERLAY ?= ## Overlay to use for deploy-k8s (e.g., "with-heap-dumps", "debug-mode", or path to custom overlay)
+NAMESPACE ?= ## Namespace for deploy-k8s/deploy-openshift (default: random for k8s, auto for openshift)
+HELM_SET ?= ## Additional Helm --set flags for deploy-k8s (e.g., "gather.logLevel=debug")
 OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
 CONTAINER_TOOL ?= podman
 BUILD_ARGS ?=
@@ -128,7 +129,6 @@ ifneq ($(LOCAL),false)
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
 	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
-		$(if $(OVERLAY),--overlay "$(OVERLAY)") \
 		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
@@ -196,15 +196,19 @@ deploy-openshift: ## Deploy the must-gather image using the 'oc adm must-gather'
 		echo "Error: oc command not found. Please install OpenShift CLI."; \
 		exit 1; \
 	fi
-	oc adm must-gather --image=$(FULL_IMAGE_NAME) $(if $(OPTS),-- /usr/bin/gather $(OPTS))
+	oc adm must-gather --image=$(FULL_IMAGE_NAME) $(if $(NAMESPACE),--run-namespace=$(NAMESPACE)) $(if $(OPTS),-- /usr/bin/gather $(OPTS))
 
 .PHONY: deploy-k8s
-deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Kustomize)
+deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Helm chart)
 	@if ! command -v kubectl >/dev/null 2>&1; then \
 		echo "Error: kubectl command not found. Please install kubectl."; \
 		exit 1; \
 	fi
-	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(OVERLAY),--overlay "$(OVERLAY)") $(if $(OPTS),--opts "$(OPTS)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)")
+	@if ! command -v helm >/dev/null 2>&1; then \
+		echo "Error: helm command not found. Please install Helm."; \
+		exit 1; \
+	fi
+	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)")
 
 
 ##@ Cleanup
@@ -248,7 +252,8 @@ help: ## Display this help.
 	@echo "  IMAGE_TAG			- Container image tag (default: $(IMAGE_TAG))"
 	@echo "  LOG_LEVEL			- Log level (default: $(LOG_LEVEL))"
 	@echo "  OPTS				- Additional must-gather options (e.g., --with-heap-dumps --with-secrets)"
-	@echo "  OVERLAY			- Kustomize overlay for deploy-k8s/test-e2e (e.g., \"with-heap-dumps\", \"debug-mode\", or path)"
+	@echo "  NAMESPACE			- Namespace for deploy-k8s/deploy-openshift (default: random for k8s, auto for openshift)"
+	@echo "  HELM_SET			- Additional Helm --set flags for deploy-k8s (e.g., \"gather.logLevel=debug\")"
 	@echo "  OUTPUT_FILE			- Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)"
 	@echo "  TARGET_BRANCH			- Target branch for test-e2e defaults (default: main)"
 	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
@@ -262,8 +267,8 @@ help: ## Display this help.
 	@echo "  make test                                          # Run all unit tests"
 	@echo "  make test-e2e                                      # Run E2E tests in local mode (default)"
 	@echo "  make test-e2e LOCAL=false FULL_IMAGE_NAME=quay.io/org/img:tag  # Run E2E tests with container image"
-	@echo "  make deploy-k8s OVERLAY=with-heap-dumps            # Run deploy-k8s with heap dump overlay"
-	@echo "  make deploy-k8s OVERLAY=/path/to/my-overlay        # Run deploy-k8s with custom overlay"
+	@echo "  make deploy-k8s OPTS=\"--with-heap-dumps\"           # Run deploy-k8s with heap dumps"
+	@echo "  make deploy-k8s NAMESPACE=my-ns                    # Run deploy-k8s in a specific namespace"
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
 # @echo "  make run-container OPTS=\"--with-secrets --with-heap-dumps\""
 	@echo "  make deploy-openshift OPTS=\"--with-heap-dumps --namespaces my-ns\""

@@ -10,7 +10,6 @@
 # Options:
 #   --image <image>     Full image name (required unless --local is used)
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
-#   --overlay <overlay> Overlay to use (pre-built name or path). Only applicable on Kubernetes, ignored on OpenShift and local mode.
 #   --target-branch <branch> Target branch (used for defaults, default: main)
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
 #   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
@@ -31,7 +30,6 @@
 #
 
 set -euo pipefail
-shopt -s extglob
 
 # Get script directory for sourcing lib and calling test scripts
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,7 +77,6 @@ trap cleanup EXIT
 
 # Default values
 FULL_IMAGE_NAME=""
-OVERLAY=""
 LOCAL_MODE=false
 TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
@@ -91,6 +88,9 @@ SKIP_OPERATOR=false
 WITH_HEAP_DUMPS=false
 HEAP_DUMP_METHOD=""
 
+# Timeout for waiting for RHDH instances to be ready (in seconds)
+RHDH_READY_TIMEOUT=600
+
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -101,10 +101,6 @@ while [[ $# -gt 0 ]]; do
         --local)
             LOCAL_MODE=true
             shift
-            ;;
-        --overlay)
-            OVERLAY="$2"
-            shift 2
             ;;
         --target-branch)
             TARGET_BRANCH="$2"
@@ -167,9 +163,6 @@ if [ "$LOCAL_MODE" = true ]; then
     log_info "Starting E2E tests in local mode"
 else
     log_info "Starting E2E tests with image: $FULL_IMAGE_NAME"
-    if [ -n "$OVERLAY" ]; then
-        log_info "Using overlay: $OVERLAY"
-    fi
 
     # Extract registry, image name, and tag from full image name
     # e.g., quay.io/rhdh-community/rhdh-must-gather:pr-123
@@ -234,7 +227,7 @@ if [ "$SKIP_HELM" = false ]; then
     CLEANUP_TASKS+=("kubectl delete namespace $NS_HELM --wait=false")
     ALL_NAMESPACES+=("$NS_HELM")
 
-    log_info "Deploying Helm release..."
+    log_info "Deploying Helm release with 2 replicas..."
     # Use provided values file or generate one based on TARGET_BRANCH
     if [ -n "$HELM_VALUES_FILE" ]; then
         if [ ! -f "$HELM_VALUES_FILE" ]; then
@@ -247,18 +240,20 @@ if [ "$SKIP_HELM" = false ]; then
         TEMP_VALUES_FILE="$(mktemp)"
         # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
         case "$TARGET_BRANCH" in
-            main|release-1.@(9|[1-9][0-9]))
+            main|release-1.9|release-1.[1-9][0-9])
                 cat > "$TEMP_VALUES_FILE" <<EOF
 route:
   enabled: false
+upstream:
+  backstage:
+    replicas: 2
+  postgresql:
+    # Purposely disable the local database to simulate a misconfigured application (missing external database info)
+    enabled: false
 global:
   dynamic:
     # Faster startup by disabling all default dynamic plugins
     includes: []
-upstream:
-  postgresql:
-    # Purposely disable the local database to simulate a misconfigured application (missing external database info)
-    enabled: false
 EOF
                 ;;
             *)
@@ -298,27 +293,24 @@ EOF
             --values "$TEMP_VALUES_FILE"
     fi
 
-    # Wait for the Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)
-    log_info "Waiting for Helm-deployed RHDH pod to enter CreateContainerConfigError state (this is expected)..."
-    HELM_POD=""
-    TIMEOUT=120
-    until HELM_POD=$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$HELM_POD" ]; do
+    # Wait for the Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)
+    log_info "Waiting for 2 Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)..."
+    TIMEOUT=$RHDH_READY_TIMEOUT
+    until [ "$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)" -ge 2 ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
         if [ $TIMEOUT -le 0 ]; then
-            break
+            log_error "Could not find 2 Helm-deployed RHDH pods in namespace $NS_HELM."
+            exit 1
         fi
     done
-    if [ -z "$HELM_POD" ]; then
-        log_error "Could not find Helm-deployed RHDH pod in namespace $NS_HELM."
+    HELM_PODS=$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[*].metadata.name}')
+    log_info "Found Helm pods: $HELM_PODS"
+    if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -n "$NS_HELM" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null; then
+        log_error "Helm-deployed pods did not reach CreateContainerConfigError state within expected time."
         exit 1
     fi
-    if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pod/"$HELM_POD" -n "$NS_HELM" --timeout=5m 2>/dev/null; then
-        POD_REASON=$(kubectl -n "$NS_HELM" get pod "$HELM_POD" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
-        log_error "Helm-deployed pod $HELM_POD did not reach CreateContainerConfigError state (current: $POD_REASON) within expected time."
-        exit 1
-    fi
-    log_info "Helm release '$HELM_RELEASE' deployed successfully in namespace $NS_HELM"
+    log_info "Helm release '$HELM_RELEASE' with 2 replicas deployed successfully in namespace $NS_HELM"
 else
     log_info "Skipping Helm release setup"
 fi
@@ -363,7 +355,7 @@ EOF
     # Wait for the standalone-deployed RHDH pod to be running (not necessarily Ready)
     log_info "Waiting for standalone-deployed RHDH pod to be running..."
     STANDALONE_POD=""
-    TIMEOUT=120
+    TIMEOUT=$RHDH_READY_TIMEOUT
     until STANDALONE_POD=$(kubectl -n "$NS_STANDALONE" get pods -l "app.kubernetes.io/instance=$STANDALONE_RELEASE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STANDALONE_POD" ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
@@ -376,7 +368,7 @@ EOF
         exit 1
     fi
     log_info "Found standalone-deployed pod: $STANDALONE_POD"
-    if ! kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"$STANDALONE_POD" --timeout=5m; then
+    if ! kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"$STANDALONE_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
         log_error "Standalone-deployed pod $STANDALONE_POD did not reach Running state."
         exit 1
     fi
@@ -395,7 +387,7 @@ EOF
         log_warn "Could not find PostgreSQL StatefulSet in namespace $NS_STANDALONE (may not be part of this chart version)"
     else
         log_info "Found PostgreSQL StatefulSet: $STANDALONE_POSTGRES"
-        kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"${STANDALONE_POSTGRES}-0" --timeout=3m 2>/dev/null || true
+        kubectl -n "$NS_STANDALONE" wait --for=jsonpath='{.status.phase}'=Running pod/"${STANDALONE_POSTGRES}-0" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null || true
     fi
     log_info "Standalone deployment '$STANDALONE_DEPLOY' deployed successfully in namespace $NS_STANDALONE"
 else
@@ -414,7 +406,7 @@ if [ "$SKIP_OPERATOR" = false ]; then
     CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
 
     log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
-    if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=5m; then
+    if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=${RHDH_READY_TIMEOUT}s; then
         log_error "Timed out waiting for rhdh-operator deployment to be available."
         exit 1
     fi
@@ -430,18 +422,13 @@ if [ "$SKIP_OPERATOR" = false ]; then
     CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
     ALL_NAMESPACES+=("$NS_OPERATOR" "$NS_STATEFULSET")
 
-    log_info "Deploying Backstage CR (kind: Deployment in v1alpha4) with 2 replicas..."
+    log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
     kubectl -n "$NS_OPERATOR" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
-spec:
-  deployment:
-    patch:
-      spec:
-        replicas: 2
 EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
@@ -456,28 +443,28 @@ spec:
     kind: StatefulSet
 EOF
 
-    # Wait for the Backstage pods to be running (not necessarily Ready - we just need them to exist for must-gather)
-    log_info "Waiting for 2 Backstage pods for CR $BACKSTAGE_CR to be running..."
-    TIMEOUT=300
-    until [ "$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)" -ge 2 ]; do
+    # Wait for the Backstage pod to be running (not necessarily Ready - we just need it to exist for must-gather)
+    log_info "Waiting for Backstage pod for CR $BACKSTAGE_CR to be running..."
+    OPERATOR_POD=""
+    TIMEOUT=$RHDH_READY_TIMEOUT
+    until OPERATOR_POD=$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$OPERATOR_POD" ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
         if [ $TIMEOUT -le 0 ]; then
-            log_error "Timed out waiting for 2 Backstage pods for CR $BACKSTAGE_CR to appear."
+            log_error "Timed out waiting for Backstage pod for CR $BACKSTAGE_CR to appear."
             exit 1
         fi
     done
-    OPERATOR_PODS=$(kubectl -n "$NS_OPERATOR" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" -o jsonpath='{.items[*].metadata.name}')
-    log_info "Found Backstage pods: $OPERATOR_PODS, waiting for them to be running..."
-    if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR" --timeout=3m; then
-        log_error "Backstage pods for CR $BACKSTAGE_CR did not reach Running state."
+    log_info "Found Backstage pod: $OPERATOR_POD, waiting for it to be running..."
+    if ! kubectl -n "$NS_OPERATOR" wait --for=jsonpath='{.status.phase}'=Running pod/"$OPERATOR_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
+        log_error "Backstage pod $OPERATOR_POD did not reach Running state."
         exit 1
     fi
-    log_info "Backstage pods for CR $BACKSTAGE_CR are now running."
+    log_info "Backstage pod $OPERATOR_POD is now running."
 
     log_info "Waiting for Backstage pods for CR $BACKSTAGE_CR_STATEFULSET to be running..."
     STATEFULSET_POD=""
-    TIMEOUT=300
+    TIMEOUT=$RHDH_READY_TIMEOUT
     until STATEFULSET_POD=$(kubectl -n "$NS_STATEFULSET" get pods -l "rhdh.redhat.com/app=backstage-$BACKSTAGE_CR_STATEFULSET" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$STATEFULSET_POD" ]; do
         sleep 2
         TIMEOUT=$((TIMEOUT - 2))
@@ -487,7 +474,7 @@ EOF
         fi
     done
     log_info "Found Backstage pod: $STATEFULSET_POD, waiting for it to be running..."
-    if ! kubectl -n "$NS_STATEFULSET" wait --for=jsonpath='{.status.phase}'=Running pod/"$STATEFULSET_POD" --timeout=3m; then
+    if ! kubectl -n "$NS_STATEFULSET" wait --for=jsonpath='{.status.phase}'=Running pod/"$STATEFULSET_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
         log_error "Backstage pod $STATEFULSET_POD did not reach Running state."
         exit 1
     fi
@@ -516,12 +503,12 @@ kubectl apply -n "$NS_RHDHSUPP308" -f "$RHDHSUPP308_MANIFEST"
 # Wait for PostgreSQL to be ready first
 log_info "Waiting for PostgreSQL pod to be ready..."
 kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
-    -n "$NS_RHDHSUPP308" --timeout=180s 2>/dev/null || log_warn "PostgreSQL pod not ready, continuing..."
+    -n "$NS_RHDHSUPP308" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null || log_warn "PostgreSQL pod not ready, continuing..."
 
 # Wait for backstage pod to be running
 log_info "Waiting for RHDHSUPP-308 backstage pod to be running..."
 RHDHSUPP308_POD=""
-TIMEOUT=180
+TIMEOUT=$RHDH_READY_TIMEOUT
 until RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$RHDHSUPP308_POD" ]; do
     sleep 2
     TIMEOUT=$((TIMEOUT - 2))
@@ -532,7 +519,7 @@ until RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes
     fi
 done
 log_info "Found RHDHSUPP-308 pod: $RHDHSUPP308_POD"
-if ! kubectl -n "$NS_RHDHSUPP308" wait --for=jsonpath='{.status.phase}'=Running pod/"$RHDHSUPP308_POD" --timeout=5m; then
+if ! kubectl -n "$NS_RHDHSUPP308" wait --for=jsonpath='{.status.phase}'=Running pod/"$RHDHSUPP308_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
     log_error "RHDHSUPP-308 pod $RHDHSUPP308_POD did not reach Running state."
     exit 1
 fi
@@ -563,9 +550,6 @@ fi
 
 if [ "$LOCAL_MODE" = true ]; then
     log_info "Running in local mode"
-    if [ -n "$OVERLAY" ]; then
-        log_warn "--overlay option is not applicable in local mode, ignoring"
-    fi
     log_info "Running make clean-out run-local..."
     make clean-out run-local OPTS="$GATHER_OPTS"
     OUTPUT_DIR="./out"
@@ -579,9 +563,6 @@ elif is_openshift; then
     if ! command -v oc &>/dev/null; then
         log_error "OpenShift cluster detected but 'oc' command not found. Please install the OpenShift CLI."
         exit 1
-    fi
-    if [ -n "$OVERLAY" ]; then
-        log_warn "--overlay option is only applicable on Kubernetes, ignoring on OpenShift"
     fi
     log_info "Running make deploy-openshift..."
     make deploy-openshift \
@@ -610,7 +591,6 @@ else
         REGISTRY="$REGISTRY" \
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
-        OVERLAY="$OVERLAY" \
         OPTS="$GATHER_OPTS"
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
@@ -657,7 +637,7 @@ fi
 if [ "$SKIP_HELM" = false ] && [ -n "$NS_HELM" ]; then
     log_info ""
     log_info "Running Helm validation..."
-    if ! "$SCRIPT_DIR/validate-helm.sh" --validate --output-dir "$OUTPUT_DIR" --namespace "$NS_HELM" --release "$HELM_RELEASE"; then
+    if ! "$SCRIPT_DIR/validate-helm.sh" --validate --output-dir "$OUTPUT_DIR" --namespace "$NS_HELM" --release "$HELM_RELEASE" --replicas 2; then
         log_error "Helm validation failed!"
         ((VALIDATION_FAILURES++))
     fi
@@ -682,7 +662,7 @@ if [ "$SKIP_OPERATOR" = false ] && [ -n "$NS_OPERATOR" ]; then
     log_info ""
     log_info "Running Operator validation..."
     if ! "$SCRIPT_DIR/validate-operator.sh" --validate --output-dir "$OUTPUT_DIR" \
-        --cr "$NS_OPERATOR:$BACKSTAGE_CR:2" \
+        --cr "$NS_OPERATOR:$BACKSTAGE_CR:1" \
         --cr "$NS_STATEFULSET:$BACKSTAGE_CR_STATEFULSET:1"; then
         log_error "Operator validation failed!"
         ((VALIDATION_FAILURES++))
