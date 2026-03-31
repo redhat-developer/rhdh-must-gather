@@ -3,7 +3,7 @@
   "extends": [
     "config:recommended"
   ],
-    "customDatasources": {
+  "customDatasources": {
     "openshift-client": {
       "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
       "format": "html",
