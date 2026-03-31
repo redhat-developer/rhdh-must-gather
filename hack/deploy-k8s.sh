@@ -174,7 +174,7 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 echo "  withIngress: false" >> "${TMP_VALUES}"
                 ;;
             --namespaces)
-                ((i++))
+                i=$((i + 1))
                 if [[ $i -lt ${#OPTS_ARRAY[@]} ]]; then
                     # Convert comma-separated to YAML array
                     NS_VALUE="${OPTS_ARRAY[$i]}"
@@ -199,7 +199,7 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 EXTRA_ARGS+=("${opt}")
                 ;;
         esac
-        ((i++))
+        i=$((i + 1))
     done
 
     # Add extraArgs if any

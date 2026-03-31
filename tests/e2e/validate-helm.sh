@@ -2,12 +2,13 @@
 # Validate Helm deployment collection in must-gather output
 #
 # Usage:
-#   ./tests/e2e/test-helm.sh --validate --output-dir <dir> --namespace <ns> --release <name>
+#   ./tests/e2e/test-helm.sh --validate --output-dir <dir> --namespace <ns> --release <name> [--replicas <n>]
 #
 # Options:
 #   --output-dir <dir>  Path to must-gather output directory (required)
 #   --namespace <ns>    Namespace where release was deployed (required)
 #   --release <name>    Name of the Helm release (required)
+#   --replicas <n>      Expected number of replicas (default: 1)
 #
 # Exit codes:
 #   0 - All validations passed
@@ -24,6 +25,7 @@ MODE=""
 NAMESPACE=""
 OUTPUT_DIR=""
 RELEASE_NAME=""
+REPLICAS=1
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -42,6 +44,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --release)
             RELEASE_NAME="$2"
+            shift 2
+            ;;
+        --replicas)
+            REPLICAS="$2"
             shift 2
             ;;
         *)
@@ -76,6 +82,7 @@ log_info "=========================================="
 log_info "Output directory: $OUTPUT_DIR"
 log_info "Namespace: $NAMESPACE"
 log_info "Helm release: $RELEASE_NAME"
+log_info "Expected replicas: $REPLICAS"
 
 reset_errors
 
@@ -93,6 +100,22 @@ check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/hook
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment" "all deployment data in Helm collection directory"
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/logs-app.txt" "deployment logs"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/pods" "all pod data in Helm collection directory"
+
+# Validate expected number of pods
+PODS_FILE="$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/pods/pods.txt"
+if [ -f "$PODS_FILE" ]; then
+    # Count pods by counting lines that start with the release name (pod names)
+    POD_COUNT=$(grep -c "^$RELEASE_NAME" "$PODS_FILE" 2>/dev/null || echo 0)
+    if [ "$POD_COUNT" -eq "$REPLICAS" ]; then
+        log_info "✓ Found expected $REPLICAS pod(s) in pods.txt"
+    else
+        log_error "✗ Expected $REPLICAS pod(s), found $POD_COUNT in pods.txt"
+        ((ERRORS++))
+    fi
+else
+    log_error "✗ pods.txt not found"
+    ((ERRORS++))
+fi
 
 # Processes are only collected from running pods; the Helm deployment is intentionally misconfigured (CreateContainerConfigError)
 # so the processes directory should NOT exist (or be empty if created)
