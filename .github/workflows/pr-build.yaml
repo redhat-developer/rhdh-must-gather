@@ -37,7 +37,6 @@ jobs:
             Containerfile
             .containerignore
             collection-scripts/**
-            deploy/**
             LICENSE
           files_ignore: |
             **/*.md

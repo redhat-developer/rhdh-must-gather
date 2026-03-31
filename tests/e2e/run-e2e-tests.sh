@@ -10,7 +10,6 @@
 # Options:
 #   --image <image>     Full image name (required unless --local is used)
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
-#   --overlay <overlay> Overlay to use (pre-built name or path). Only applicable on Kubernetes, ignored on OpenShift and local mode.
 #   --target-branch <branch> Target branch (used for defaults, default: main)
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
 #   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
@@ -79,7 +78,6 @@ trap cleanup EXIT
 
 # Default values
 FULL_IMAGE_NAME=""
-OVERLAY=""
 LOCAL_MODE=false
 TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
@@ -101,10 +99,6 @@ while [[ $# -gt 0 ]]; do
         --local)
             LOCAL_MODE=true
             shift
-            ;;
-        --overlay)
-            OVERLAY="$2"
-            shift 2
             ;;
         --target-branch)
             TARGET_BRANCH="$2"
@@ -167,9 +161,6 @@ if [ "$LOCAL_MODE" = true ]; then
     log_info "Starting E2E tests in local mode"
 else
     log_info "Starting E2E tests with image: $FULL_IMAGE_NAME"
-    if [ -n "$OVERLAY" ]; then
-        log_info "Using overlay: $OVERLAY"
-    fi
 
     # Extract registry, image name, and tag from full image name
     # e.g., quay.io/rhdh-community/rhdh-must-gather:pr-123
@@ -563,9 +554,6 @@ fi
 
 if [ "$LOCAL_MODE" = true ]; then
     log_info "Running in local mode"
-    if [ -n "$OVERLAY" ]; then
-        log_warn "--overlay option is not applicable in local mode, ignoring"
-    fi
     log_info "Running make clean-out run-local..."
     make clean-out run-local OPTS="$GATHER_OPTS"
     OUTPUT_DIR="./out"
@@ -579,9 +567,6 @@ elif is_openshift; then
     if ! command -v oc &>/dev/null; then
         log_error "OpenShift cluster detected but 'oc' command not found. Please install the OpenShift CLI."
         exit 1
-    fi
-    if [ -n "$OVERLAY" ]; then
-        log_warn "--overlay option is only applicable on Kubernetes, ignoring on OpenShift"
     fi
     log_info "Running make deploy-openshift..."
     make deploy-openshift \
@@ -610,7 +595,6 @@ else
         REGISTRY="$REGISTRY" \
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
-        OVERLAY="$OVERLAY" \
         OPTS="$GATHER_OPTS"
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)

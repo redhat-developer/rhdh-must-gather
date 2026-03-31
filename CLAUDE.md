@@ -26,8 +26,7 @@ make image-push REGISTRY=quay.io IMAGE_NAME=org/image IMAGE_TAG=v1.0.0
 ### Deployment Testing
 ```bash
 make deploy-openshift                               # Test with `oc adm must-gather`
-make deploy-k8s                                     # Test on standard Kubernetes
-make deploy-k8s OVERLAY=with-heap-dumps             # Use a kustomize overlay
+make deploy-k8s                                     # Test on standard Kubernetes (uses Helm chart)
 make deploy-k8s OPTS="--with-secrets --namespaces ns1,ns2"
 ```
 
@@ -51,11 +50,6 @@ make clean-out              # Remove only the local output directory (./out)
 2. Runs each enabled `gather_*` script sequentially
 3. On exit (success or interrupt), runs `sanitize` to redact sensitive data
 4. Outputs to `BASE_COLLECTION_PATH` (default: `/must-gather` in container, `./out` locally)
-
-### Deployment Manifests (`deploy/`)
-Kustomize-based manifests for running on standard Kubernetes:
-- `deploy/base/` - Core resources (Deployment, RBAC, ServiceAccount)
-- `deploy/overlays/` - Pre-built configurations (debug-mode, with-heap-dumps, specific-namespaces)
 
 ### Tests (`tests/`)
 - **Unit tests**: `tests/*.bats` - BATS tests for shell functions (use `tests/test_helper.bash` for setup)

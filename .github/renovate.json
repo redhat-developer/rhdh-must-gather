@@ -3,11 +3,7 @@
   "extends": [
     "config:recommended"
   ],
-  "ignorePaths": [
-    "deploy/overlays/custom-image/kustomization.yaml",
-    "deploy/base/kustomization.yaml"
-  ],
-  "customDatasources": {
+    "customDatasources": {
     "openshift-client": {
       "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
       "format": "html",

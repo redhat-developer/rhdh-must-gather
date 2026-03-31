@@ -1,40 +1,36 @@
 #!/usr/bin/env bash
 #
-# Run RHDH must-gather on a standard Kubernetes cluster using Kustomize.
+# Run RHDH must-gather on a standard Kubernetes cluster using the Helm chart.
 #
 # Usage:
 #   ./hack/deploy-k8s.sh [OPTIONS]
 #
 # Options:
-#   --image <image>     Full image name (default: quay.io/rhdh-community/rhdh-must-gather:latest)
-#   --overlay <overlay> Overlay to use. Can be:
-#                       - A pre-built overlay name (e.g., "with-heap-dumps", "debug-mode")
-#                       - A full/relative path to a user-defined overlay directory
-#   --opts <options>    Additional options to pass to the gather script (quote multiple options)
-#   --output <file>     Output file path (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
-#   --help              Show this help message
+#   --image <image>       Full image name (default: quay.io/rhdh-community/rhdh-must-gather:latest)
+#   --namespace <ns>      Namespace to deploy must-gather in (default: rhdh-must-gather-<timestamp>)
+#   --opts <options>      Additional options to pass to the gather script (quote multiple options)
+#   --helm-set <sets>     Additional Helm --set flags (space-separated, e.g., "key1=val1 key2=val2")
+#   --output <file>       Output file path (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
+#   --help                Show this help message
 #
 # Examples:
 #   ./hack/deploy-k8s.sh
 #   ./hack/deploy-k8s.sh --image quay.io/myorg/rhdh-must-gather:v1.0.0
-#   ./hack/deploy-k8s.sh --overlay with-heap-dumps
-#   ./hack/deploy-k8s.sh --overlay debug-mode --opts "--namespaces my-ns"
-#   ./hack/deploy-k8s.sh --overlay /path/to/my-overlay
+#   ./hack/deploy-k8s.sh --namespace my-must-gather-ns
+#   ./hack/deploy-k8s.sh --opts "--namespaces my-ns"
+#   ./hack/deploy-k8s.sh --opts "--with-heap-dumps --namespaces my-ns"
 #   ./hack/deploy-k8s.sh --output ./debug-mustgather.tar.gz
-#   ./hack/deploy-k8s.sh --image myimage:tag --overlay with-heap-dumps --opts "--with-secrets --namespaces my-ns"
+#   ./hack/deploy-k8s.sh --image myimage:tag --opts "--with-secrets --namespaces my-ns"
 #
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-KUSTOMIZE_BASE="${REPO_ROOT}/deploy"
-
 # Default values
 DEFAULT_IMAGE="quay.io/rhdh-community/rhdh-must-gather:latest"
 IMAGE="${DEFAULT_IMAGE}"
-OVERLAY=""
+NAMESPACE=""
 OPTS_STRING=""
+HELM_SET_STRING=""
 OUTPUT_FILE=""
 
 # Parse named arguments
@@ -49,12 +45,16 @@ while [[ $# -gt 0 ]]; do
             IMAGE="$2"
             shift 2
             ;;
-        --overlay)
-            OVERLAY="$2"
+        --namespace)
+            NAMESPACE="$2"
             shift 2
             ;;
         --opts)
             OPTS_STRING="$2"
+            shift 2
+            ;;
+        --helm-set)
+            HELM_SET_STRING="$2"
             shift 2
             ;;
         --output)
@@ -72,142 +72,200 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Convert OPTS_STRING to array
-OPTS=()
-if [[ -n "${OPTS_STRING}" ]]; then
-    read -ra OPTS <<< "${OPTS_STRING}"
-fi
-
 # Extract image components
-IMAGE_NAME="${IMAGE%:*}"
+# Handle images with or without registry prefix
+if [[ "${IMAGE}" == *"/"*"/"* ]]; then
+    # Full path: registry/repo/name:tag
+    IMAGE_REGISTRY="${IMAGE%%/*}"
+    IMAGE_REPO_TAG="${IMAGE#*/}"
+    IMAGE_REPO="${IMAGE_REPO_TAG%:*}"
+else
+    # Short path: repo/name:tag (default registry)
+    IMAGE_REGISTRY=""
+    IMAGE_REPO="${IMAGE%:*}"
+fi
 IMAGE_TAG="${IMAGE##*:}"
-if [[ "${IMAGE_TAG}" == "${IMAGE_NAME}" ]]; then
+if [[ "${IMAGE_TAG}" == "${IMAGE}" ]] || [[ "${IMAGE_TAG}" == "${IMAGE_REPO}" ]]; then
     IMAGE_TAG="latest"
 fi
 
-# Resolve overlay path
-OVERLAY_PATH=""
-if [[ -n "${OVERLAY}" ]]; then
-    if [[ -d "${OVERLAY}" ]]; then
-        # Full/relative path to a user-defined overlay
-        OVERLAY_PATH="$(cd "${OVERLAY}" && pwd)"
-    elif [[ -d "${KUSTOMIZE_BASE}/overlays/${OVERLAY}" ]]; then
-        # Pre-built overlay name
-        OVERLAY_PATH="${KUSTOMIZE_BASE}/overlays/${OVERLAY}"
-    else
-        echo "Error: Overlay not found: ${OVERLAY}"
-        echo "       Looked for:"
-        echo "         - ${OVERLAY} (as path)"
-        echo "         - ${KUSTOMIZE_BASE}/overlays/${OVERLAY} (as pre-built overlay)"
-        exit 1
-    fi
-fi
-
-# Generate unique namespace and output file (if not overridden)
+# Generate namespace (if not provided) and output file
 TIMESTAMP=$(date +%s)
-NAMESPACE="rhdh-must-gather-${TIMESTAMP}"
+if [[ -z "${NAMESPACE}" ]]; then
+    NAMESPACE="rhdh-must-gather-${TIMESTAMP}"
+fi
+RELEASE_NAME="rhdh-must-gather"
 if [[ -z "${OUTPUT_FILE}" ]]; then
     OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar.gz"
 elif [[ "${OUTPUT_FILE}" != *.tar.gz ]]; then
     OUTPUT_FILE="${OUTPUT_FILE}.tar.gz"
 fi
 
-# Create temporary overlay directory
-TMP_OVERLAY=$(mktemp -d)
-trap 'rm -rf "${TMP_OVERLAY}"' EXIT
-
-echo "Testing against a regular K8s cluster..."
+echo "Testing against a regular K8s cluster using Helm chart..."
 echo ""
 
-# Check for kubectl
+# Check for required tools
 if ! command -v kubectl &>/dev/null; then
     echo "Error: kubectl command not found."
     exit 1
 fi
 
-echo "Preparing must-gather resources in namespace: ${NAMESPACE}"
-if [[ -n "${OVERLAY_PATH}" ]]; then
-    echo "Using overlay: ${OVERLAY_PATH}"
+if ! command -v helm &>/dev/null; then
+    echo "Error: helm command not found."
+    exit 1
 fi
 
-# Create symlink to base/overlay directory (Kustomize requires relative paths)
-if [[ -n "${OVERLAY_PATH}" ]]; then
-    ln -s "${OVERLAY_PATH}" "${TMP_OVERLAY}/base"
-else
-    ln -s "${KUSTOMIZE_BASE}" "${TMP_OVERLAY}/base"
+echo "Creating namespace: ${NAMESPACE}"
+kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+echo ""
+echo "Installing/upgrading must-gather Helm release: ${RELEASE_NAME}"
+echo "Namespace: ${NAMESPACE}"
+echo "Image: ${IMAGE}"
+
+# Create temporary values file
+TMP_VALUES=$(mktemp)
+trap 'rm -f "${TMP_VALUES}"' EXIT
+
+# Build values file
+cat > "${TMP_VALUES}" <<EOF
+image:
+EOF
+
+if [[ -n "${IMAGE_REGISTRY}" ]]; then
+    cat >> "${TMP_VALUES}" <<EOF
+  registry: ${IMAGE_REGISTRY}
+EOF
 fi
 
-# Generate kustomization.yaml
-cat > "${TMP_OVERLAY}/kustomization.yaml" <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-namespace: ${NAMESPACE}
-
-resources:
-  - base
-
-images:
-  - name: quay.io/rhdh-community/rhdh-must-gather
-    newName: ${IMAGE_NAME}
-    newTag: ${IMAGE_TAG}
-
+cat >> "${TMP_VALUES}" <<EOF
+  repository: ${IMAGE_REPO}
+  tag: ${IMAGE_TAG}
 EOF
 
-# Add args patch if OPTS provided
-if [[ ${#OPTS[@]} -gt 0 ]]; then
-    cat >> "${TMP_OVERLAY}/kustomization.yaml" <<EOF
-patches:
-  - target:
-      kind: Deployment
-      name: rhdh-must-gather
-    patch: |
-      - op: add
-        path: /spec/template/spec/initContainers/0/args
-        value:
-EOF
-    for opt in "${OPTS[@]}"; do
-        echo "          - \"${opt}\"" >> "${TMP_OVERLAY}/kustomization.yaml"
+# Parse OPTS_STRING and convert to gather.* values
+if [[ -n "${OPTS_STRING}" ]]; then
+    echo "" >> "${TMP_VALUES}"
+    echo "gather:" >> "${TMP_VALUES}"
+
+    # Parse options
+    EXTRA_ARGS=()
+    read -ra OPTS_ARRAY <<< "${OPTS_STRING}"
+    i=0
+    while [[ $i -lt ${#OPTS_ARRAY[@]} ]]; do
+        opt="${OPTS_ARRAY[$i]}"
+        case "${opt}" in
+            --with-heap-dumps)
+                echo "  withHeapDumps: true" >> "${TMP_VALUES}"
+                ;;
+            --with-secrets)
+                echo "  withSecrets: true" >> "${TMP_VALUES}"
+                ;;
+            --without-operator)
+                echo "  withOperator: false" >> "${TMP_VALUES}"
+                ;;
+            --without-helm)
+                echo "  withHelm: false" >> "${TMP_VALUES}"
+                ;;
+            --without-route)
+                echo "  withRoute: false" >> "${TMP_VALUES}"
+                ;;
+            --without-ingress)
+                echo "  withIngress: false" >> "${TMP_VALUES}"
+                ;;
+            --namespaces)
+                ((i++))
+                if [[ $i -lt ${#OPTS_ARRAY[@]} ]]; then
+                    # Convert comma-separated to YAML array
+                    NS_VALUE="${OPTS_ARRAY[$i]}"
+                    echo "  namespaces:" >> "${TMP_VALUES}"
+                    IFS=',' read -ra NS_ARRAY <<< "${NS_VALUE}"
+                    for ns in "${NS_ARRAY[@]}"; do
+                        echo "    - ${ns}" >> "${TMP_VALUES}"
+                    done
+                fi
+                ;;
+            --namespaces=*)
+                # Handle --namespaces=ns1,ns2 format
+                NS_VALUE="${opt#*=}"
+                echo "  namespaces:" >> "${TMP_VALUES}"
+                IFS=',' read -ra NS_ARRAY <<< "${NS_VALUE}"
+                for ns in "${NS_ARRAY[@]}"; do
+                    echo "    - ${ns}" >> "${TMP_VALUES}"
+                done
+                ;;
+            *)
+                # Unknown options go to extraArgs
+                EXTRA_ARGS+=("${opt}")
+                ;;
+        esac
+        ((i++))
+    done
+
+    # Add extraArgs if any
+    if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+        echo "  extraArgs:" >> "${TMP_VALUES}"
+        for arg in "${EXTRA_ARGS[@]}"; do
+            echo "    - \"${arg}\"" >> "${TMP_VALUES}"
+        done
+    fi
+fi
+
+echo "Using values file:"
+echo "---"
+cat "${TMP_VALUES}"
+echo "---"
+echo ""
+
+# Build additional --set arguments
+HELM_SET_ARGS=()
+if [[ -n "${HELM_SET_STRING}" ]]; then
+    read -ra HELM_SET_ARRAY <<< "${HELM_SET_STRING}"
+    for item in "${HELM_SET_ARRAY[@]}"; do
+        HELM_SET_ARGS+=(--set "${item}")
     done
 fi
 
-# Create resources
-echo "Creating must-gather resources using this Kustomization overlay (${TMP_OVERLAY}/)..."
-echo "---"
-cat "${TMP_OVERLAY}/kustomization.yaml"
-echo "---"
-echo ""
-kubectl apply -k "${TMP_OVERLAY}"
-echo ""
+# Install or upgrade the Helm chart
+helm upgrade --install "${RELEASE_NAME}" rhdh-must-gather \
+    --repo https://redhat-developer.github.io/rhdh-chart \
+    --namespace "${NAMESPACE}" \
+    --values "${TMP_VALUES}" \
+    "${HELM_SET_ARGS[@]}" \
+    --wait \
+    --timeout 60m
 
-# Wait for deployment to be available (gather init container must complete first)
-echo "Waiting for deployment to be available (timeout: 3600s)..."
-if ! kubectl -n "${NAMESPACE}" wait --for=condition=available deployment/rhdh-must-gather --timeout=3600s 2>&1; then
-    echo "Error: Deployment did not become available within timeout"
+echo ""
+echo "Helm release installed, waiting for gather to complete..."
+
+# Wait for the pod to be ready (gather init container completed)
+if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" --timeout=3600s 2>&1; then
+    echo "Error: Gather did not complete within timeout"
     echo ""
-    echo "Pod logs:"
-    POD_NAME=$(kubectl -n "${NAMESPACE}" get pod -l app=rhdh-must-gather,component=data-holder -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-    if [[ -n "${POD_NAME}" ]]; then
-        kubectl -n "${NAMESPACE}" logs "${POD_NAME}" -c gather --tail=50 || true
-    fi
+    echo "Gather logs:"
+    kubectl -n "${NAMESPACE}" logs -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -c gather --tail=50 || true
+    echo ""
+    echo "Resources left in namespace ${NAMESPACE} for debugging."
+    echo "To clean up manually, run:"
+    echo "  helm uninstall ${RELEASE_NAME} -n ${NAMESPACE}"
+    echo "  kubectl delete namespace ${NAMESPACE}"
     exit 1
 fi
-echo "Deployment is available (gather completed)"
+echo "Gather completed successfully"
 echo ""
 
-# Pull data from the data-holder pod
-echo "Pulling must-gather data from data-holder pod..."
-POD_NAME=$(kubectl -n "${NAMESPACE}" get pod -l app=rhdh-must-gather,component=data-holder -o jsonpath='{.items[0].metadata.name}')
-kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
+# Pull data from the data-holder container
+echo "Pulling must-gather data from data-holder container..."
+kubectl -n "${NAMESPACE}" exec "deploy/${RELEASE_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
 echo ""
 
 # Cleanup
-echo "Cleaning up resources..."
-kubectl delete -k "${TMP_OVERLAY}" --wait=false 2>/dev/null || true
+echo "Cleaning up Helm release and namespace..."
+helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --wait 2>/dev/null || true
+kubectl delete namespace "${NAMESPACE}" --wait=false 2>/dev/null || true
 echo ""
 
-echo "✓ Must-gather data saved to: ${OUTPUT_FILE}"
+echo "Must-gather data saved to: ${OUTPUT_FILE}"
 echo ""
 echo "To extract the data, run:"
 echo "  tar xzf ${OUTPUT_FILE}"
-

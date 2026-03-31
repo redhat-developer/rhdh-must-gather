@@ -7,7 +7,6 @@ on:
       - 'tests/**'
       - 'Makefile'
       - '.github/workflows/test.yaml'
-      - 'deploy/**'
       - 'hack/deploy-k8s.sh'
     branches: [main]
 

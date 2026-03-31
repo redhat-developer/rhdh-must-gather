@@ -28,82 +28,47 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/g
 
 ### For Kubernetes clusters
 
-```bash
-# 1. Basic deployment using the default configuration
-kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
+Use the [RHDH Must-Gather Helm chart](https://github.com/redhat-developer/rhdh-chart/tree/main/charts/must-gather):
 
-# 2. Wait for the deployment to be available (gather init container must complete first)
-kubectl -n rhdh-must-gather wait --for=condition=available deployment/rhdh-must-gather \
+```bash
+# Install must-gather with default options
+helm install my-rhdh-must-gather rhdh-must-gather \
+  --repo https://redhat-developer.github.io/rhdh-chart
+
+# Wait for the gather to complete (pod becomes ready when init container finishes)
+kubectl wait --for=condition=ready pod \
+  -l app.kubernetes.io/instance=my-rhdh-must-gather,app.kubernetes.io/component=gather \
   --timeout=3600s
 
-# 3. Stream the must-gather data from the data-holder pod
-POD_NAME=$(kubectl -n rhdh-must-gather get pod -l app=rhdh-must-gather,component=data-holder \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl -n rhdh-must-gather exec "$POD_NAME" -- \
-  tar czf - -C /must-gather . > rhdh-must-gather-output.k8s.tar.gz
+# Download the collected data from the data-holder container
+kubectl exec deploy/my-rhdh-must-gather -c data-holder -- \
+  tar czf - -C /must-gather . > rhdh-must-gather-output.tar.gz
 
-# 4. Clean up the must-gather resources
-kubectl delete -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy?ref=main'
+# Clean up
+helm uninstall my-rhdh-must-gather
 ```
 
-**Using pre-built overlays:**
+**With custom options:**
 
 ```bash
-# Use case 1: Enable debug mode with increased resources
-kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy/overlays/debug-mode?ref=main'
+# Enable heap dump collection
+helm install my-rhdh-must-gather rhdh-must-gather \
+  --repo https://redhat-developer.github.io/rhdh-chart \
+  --set gather.withHeapDumps=true
 
-# Use case 2: Enable heap dump collection (larger storage, extended timeout)
-kubectl apply -k 'https://github.com/redhat-developer/rhdh-must-gather/deploy/overlays/with-heap-dumps?ref=main'
+# Collect from specific namespaces with secrets
+helm install my-rhdh-must-gather rhdh-must-gather \
+  --repo https://redhat-developer.github.io/rhdh-chart \
+  --set "gather.namespaces={rhdh-prod,rhdh-staging}" \
+  --set gather.withSecrets=true
+
+# Use a specific image version
+helm install my-rhdh-must-gather rhdh-must-gather \
+  --repo https://redhat-developer.github.io/rhdh-chart \
+  --set image.tag=v1.0.0
 ```
 
-**Creating your own overlay for custom configurations:**
-
-1. Create a local overlay directory:
-
-```bash
-mkdir -p my-must-gather-overlay
-```
-
-2. Create a `kustomization.yaml` that references the base
-
-```bash
-cat > my-must-gather-overlay/kustomization.yaml <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - 'https://github.com/redhat-developer/rhdh-must-gather/deploy/base?ref=main'
-
-# Example: Change the namespace
-namespace: my-custom-namespace
-
-# Example: Use a specific image tag
-images:
-  - name: quay.io/rhdh-community/rhdh-must-gather
-    newTag: v1.0.0
-
-patches:
-  # Example: Add custom arguments to the gather init container
-  - target:
-      kind: Deployment
-      name: rhdh-must-gather
-    patch: |
-      - op: add
-        path: /spec/template/spec/initContainers/0/args
-        value:
-          - "--namespaces"
-          - "rhdh-prod,rhdh-staging"
-          - "--with-secrets"
-EOF
-```
-
-3. Apply your custom overlay
-
-```bash
-kubectl apply -k my-must-gather-overlay/
-```
-
-See the [deploy/overlays](deploy/overlays) directory for more more details and examples.
+See the [chart documentation](https://github.com/redhat-developer/rhdh-chart/tree/main/charts/must-gather) for all available options.
 
 ## What data is collected
 
