@@ -28,23 +28,23 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/g
 
 ### For Kubernetes clusters
 
-Use the [RHDH Must-Gather Helm chart](https://github.com/redhat-developer/rhdh-chart/tree/main/charts/must-gather):
+You can use the [RHDH Must-Gather Helm chart](https://github.com/redhat-developer/rhdh-chart/tree/main/charts/must-gather):
 
 ```bash
-# Install must-gather with default options
+# 1. Install must-gather with default options
 helm install my-rhdh-must-gather rhdh-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart
 
-# Wait for the gather to complete (pod becomes ready when init container finishes)
+# 2. Wait for the gather to complete (pod becomes ready when init container finishes)
 kubectl wait --for=condition=ready pod \
   -l app.kubernetes.io/instance=my-rhdh-must-gather,app.kubernetes.io/component=gather \
   --timeout=3600s
 
-# Download the collected data from the data-holder container
+# 3. Download the collected data from the data-holder container
 kubectl exec deploy/my-rhdh-must-gather -c data-holder -- \
   tar czf - -C /must-gather . > rhdh-must-gather-output.tar.gz
 
-# Clean up
+# 4. Clean up
 helm uninstall my-rhdh-must-gather
 ```
 
