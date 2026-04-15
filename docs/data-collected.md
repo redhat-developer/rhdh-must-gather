@@ -1,6 +1,6 @@
 ## What Data is Collected
 
-This tool focuses exclusively on RHDH-related resources as well some very minimal platform about the cluster. For general cluster-wide information, combine this with the generic OCP must-gather.
+This tool focuses exclusively on RHDH-related resources, as well as some very minimal platform info about the cluster. For general cluster-wide information, combine this with the generic OCP must-gather.
 
 ### Platform Information
 - **Platform Detection**: Automatically identifies the platform type:
