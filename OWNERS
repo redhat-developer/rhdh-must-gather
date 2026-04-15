@@ -1,0 +1,11 @@
+# if adding/removing approvers, remember to update the pr*.yaml files to add/remove them from the authorize job
+approvers:
+- rm3l
+
+reviewers:
+- Fortune-Ndlovu
+- gazarenkov
+- OpinionatedHeron
+- rm3l
+- subhashkhileri
+- zdrapela
