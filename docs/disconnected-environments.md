@@ -162,7 +162,7 @@ If your internal registry requires authentication, configure pull secrets.
 
 ### OpenShift
 
-`oc adm must-gather` runs in a temporary namespace, so you must add your registry credentials to the cluster-wide pull secret:
+By default, `oc adm must-gather` spawns a new must-gather pod in a temporary namespace, so we recommend that you add your registry credentials to the cluster-wide pull secret:
 
 ```bash
 # Get the existing pull secret
