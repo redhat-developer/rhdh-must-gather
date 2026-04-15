@@ -22,25 +22,18 @@ In this scenario, your local machine has network access to both the public inter
 ### Mirror the Container Image
 
 ```bash
-# Copy directly from quay.io to your internal registry
+# Copy from quay.io to your internal registry using a specific version tag
 skopeo copy \
-  docker://quay.io/rhdh-community/rhdh-must-gather:latest \
-  docker://registry.example.com/rhdh/rhdh-must-gather:latest
-```
+  docker://quay.io/rhdh-community/rhdh-must-gather:<version> \
+  docker://registry.example.com/rhdh/rhdh-must-gather:<version>
 
-**Pin to a specific version (recommended):**
-
-```bash
-# Using a version tag
-skopeo copy \
-  docker://quay.io/rhdh-community/rhdh-must-gather:v1.0.0 \
-  docker://registry.example.com/rhdh/rhdh-must-gather:v1.0.0
-
-# Using a digest for immutable references
+# Or using a digest for fully immutable references
 skopeo copy \
   docker://quay.io/rhdh-community/rhdh-must-gather@sha256:<digest> \
-  docker://registry.example.com/rhdh/rhdh-must-gather:v1.0.0
+  docker://registry.example.com/rhdh/rhdh-must-gather:<version>
 ```
+
+> **Note**: Using a pinned version tag or digest ensures reproducible troubleshooting runs. Avoid using `:latest` in disconnected environments, as it makes it difficult to correlate collected data with a specific tool version.
 
 ### Download the Helm Chart (Kubernetes only)
 
@@ -64,17 +57,14 @@ Save the container image to a local directory:
 # Create a directory for the mirrored content
 mkdir -p ./mirror/rhdh-must-gather
 
-# Copy the image to a local directory
+# Copy the image to a local directory using a specific version tag
 skopeo copy \
-  docker://quay.io/rhdh-community/rhdh-must-gather:latest \
+  docker://quay.io/rhdh-community/rhdh-must-gather:<version> \
   dir:./mirror/rhdh-must-gather
-```
 
-**Pin to a specific version (recommended):**
-
-```bash
+# Or using a digest for fully immutable references
 skopeo copy \
-  docker://quay.io/rhdh-community/rhdh-must-gather:v1.0.0 \
+  docker://quay.io/rhdh-community/rhdh-must-gather@sha256:<digest> \
   dir:./mirror/rhdh-must-gather
 ```
 
@@ -101,7 +91,7 @@ Connect to the bastion host and push the image to your internal registry:
 # Copy from the local directory to the internal registry
 skopeo copy \
   dir:/tmp/mirror/rhdh-must-gather \
-  docker://registry.example.com/rhdh/rhdh-must-gather:latest
+  docker://registry.example.com/rhdh/rhdh-must-gather:<version>
 ```
 
 ### Step 4: Run Must-Gather
@@ -113,7 +103,7 @@ See [Running with the Mirrored Image](#running-with-the-mirrored-image) below.
 ### OpenShift
 
 ```bash
-oc adm must-gather --image=registry.example.com/rhdh/rhdh-must-gather:latest
+oc adm must-gather --image=registry.example.com/rhdh/rhdh-must-gather:<version>
 ```
 
 ### Kubernetes (Helm)
@@ -135,7 +125,7 @@ helm install my-rhdh-must-gather rhdh-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   --set image.registry=registry.example.com \
   --set image.repository=rhdh/rhdh-must-gather \
-  --set image.tag=latest
+  --set image.tag=<version>
 ```
 
 **From a local chart file:**
@@ -144,10 +134,10 @@ helm install my-rhdh-must-gather rhdh-must-gather \
 helm install my-rhdh-must-gather ./rhdh-must-gather-*.tgz \
   --set image.registry=registry.example.com \
   --set image.repository=rhdh/rhdh-must-gather \
-  --set image.tag=latest
+  --set image.tag=<version>
 ```
 
-**Using a digest for immutable references:**
+**Using a digest for fully immutable references:**
 
 ```bash
 helm install my-rhdh-must-gather ./rhdh-must-gather-*.tgz \
@@ -194,7 +184,7 @@ kubectl create secret docker-registry my-registry-secret \
 helm install my-rhdh-must-gather ./rhdh-must-gather-*.tgz \
   --set image.registry=registry.example.com \
   --set image.repository=rhdh/rhdh-must-gather \
-  --set image.tag=latest \
+  --set image.tag=<version> \
   --set imagePullSecrets[0].name=my-registry-secret
 ```
 
@@ -206,7 +196,7 @@ If pods fail to start with `ImagePullBackOff`:
 
 1. Verify the image exists in your internal registry:
    ```bash
-   skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:latest
+   skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:<version>
    ```
 
 2. Check pull secret configuration:
@@ -232,9 +222,9 @@ Before running must-gather, verify the image was mirrored correctly:
 
 ```bash
 # Check the image manifest
-skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:latest
+skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:<version>
 
 # Compare digests between source and mirrored image
-skopeo inspect docker://quay.io/rhdh-community/rhdh-must-gather:latest --format '{{.Digest}}'
-skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:latest --format '{{.Digest}}'
+skopeo inspect docker://quay.io/rhdh-community/rhdh-must-gather:<version> --format '{{.Digest}}'
+skopeo inspect docker://registry.example.com/rhdh/rhdh-must-gather:<version> --format '{{.Digest}}'
 ```
