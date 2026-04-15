@@ -212,12 +212,11 @@ If pods fail to start with `ImagePullBackOff`:
 2. Check pull secret configuration:
    ```bash
    kubectl get secrets
-   kubectl describe sa default
    ```
 
-3. Verify the pod is using the correct image reference:
+3. Verify the must-gather pod is using the correct image reference and pull secrets:
    ```bash
-   kubectl get pod <pod-name> -o jsonpath='{.spec.containers[*].image}'
+   kubectl describe pod <pod-name>
    ```
 
 ### Certificate errors
