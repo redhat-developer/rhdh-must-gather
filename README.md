@@ -88,7 +88,7 @@ See [secret-collection-and-sanitization.md](./docs/secret-collection-and-sanitiz
 
 ## Disconnected/Airgapped Environments
 
-For running in environments without direct internet access (partially disconnected with proxy/bastion or fully disconnected), see [disconnected-environments.md](./docs/disconnected-environments.md) for instructions on mirroring the container image and Helm chart to your internal registry.
+For running in airgapped environments (partially or fully disconnected), see [disconnected-environments.md](./docs/disconnected-environments.md) for instructions on mirroring the container image and/or Helm chart to your internal registry.
 
 ## Configuration
 
