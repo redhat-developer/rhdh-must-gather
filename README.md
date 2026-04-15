@@ -86,6 +86,10 @@ See [heap-dumps-collection.md](./docs/heap-dumps-collection.md) for more details
 
 See [secret-collection-and-sanitization.md](./docs/secret-collection-and-sanitization.md) for more details.
 
+## Disconnected/Airgapped Environments
+
+For running in airgapped environments (partially or fully disconnected), see [disconnected-environments.md](./docs/disconnected-environments.md) for instructions on mirroring the container image and/or Helm chart to your internal registry.
+
 ## Configuration
 
 ### Environment Variables
