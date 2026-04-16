@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        method: [default, inspector, sigusr2]
+        method: [auto, inspector, sigusr2]
 
     steps:
       - name: Checkout repository
@@ -91,14 +91,10 @@ jobs:
 
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
-          if [ "${{ matrix.method }}" = "default" ]; then
-            # Default method: test all instances
+          if [ "${{ matrix.method }}" = "auto" ]; then
+            # Auto: let the tool use its built-in default method (inspector)
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true
-          elif [ "${{ matrix.method }}" = "sigusr2" ]; then
-            # SIGUSR2 method: only test RHDHSUPP-308 (only manifest with NODE_OPTIONS configured)
-            make test-e2e LOCAL=false HEAP_DUMP_METHOD=sigusr2
           else
-            # Inspector method: test all instances
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }}
           fi
 
