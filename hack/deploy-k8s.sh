@@ -171,6 +171,7 @@ if [[ -n "${OPTS_STRING}" ]]; then
     EXTRA_ARGS=()
     HEAP_DUMP_ENABLED=""
     HEAP_DUMP_INSTANCES=""
+    HEAP_DUMP_METHOD=""
     read -ra OPTS_ARRAY <<< "${OPTS_STRING}"
     i=0
     while [[ $i -lt ${#OPTS_ARRAY[@]} ]]; do
@@ -190,6 +191,34 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 ;;
             --heap-dump-instances=*)
                 HEAP_DUMP_INSTANCES="${opt#*=}"
+                ;;
+            --heap-dump-method)
+                i=$((i + 1))
+                if [[ $i -lt ${#OPTS_ARRAY[@]} && -n "${OPTS_ARRAY[$i]}" && "${OPTS_ARRAY[$i]}" != --* ]]; then
+                    case "${OPTS_ARRAY[$i]}" in
+                        inspector|sigusr2)
+                            HEAP_DUMP_METHOD="${OPTS_ARRAY[$i]}"
+                            ;;
+                        *)
+                            echo "Error: --heap-dump-method must be 'inspector' or 'sigusr2'"
+                            exit 1
+                            ;;
+                    esac
+                else
+                    echo "Error: --heap-dump-method requires a value (inspector or sigusr2)"
+                    exit 1
+                fi
+                ;;
+            --heap-dump-method=*)
+                case "${opt#*=}" in
+                    inspector|sigusr2)
+                        HEAP_DUMP_METHOD="${opt#*=}"
+                        ;;
+                    *)
+                        echo "Error: --heap-dump-method must be 'inspector' or 'sigusr2'"
+                        exit 1
+                        ;;
+                esac
                 ;;
             --with-secrets)
                 echo "  withSecrets: true" >> "${TMP_VALUES}"
@@ -239,10 +268,13 @@ if [[ -n "${OPTS_STRING}" ]]; then
     done
 
     # Write heapDump block if any heap dump options were specified
-    if [[ -n "${HEAP_DUMP_ENABLED}" || -n "${HEAP_DUMP_INSTANCES}" ]]; then
+    if [[ -n "${HEAP_DUMP_ENABLED}" || -n "${HEAP_DUMP_INSTANCES}" || -n "${HEAP_DUMP_METHOD}" ]]; then
         echo "  heapDump:" >> "${TMP_VALUES}"
         if [[ -n "${HEAP_DUMP_ENABLED}" ]]; then
             echo "    enabled: true" >> "${TMP_VALUES}"
+        fi
+        if [[ -n "${HEAP_DUMP_METHOD}" ]]; then
+            echo "    method: ${HEAP_DUMP_METHOD}" >> "${TMP_VALUES}"
         fi
         if [[ -n "${HEAP_DUMP_INSTANCES}" ]]; then
             echo "    instances: \"${HEAP_DUMP_INSTANCES}\"" >> "${TMP_VALUES}"
