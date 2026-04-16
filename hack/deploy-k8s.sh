@@ -174,7 +174,8 @@ if [[ -n "${OPTS_STRING}" ]]; then
         opt="${OPTS_ARRAY[$i]}"
         case "${opt}" in
             --with-heap-dumps)
-                echo "  withHeapDumps: true" >> "${TMP_VALUES}"
+                echo "  heapDump:" >> "${TMP_VALUES}"
+                echo "    enabled: true" >> "${TMP_VALUES}"
                 ;;
             --with-secrets)
                 echo "  withSecrets: true" >> "${TMP_VALUES}"

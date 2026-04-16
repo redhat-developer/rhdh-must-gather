@@ -54,7 +54,7 @@ helm uninstall my-rhdh-must-gather
 # Enable heap dump collection
 helm install my-rhdh-must-gather rhdh-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
-  --set gather.withHeapDumps=true
+  --set gather.heapDump.enabled=true
 
 # Collect from specific namespaces with secrets
 helm install my-rhdh-must-gather rhdh-must-gather \

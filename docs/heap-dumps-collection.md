@@ -327,10 +327,9 @@ Set the environment variable via Helm values:
 # Using a values file
 cat > values.yaml <<EOF
 gather:
-  withHeapDumps: true
-  extraEnvVars:
-    - name: HEAP_DUMP_TIMEOUT
-      value: "900"
+  heapDump:
+    enabled: true
+    timeout: 900
 EOF
 helm install my-rhdh-must-gather rhdh-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
