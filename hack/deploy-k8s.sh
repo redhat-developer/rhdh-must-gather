@@ -19,6 +19,7 @@
 #   ./hack/deploy-k8s.sh --namespace my-must-gather-ns
 #   ./hack/deploy-k8s.sh --opts "--namespaces my-ns"
 #   ./hack/deploy-k8s.sh --opts "--with-heap-dumps --namespaces my-ns"
+#   ./hack/deploy-k8s.sh --opts "--with-heap-dumps --heap-dump-instances my-rhdh,dev-hub"
 #   ./hack/deploy-k8s.sh --output ./debug-mustgather.tar.gz
 #   ./hack/deploy-k8s.sh --image myimage:tag --opts "--with-secrets --namespaces my-ns"
 #
@@ -166,16 +167,29 @@ if [[ -n "${OPTS_STRING}" ]]; then
     echo "" >> "${TMP_VALUES}"
     echo "gather:" >> "${TMP_VALUES}"
 
-    # Parse options
+    # Parse options - collect heapDump settings separately to write as a single block
     EXTRA_ARGS=()
+    HEAP_DUMP_ENABLED=""
+    HEAP_DUMP_INSTANCES=""
     read -ra OPTS_ARRAY <<< "${OPTS_STRING}"
     i=0
     while [[ $i -lt ${#OPTS_ARRAY[@]} ]]; do
         opt="${OPTS_ARRAY[$i]}"
         case "${opt}" in
             --with-heap-dumps)
-                echo "  heapDump:" >> "${TMP_VALUES}"
-                echo "    enabled: true" >> "${TMP_VALUES}"
+                HEAP_DUMP_ENABLED="true"
+                ;;
+            --heap-dump-instances)
+                i=$((i + 1))
+                if [[ $i -lt ${#OPTS_ARRAY[@]} && -n "${OPTS_ARRAY[$i]}" && "${OPTS_ARRAY[$i]}" != --* ]]; then
+                    HEAP_DUMP_INSTANCES="${OPTS_ARRAY[$i]}"
+                else
+                    echo "Error: --heap-dump-instances requires a comma-separated list of instance names"
+                    exit 1
+                fi
+                ;;
+            --heap-dump-instances=*)
+                HEAP_DUMP_INSTANCES="${opt#*=}"
                 ;;
             --with-secrets)
                 echo "  withSecrets: true" >> "${TMP_VALUES}"
@@ -194,7 +208,7 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 ;;
             --namespaces)
                 i=$((i + 1))
-                if [[ $i -lt ${#OPTS_ARRAY[@]} ]]; then
+                if [[ $i -lt ${#OPTS_ARRAY[@]} && -n "${OPTS_ARRAY[$i]}" && "${OPTS_ARRAY[$i]}" != --* ]]; then
                     # Convert comma-separated to YAML array
                     NS_VALUE="${OPTS_ARRAY[$i]}"
                     echo "  namespaces:" >> "${TMP_VALUES}"
@@ -202,6 +216,9 @@ if [[ -n "${OPTS_STRING}" ]]; then
                     for ns in "${NS_ARRAY[@]}"; do
                         echo "    - ${ns}" >> "${TMP_VALUES}"
                     done
+                else
+                    echo "Error: --namespaces requires a comma-separated list of namespaces"
+                    exit 1
                 fi
                 ;;
             --namespaces=*)
@@ -220,6 +237,17 @@ if [[ -n "${OPTS_STRING}" ]]; then
         esac
         i=$((i + 1))
     done
+
+    # Write heapDump block if any heap dump options were specified
+    if [[ -n "${HEAP_DUMP_ENABLED}" || -n "${HEAP_DUMP_INSTANCES}" ]]; then
+        echo "  heapDump:" >> "${TMP_VALUES}"
+        if [[ -n "${HEAP_DUMP_ENABLED}" ]]; then
+            echo "    enabled: true" >> "${TMP_VALUES}"
+        fi
+        if [[ -n "${HEAP_DUMP_INSTANCES}" ]]; then
+            echo "    instances: \"${HEAP_DUMP_INSTANCES}\"" >> "${TMP_VALUES}"
+        fi
+    fi
 
     # Add extraArgs if any
     if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
