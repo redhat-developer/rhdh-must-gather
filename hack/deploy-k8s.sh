@@ -181,8 +181,11 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 ;;
             --heap-dump-instances)
                 i=$((i + 1))
-                if [[ $i -lt ${#OPTS_ARRAY[@]} ]]; then
+                if [[ $i -lt ${#OPTS_ARRAY[@]} && -n "${OPTS_ARRAY[$i]}" && "${OPTS_ARRAY[$i]}" != --* ]]; then
                     HEAP_DUMP_INSTANCES="${OPTS_ARRAY[$i]}"
+                else
+                    echo "Error: --heap-dump-instances requires a comma-separated list of instance names"
+                    exit 1
                 fi
                 ;;
             --heap-dump-instances=*)
@@ -205,7 +208,7 @@ if [[ -n "${OPTS_STRING}" ]]; then
                 ;;
             --namespaces)
                 i=$((i + 1))
-                if [[ $i -lt ${#OPTS_ARRAY[@]} ]]; then
+                if [[ $i -lt ${#OPTS_ARRAY[@]} && -n "${OPTS_ARRAY[$i]}" && "${OPTS_ARRAY[$i]}" != --* ]]; then
                     # Convert comma-separated to YAML array
                     NS_VALUE="${OPTS_ARRAY[$i]}"
                     echo "  namespaces:" >> "${TMP_VALUES}"
@@ -213,6 +216,9 @@ if [[ -n "${OPTS_STRING}" ]]; then
                     for ns in "${NS_ARRAY[@]}"; do
                         echo "    - ${ns}" >> "${TMP_VALUES}"
                     done
+                else
+                    echo "Error: --namespaces requires a comma-separated list of namespaces"
+                    exit 1
                 fi
                 ;;
             --namespaces=*)
