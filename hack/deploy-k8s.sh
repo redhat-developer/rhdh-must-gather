@@ -316,19 +316,66 @@ helm upgrade --install "${RELEASE_NAME}" redhat-developer-hub-must-gather \
     --repo https://redhat-developer.github.io/rhdh-chart \
     --namespace "${NAMESPACE}" \
     --values "${TMP_VALUES}" \
-    "${HELM_SET_ARGS[@]}" \
-    --wait \
-    --timeout "${HELM_TIMEOUT}"
+    "${HELM_SET_ARGS[@]}"
 
 echo ""
-echo "Helm release installed, waiting for gather to complete..."
+echo "Helm release installed, waiting for pod to be created..."
 
-# Wait for the pod to be ready (gather init container completed)
-if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" --timeout=3600s 2>&1; then
-    echo "Error: Gather did not complete within timeout"
+# Wait for the pod to exist
+POD_SELECTOR="app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather"
+TIMEOUT_SECONDS=$(echo "${HELM_TIMEOUT}" | sed 's/m/*60/;s/h/*3600/;s/s//' | bc)
+WAIT_START=$(date +%s)
+while ! kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o name 2>/dev/null | grep -q .; do
+    ELAPSED=$(($(date +%s) - WAIT_START))
+    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+        echo "Error: Timed out waiting for pod to be created"
+        exit 1
+    fi
+    sleep 2
+done
+
+echo "Pod created, waiting for gather container to start..."
+
+# Wait for the gather init container to be running
+while true; do
+    ELAPSED=$(($(date +%s) - WAIT_START))
+    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+        echo "Error: Timed out waiting for gather container to start"
+        exit 1
+    fi
+
+    # Check if the init container is running or has completed
+    CONTAINER_STATE=$(kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="gather")].state}' 2>/dev/null)
+    if [[ "${CONTAINER_STATE}" == *"running"* ]] || [[ "${CONTAINER_STATE}" == *"terminated"* ]]; then
+        break
+    fi
+    sleep 2
+done
+
+echo "Streaming gather logs..."
+echo ""
+
+# Stream logs from the gather init container (will exit when container completes)
+# Use timeout to prevent hanging indefinitely
+if ! timeout "${HELM_TIMEOUT}" kubectl -n "${NAMESPACE}" logs -l "${POD_SELECTOR}" -c gather -f 2>&1; then
     echo ""
-    echo "Gather logs:"
-    kubectl -n "${NAMESPACE}" logs -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -c gather --tail=50 || true
+    echo "Error: Gather container did not complete within timeout or failed"
+    echo ""
+    echo "Resources left in namespace ${NAMESPACE} for debugging."
+    echo "To clean up manually, run:"
+    echo "  helm uninstall ${RELEASE_NAME} -n ${NAMESPACE}"
+    if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+        echo "  kubectl delete namespace ${NAMESPACE}"
+    fi
+    exit 1
+fi
+
+echo ""
+echo "Gather logs finished, waiting for data-holder container to be ready..."
+
+# Wait for the pod to be ready (data-holder container running)
+if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR}" --timeout="${HELM_TIMEOUT}" 2>&1; then
+    echo "Error: Pod did not become ready within timeout"
     echo ""
     echo "Resources left in namespace ${NAMESPACE} for debugging."
     echo "To clean up manually, run:"
