@@ -20,6 +20,7 @@
 #   --with-heap-dumps   Collect heap dumps from ALL instances (nightly mode).
 #                       Without this flag, heap dumps are only collected from RHDHSUPP-308 test instance.
 #   --heap-dump-method <method>  Heap dump method: 'inspector' (default) or 'sigusr2'. Only used with --with-heap-dumps.
+#   --helm-timeout <duration>  Timeout for Helm install/upgrade (default: 60m)
 #   --help              Show this help message
 #
 # Examples:
@@ -87,6 +88,7 @@ SKIP_HELM_STANDALONE=false
 SKIP_OPERATOR=false
 WITH_HEAP_DUMPS=false
 HEAP_DUMP_METHOD=""
+HELM_TIMEOUT=""
 
 # Timeout for waiting for RHDH instances to be ready (in seconds)
 RHDH_READY_TIMEOUT=600
@@ -136,6 +138,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --heap-dump-method)
             HEAP_DUMP_METHOD="$2"
+            shift 2
+            ;;
+        --helm-timeout)
+            HELM_TIMEOUT="$2"
             shift 2
             ;;
         --help|-h)
@@ -591,7 +597,8 @@ else
         REGISTRY="$REGISTRY" \
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
-        OPTS="$GATHER_OPTS"
+        OPTS="$GATHER_OPTS" \
+        ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"}
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$OUTPUT_TARBALL" ]; then

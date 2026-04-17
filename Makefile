@@ -14,6 +14,7 @@ OPTS ?= ## Additional options to pass to must-gather (e.g., --with-heap-dumps --
 NAMESPACE ?= ## Namespace for deploy-k8s/deploy-openshift (default: random for k8s, auto for openshift)
 HELM_SET ?= ## Additional Helm --set flags for deploy-k8s (e.g., "gather.logLevel=debug")
 OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
+HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
 BUILD_ARGS ?=
 LABELS ?=
@@ -125,7 +126,8 @@ ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
 	@./tests/e2e/run-e2e-tests.sh --local \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
-		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)")
+		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
+		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
 	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
@@ -134,7 +136,8 @@ else
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
 		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)") \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
-		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)")
+		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
+		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 endif
 
 .PHONY: $(TOOLS_DIR)
@@ -208,7 +211,7 @@ deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Helm 
 		echo "Error: helm command not found. Please install Helm."; \
 		exit 1; \
 	fi
-	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)")
+	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)") $(if $(HELM_TIMEOUT),--timeout "$(HELM_TIMEOUT)")
 
 
 ##@ Cleanup
@@ -255,6 +258,7 @@ help: ## Display this help.
 	@echo "  NAMESPACE			- Namespace for deploy-k8s/deploy-openshift (default: random for k8s, auto for openshift)"
 	@echo "  HELM_SET			- Additional Helm --set flags for deploy-k8s (e.g., \"gather.logLevel=debug\")"
 	@echo "  OUTPUT_FILE			- Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)"
+	@echo "  HELM_TIMEOUT			- Timeout for Helm install/upgrade in deploy-k8s (default: 60m)"
 	@echo "  TARGET_BRANCH			- Target branch for test-e2e defaults (default: main)"
 	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
 	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
