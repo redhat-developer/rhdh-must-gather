@@ -392,21 +392,29 @@ done
 
 echo "Waiting for data-holder container to be ready..."
 
-# Wait for the pod to be ready (data-holder container running)
-kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR}" --timeout="${HELM_TIMEOUT}"
-WAIT_EXIT_CODE=$?
-echo "Wait completed with exit code: ${WAIT_EXIT_CODE}"
-if [[ ${WAIT_EXIT_CODE} -ne 0 ]]; then
-    echo "Error: Pod did not become ready within timeout"
-    echo ""
-    echo "Resources left in namespace ${NAMESPACE} for debugging."
-    echo "To clean up manually, run:"
-    echo "  helm uninstall ${RELEASE_NAME} -n ${NAMESPACE}"
-    if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
-        echo "  kubectl delete namespace ${NAMESPACE}"
+# Wait for the pod to be ready with progress output
+while true; do
+    ELAPSED=$(($(date +%s) - WAIT_START))
+    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+        echo "Error: Timed out waiting for data-holder container to be ready"
+        echo "Pod status:"
+        kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o wide
+        kubectl -n "${NAMESPACE}" describe pod -l "${POD_SELECTOR}" | tail -30
+        exit 1
     fi
-    exit 1
-fi
+
+    # Check if pod is ready
+    READY=$(kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+    if [[ "${READY}" == "True" ]]; then
+        echo "Pod is ready"
+        break
+    fi
+
+    # Show container status
+    CONTAINER_STATUS=$(kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="data-holder")].state}' 2>/dev/null)
+    echo "  Data-holder container state: ${CONTAINER_STATUS} (${ELAPSED}s elapsed)"
+    sleep 5
+done
 echo ""
 echo "Gather completed successfully"
 echo ""
