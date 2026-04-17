@@ -11,6 +11,7 @@
 #   --opts <options>      Additional options to pass to the gather script (quote multiple options)
 #   --helm-set <sets>     Additional Helm --set flags (space-separated, e.g., "key1=val1 key2=val2")
 #   --output <file>       Output file path (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
+#   --timeout <duration>  Timeout for Helm install/upgrade (default: 60m)
 #   --help                Show this help message
 #
 # Examples:
@@ -33,6 +34,7 @@ NAMESPACE=""
 OPTS_STRING=""
 HELM_SET_STRING=""
 OUTPUT_FILE=""
+HELM_TIMEOUT="60m"
 
 # Parse named arguments
 show_help() {
@@ -60,6 +62,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --output)
             OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        --timeout)
+            HELM_TIMEOUT="$2"
             shift 2
             ;;
         --help|-h)
@@ -312,7 +318,7 @@ helm upgrade --install "${RELEASE_NAME}" redhat-developer-hub-must-gather \
     --values "${TMP_VALUES}" \
     "${HELM_SET_ARGS[@]}" \
     --wait \
-    --timeout 60m
+    --timeout "${HELM_TIMEOUT}"
 
 echo ""
 echo "Helm release installed, waiting for gather to complete..."
