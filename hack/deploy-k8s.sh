@@ -374,7 +374,10 @@ echo ""
 echo "Gather logs finished, waiting for data-holder container to be ready..."
 
 # Wait for the pod to be ready (data-holder container running)
-if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR}" --timeout="${HELM_TIMEOUT}" 2>&1; then
+kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR}" --timeout="${HELM_TIMEOUT}"
+WAIT_EXIT_CODE=$?
+echo "Wait completed with exit code: ${WAIT_EXIT_CODE}"
+if [[ ${WAIT_EXIT_CODE} -ne 0 ]]; then
     echo "Error: Pod did not become ready within timeout"
     echo ""
     echo "Resources left in namespace ${NAMESPACE} for debugging."
@@ -385,13 +388,26 @@ if ! kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR
     fi
     exit 1
 fi
+echo ""
 echo "Gather completed successfully"
 echo ""
 
 # Pull data from the data-holder container
 echo "Pulling must-gather data from data-holder container..."
 POD_NAME=$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -o jsonpath='{.items[0].metadata.name}')
-kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
+echo "Pod: ${POD_NAME}"
+if ! timeout 5m kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"; then
+    echo "Error: Failed to pull data from data-holder container (timeout or error)"
+    echo ""
+    echo "Resources left in namespace ${NAMESPACE} for debugging."
+    echo "To clean up manually, run:"
+    echo "  helm uninstall ${RELEASE_NAME} -n ${NAMESPACE}"
+    if [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+        echo "  kubectl delete namespace ${NAMESPACE}"
+    fi
+    exit 1
+fi
+echo "Data pulled successfully ($(du -h "${OUTPUT_FILE}" | cut -f1))"
 echo ""
 
 # Cleanup
