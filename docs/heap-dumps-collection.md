@@ -331,7 +331,7 @@ gather:
     enabled: true
     timeout: 900
 EOF
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   -f values.yaml
 ```
