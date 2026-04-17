@@ -35,7 +35,7 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
 # The OpenShift client package includes both oc and kubectl
 # oc is required for OpenShift-specific features like 'oc adm inspect' and routes
 # renovate: datasource=custom.openshift-client
-RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.18.7/openshift-client-linux.tar.gz \
+RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux.tar.gz \
     | tar xz -C /usr/local/bin/ oc kubectl \
     && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl \
     && oc version --client \
