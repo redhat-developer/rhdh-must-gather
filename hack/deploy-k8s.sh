@@ -371,7 +371,26 @@ if ! timeout "${HELM_TIMEOUT}" kubectl -n "${NAMESPACE}" logs -l "${POD_SELECTOR
 fi
 
 echo ""
-echo "Gather logs finished, waiting for data-holder container to be ready..."
+echo "Gather logs finished, waiting for init container to terminate..."
+
+# Wait for the gather init container to terminate (in case logs exited early)
+while true; do
+    ELAPSED=$(($(date +%s) - WAIT_START))
+    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+        echo "Error: Timed out waiting for gather init container to terminate"
+        exit 1
+    fi
+
+    CONTAINER_STATE=$(kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="gather")].state}' 2>/dev/null)
+    if [[ "${CONTAINER_STATE}" == *"terminated"* ]]; then
+        echo "Init container terminated"
+        break
+    fi
+    echo "  Init container still running... (${ELAPSED}s elapsed)"
+    sleep 5
+done
+
+echo "Waiting for data-holder container to be ready..."
 
 # Wait for the pod to be ready (data-holder container running)
 kubectl -n "${NAMESPACE}" wait --for=condition=ready pod -l "${POD_SELECTOR}" --timeout="${HELM_TIMEOUT}"
