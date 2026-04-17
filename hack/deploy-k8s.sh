@@ -306,7 +306,7 @@ if [[ -n "${HELM_SET_STRING}" ]]; then
 fi
 
 # Install or upgrade the Helm chart
-helm upgrade --install "${RELEASE_NAME}" rhdh-must-gather \
+helm upgrade --install "${RELEASE_NAME}" redhat-developer-hub-must-gather \
     --repo https://redhat-developer.github.io/rhdh-chart \
     --namespace "${NAMESPACE}" \
     --values "${TMP_VALUES}" \
@@ -337,7 +337,8 @@ echo ""
 
 # Pull data from the data-holder container
 echo "Pulling must-gather data from data-holder container..."
-kubectl -n "${NAMESPACE}" exec "deploy/${RELEASE_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
+POD_NAME=$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -o jsonpath='{.items[0].metadata.name}')
+kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"
 echo ""
 
 # Cleanup

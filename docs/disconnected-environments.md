@@ -38,7 +38,7 @@ skopeo copy \
 ### Download the Helm Chart (Kubernetes only)
 
 ```bash
-helm pull rhdh-must-gather --repo https://redhat-developer.github.io/rhdh-chart
+helm pull redhat-developer-hub-must-gather --repo https://redhat-developer.github.io/rhdh-chart
 ```
 
 ### Run Must-Gather
@@ -71,7 +71,7 @@ skopeo copy \
 Download the Helm chart (Kubernetes only):
 
 ```bash
-helm pull rhdh-must-gather --repo https://redhat-developer.github.io/rhdh-chart --destination ./mirror/
+helm pull redhat-developer-hub-must-gather --repo https://redhat-developer.github.io/rhdh-chart --destination ./mirror/
 ```
 
 ### Step 2: Transfer Files to the Bastion Host
@@ -121,7 +121,7 @@ The Helm chart provides the following image configuration options:
 **From the remote chart repository (if accessible):**
 
 ```bash
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   --set image.registry=registry.example.com \
   --set image.repository=rhdh/rhdh-must-gather \

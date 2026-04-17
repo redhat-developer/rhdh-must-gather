@@ -32,7 +32,7 @@ You can use the [RHDH Must-Gather Helm chart](https://github.com/redhat-develope
 
 ```bash
 # 1. Install must-gather with default options
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart
 
 # 2. Wait for the gather to complete (pod becomes ready when init container finishes)
@@ -52,18 +52,18 @@ helm uninstall my-rhdh-must-gather
 
 ```bash
 # Enable heap dump collection
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   --set gather.heapDump.enabled=true
 
 # Collect from specific namespaces with secrets
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   --set "gather.namespaces={rhdh-prod,rhdh-staging}" \
   --set gather.withSecrets=true
 
 # Use a specific image version
-helm install my-rhdh-must-gather rhdh-must-gather \
+helm install my-rhdh-must-gather redhat-developer-hub-must-gather \
   --repo https://redhat-developer.github.io/rhdh-chart \
   --set image.tag=v1.0.0
 ```
