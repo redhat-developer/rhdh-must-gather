@@ -473,14 +473,27 @@ if [ "$SKIP_OPERATOR" = false ]; then
     CLEANUP_TASKS+=("kubectl delete namespace $NS_STATEFULSET --wait=false")
     ALL_NAMESPACES+=("$NS_OPERATOR" "$NS_STATEFULSET")
 
+    # Create ConfigMap to disable default dynamic plugins for faster startup
+    DYNAMIC_PLUGINS_CM="dynamic-plugins-config"
+    log_info "Creating dynamic plugins ConfigMap to disable defaults..."
+    for ns in "$NS_OPERATOR" "$NS_STATEFULSET"; do
+        kubectl -n "$ns" apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $DYNAMIC_PLUGINS_CM
+data:
+  dynamic-plugins.yaml: |
+    includes: []
+EOF
+    done
+
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
     # Build CR spec - add NODE_OPTIONS for SIGUSR2 heap dump method
     BACKSTAGE_CR_EXTRA_ENVS=""
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_EXTRA_ENVS='
-spec:
-  application:
     extraEnvs:
       envs:
         - name: NODE_OPTIONS
@@ -491,6 +504,9 @@ apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
+spec:
+  application:
+    dynamicPluginsConfigMapName: $DYNAMIC_PLUGINS_CM
 $BACKSTAGE_CR_EXTRA_ENVS
 EOF
 
@@ -500,7 +516,6 @@ EOF
     BACKSTAGE_CR_STS_EXTRA=""
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_STS_EXTRA='
-  application:
     extraEnvs:
       envs:
         - name: NODE_OPTIONS
@@ -514,6 +529,8 @@ metadata:
 spec:
   deployment:
     kind: StatefulSet
+  application:
+    dynamicPluginsConfigMapName: $DYNAMIC_PLUGINS_CM
 $BACKSTAGE_CR_STS_EXTRA
 EOF
 
