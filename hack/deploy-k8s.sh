@@ -393,10 +393,13 @@ done
 echo "Waiting for data-holder container to be ready..."
 
 # Wait for the pod to be ready with progress output
+# Use a separate 5-minute timeout for data-holder readiness
+DATA_HOLDER_TIMEOUT=300
+DATA_HOLDER_WAIT_START=$(date +%s)
 while true; do
-    ELAPSED=$(($(date +%s) - WAIT_START))
-    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
-        echo "Error: Timed out waiting for data-holder container to be ready"
+    ELAPSED=$(($(date +%s) - DATA_HOLDER_WAIT_START))
+    if [[ ${ELAPSED} -ge ${DATA_HOLDER_TIMEOUT} ]]; then
+        echo "Error: Timed out waiting for data-holder container to be ready (${DATA_HOLDER_TIMEOUT}s)"
         echo "Pod status:"
         kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o wide
         kubectl -n "${NAMESPACE}" describe pod -l "${POD_SELECTOR}" | tail -30
