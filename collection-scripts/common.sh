@@ -574,11 +574,14 @@ collect_heap_dump_via_inspector() {
       kill "$port_forward_pid" 2>/dev/null || true
       wait "$port_forward_pid" 2>/dev/null || true
     fi
-    # Clean up all temp files
-    rm -f "$inspector_temp_dir/inspector_fifo_$$" "$inspector_temp_dir/inspector_out_$$" "$inspector_temp_dir/heapdump_chunks_$$" \
-          "$inspector_temp_dir/inspector_cleaned_$$" "$inspector_temp_dir/inspector_fallback_fifo_$$" \
-          "$inspector_temp_dir/inspector_fallback_out_$$" 2>/dev/null || true
-    rmdir "$inspector_temp_dir" 2>/dev/null || true
+    # Clean up all temp files (use default to avoid unbound variable with set -u)
+    local tmp_dir="${inspector_temp_dir:-}"
+    if [[ -n "$tmp_dir" ]]; then
+      rm -f "$tmp_dir/inspector_fifo_$$" "$tmp_dir/inspector_out_$$" "$tmp_dir/heapdump_chunks_$$" \
+            "$tmp_dir/inspector_cleaned_$$" "$tmp_dir/inspector_fallback_fifo_$$" \
+            "$tmp_dir/inspector_fallback_out_$$" 2>/dev/null || true
+      rmdir "$tmp_dir" 2>/dev/null || true
+    fi
   }
   # Alias for backward compatibility within this function
   cleanup_port_forward() { cleanup_inspector; }
