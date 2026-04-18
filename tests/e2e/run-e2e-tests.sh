@@ -261,6 +261,28 @@ global:
     # Faster startup by disabling all default dynamic plugins
     includes: []
 EOF
+                # Add NODE_OPTIONS for SIGUSR2 heap dump method
+                # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
+                # from the chart (BACKEND_SECRET, POSTGRESQL_ADMIN_PASSWORD) alongside NODE_OPTIONS,
+                # otherwise the defaults would be lost.
+                if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+                    cat >> "$TEMP_VALUES_FILE" <<'EOF'
+  backstage:
+    extraEnvVars:
+      - name: BACKEND_SECRET
+        valueFrom:
+          secretKeyRef:
+            key: backend-secret
+            name: '{{ include "rhdh.backend-secret-name" $ }}'
+      - name: POSTGRESQL_ADMIN_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            key: postgres-password
+            name: '{{- include "rhdh.postgresql.secretName" . }}'
+      - name: NODE_OPTIONS
+        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
+                fi
                 ;;
             *)
                 log_error "Unsupported target branch: $TARGET_BRANCH"
@@ -343,6 +365,29 @@ global:
     # Faster startup by disabling all default dynamic plugins
     includes: []
 EOF
+    # Add NODE_OPTIONS for SIGUSR2 heap dump method
+    # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
+    # from the chart (BACKEND_SECRET, POSTGRESQL_ADMIN_PASSWORD) alongside NODE_OPTIONS,
+    # otherwise the defaults would be lost.
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
+upstream:
+  backstage:
+    extraEnvVars:
+      - name: BACKEND_SECRET
+        valueFrom:
+          secretKeyRef:
+            key: backend-secret
+            name: '{{ include "rhdh.backend-secret-name" $ }}'
+      - name: POSTGRESQL_ADMIN_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            key: postgres-password
+            name: '{{- include "rhdh.postgresql.secretName" . }}'
+      - name: NODE_OPTIONS
+        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
+    fi
 
     # Render the Helm chart and apply directly (no Helm release tracking)
     log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
@@ -430,15 +475,37 @@ if [ "$SKIP_OPERATOR" = false ]; then
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
+    # Build CR spec - add NODE_OPTIONS for SIGUSR2 heap dump method
+    BACKSTAGE_CR_EXTRA_ENVS=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_EXTRA_ENVS='
+spec:
+  application:
+    extraEnvs:
+      envs:
+        - name: NODE_OPTIONS
+          value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
+    fi
     kubectl -n "$NS_OPERATOR" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha4
 kind: Backstage
 metadata:
   name: $BACKSTAGE_CR
+$BACKSTAGE_CR_EXTRA_ENVS
 EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
+    # Build CR spec - add NODE_OPTIONS for SIGUSR2 heap dump method
+    BACKSTAGE_CR_STS_EXTRA=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_STS_EXTRA='
+  application:
+    extraEnvs:
+      envs:
+        - name: NODE_OPTIONS
+          value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
+    fi
     kubectl -n "$NS_STATEFULSET" apply -f - <<EOF
 apiVersion: rhdh.redhat.com/v1alpha5
 kind: Backstage
@@ -447,6 +514,7 @@ metadata:
 spec:
   deployment:
     kind: StatefulSet
+$BACKSTAGE_CR_STS_EXTRA
 EOF
 
     # Wait for the Backstage pod to be running (not necessarily Ready - we just need it to exist for must-gather)
