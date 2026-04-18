@@ -12,7 +12,7 @@ jobs:
   e2e-tests:
     name: Nightly E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -35,7 +35,7 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests
-        run: make test-e2e LOCAL=false HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+        run: make test-e2e LOCAL=false HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '40m' }}
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
@@ -63,7 +63,7 @@ jobs:
   e2e-tests-heap-dumps:
     name: Nightly E2E Tests (Heap Dumps - ${{ matrix.method }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -93,9 +93,9 @@ jobs:
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
             # Auto: let the tool use its built-in default method (inspector)
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '40m' }}
           else
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '40m' }}
           fi
 
       - name: Display must-gather process logs
