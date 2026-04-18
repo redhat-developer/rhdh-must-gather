@@ -1554,6 +1554,14 @@ _process_container_heap_dump() {
 
         log_info "Sending SIGUSR2 signal to trigger heap dump..."
 
+        # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
+        local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
+        local search_paths="$remote_dir /tmp /app /opt/app-root/src"
+        local poll_interval=5
+        local max_wait="${HEAP_DUMP_TIMEOUT:-600}"
+        local waited=0
+        local found_heap_file=""
+
         {
           echo "Sending SIGUSR2 signal to Node.js process (PID: $node_pid)..."
           if send_signal_to_process "$ns" "$pod" "$container" "$node_pid" "USR2" 2>&1; then
@@ -1561,56 +1569,45 @@ _process_container_heap_dump() {
           else
             echo "Failed to send SIGUSR2 signal"
           fi
-
-          # Wait for heap dump file to be created
           echo ""
-          echo "Waiting ${HEAP_DUMP_TIMEOUT}s for heap dump to be generated..."
-          sleep "${HEAP_DUMP_TIMEOUT}"
-
-          # Look for heap dump files in common locations
-          # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
-          local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
-          echo "Searching for heap dump files (primary: $remote_dir)..."
-          local found_dumps
-          found_dumps=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-            "find $remote_dir /tmp /app /opt/app-root/src . -maxdepth 2 \( -name '*.heapsnapshot' -o -name 'Heap.*.heapsnapshot' -o -name 'heapdump-*.heapsnapshot' \) 2>/dev/null | head -5" 2>/dev/null || true)
-
-          if [[ -n "$found_dumps" ]]; then
-            echo "Found heap dump file(s):"
-            echo "$found_dumps"
-          else
-            echo "No heap dump files found in $remote_dir, /tmp, /app, /opt/app-root/src, or current directory"
-          fi
+          echo "Polling for heap dump file (max ${max_wait}s, checking every ${poll_interval}s)..."
         } >> "$container_dir/heap-dump.log" 2>&1
 
-        # Try to copy any heap dump file we can find
-        # HEAP_DUMP_REMOTE_DIR should match --diagnostic-dir in NODE_OPTIONS
-        local remote_dir="${HEAP_DUMP_REMOTE_DIR:-/tmp}"
-        local search_paths="$remote_dir /tmp /app /opt/app-root/src"
-
-        for search_path in $search_paths; do
-          local heap_files
-          heap_files=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-            "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
-
-          if [[ -n "$heap_files" ]]; then
-            log_info "Found heap dump file: $heap_files"
-
-            local local_path="$container_dir/${heap_file}"
-            if $KUBECTL_CMD cp -n "$ns" "${pod}:${heap_files}" "$local_path" -c "$container" >> "$container_dir/heap-dump.log" 2>&1; then
-              local file_size
-              file_size=$(du -h "$local_path" 2>/dev/null | cut -f1)
-              log_success "Heap dump copied to $local_path (${file_size})"
-              echo "Heap dump collected: ${heap_file} (${file_size})" >> "$container_dir/heap-dump.log"
-
-              # Clean up remote file
-              $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$heap_files" 2>/dev/null || true
-
-              heap_collected=true
-              break
+        # Poll for heap dump file instead of sleeping for the full timeout
+        while [[ $waited -lt $max_wait ]]; do
+          for search_path in $search_paths; do
+            found_heap_file=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
+              "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
+            if [[ -n "$found_heap_file" ]]; then
+              break 2
             fi
+          done
+          sleep "$poll_interval"
+          waited=$((waited + poll_interval))
+          if (( waited % 30 == 0 )); then
+            log_debug "Still waiting for heap dump... (${waited}s elapsed)"
           fi
         done
+
+        if [[ -n "$found_heap_file" ]]; then
+          log_info "Found heap dump file: $found_heap_file"
+          echo "Found heap dump file after ${waited}s: $found_heap_file" >> "$container_dir/heap-dump.log"
+
+          local local_path="$container_dir/${heap_file}"
+          if $KUBECTL_CMD cp -n "$ns" "${pod}:${found_heap_file}" "$local_path" -c "$container" >> "$container_dir/heap-dump.log" 2>&1; then
+            local file_size
+            file_size=$(du -h "$local_path" 2>/dev/null | cut -f1)
+            log_success "Heap dump copied to $local_path (${file_size})"
+            echo "Heap dump collected: ${heap_file} (${file_size})" >> "$container_dir/heap-dump.log"
+
+            # Clean up remote file
+            $KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- rm -f "$found_heap_file" 2>/dev/null || true
+
+            heap_collected=true
+          fi
+        else
+          echo "No heap dump files found after ${max_wait}s in: $search_paths" >> "$container_dir/heap-dump.log"
+        fi
       else
         log_error "Unknown heap dump method: $heap_dump_method"
         echo "Unknown heap dump method: $heap_dump_method" >> "$container_dir/heap-dump.log"
