@@ -289,9 +289,11 @@ if [[ -n "${OPTS_STRING}" ]]; then
 
     # Add extra environment variables for heap dump configuration
     if [[ -n "${HEAP_DUMP_SIGUSR2_STABLE_SECONDS:-}" ]]; then
-        echo "  extraEnvVars:" >> "${TMP_VALUES}"
-        echo "    - name: HEAP_DUMP_SIGUSR2_STABLE_SECONDS" >> "${TMP_VALUES}"
-        echo "      value: \"${HEAP_DUMP_SIGUSR2_STABLE_SECONDS}\"" >> "${TMP_VALUES}"
+        {
+            echo "  extraEnvVars:"
+            echo "    - name: HEAP_DUMP_SIGUSR2_STABLE_SECONDS"
+            echo "      value: \"${HEAP_DUMP_SIGUSR2_STABLE_SECONDS}\""
+        } >> "${TMP_VALUES}"
     fi
 
     # Add extraArgs if any
