@@ -562,6 +562,11 @@ collect_heap_dump_via_inspector() {
   local ws_buffer_size="${HEAP_DUMP_BUFFER_SIZE:-16777216}"  # 16MB default
   local port_forward_pid=""
 
+  # Use temp directory under BASE_COLLECTION_PATH (mounted PVC) instead of /tmp
+  # to avoid exceeding ephemeral storage limits (heap dumps can be 100MB+)
+  local inspector_temp_dir="${BASE_COLLECTION_PATH:-.}/.inspector_tmp"
+  mkdir -p "$inspector_temp_dir" 2>/dev/null || inspector_temp_dir="/tmp"
+
   # Cleanup function - ensures port-forward and temp files are cleaned up
   # even on unexpected exits (via trap)
   cleanup_inspector() {
@@ -570,9 +575,10 @@ collect_heap_dump_via_inspector() {
       wait "$port_forward_pid" 2>/dev/null || true
     fi
     # Clean up all temp files
-    rm -f "/tmp/inspector_fifo_$$" "/tmp/inspector_out_$$" "/tmp/heapdump_chunks_$$" \
-          "/tmp/inspector_cleaned_$$" "/tmp/inspector_fallback_fifo_$$" \
-          "/tmp/inspector_fallback_out_$$" 2>/dev/null || true
+    rm -f "$inspector_temp_dir/inspector_fifo_$$" "$inspector_temp_dir/inspector_out_$$" "$inspector_temp_dir/heapdump_chunks_$$" \
+          "$inspector_temp_dir/inspector_cleaned_$$" "$inspector_temp_dir/inspector_fallback_fifo_$$" \
+          "$inspector_temp_dir/inspector_fallback_out_$$" 2>/dev/null || true
+    rmdir "$inspector_temp_dir" 2>/dev/null || true
   }
   # Alias for backward compatibility within this function
   cleanup_port_forward() { cleanup_inspector; }
@@ -769,10 +775,10 @@ collect_heap_dump_via_inspector() {
   echo "" >> "$log_file"
   echo "=== Inspector Protocol Communication ===" >> "$log_file"
 
-  # Create temp files for communication
-  local fifo="/tmp/inspector_fifo_$$"
-  local outfile="/tmp/inspector_out_$$"
-  local heapfile="/tmp/heapdump_chunks_$$"
+  # Create temp files for communication (use inspector_temp_dir to avoid ephemeral storage limits)
+  local fifo="$inspector_temp_dir/inspector_fifo_$$"
+  local outfile="$inspector_temp_dir/inspector_out_$$"
+  local heapfile="$inspector_temp_dir/heapdump_chunks_$$"
   rm -f "$fifo" "$outfile" "$heapfile" 2>/dev/null || true
 
   if ! mkfifo "$fifo" 2>> "$log_file"; then
@@ -1030,7 +1036,7 @@ collect_heap_dump_via_inspector() {
 
   # WebSocket output may contain leading null bytes from buffer initialization.
   # Strip them before JSON parsing. The messages are already newline-separated.
-  local cleaned_file="/tmp/inspector_cleaned_$$"
+  local cleaned_file="$inspector_temp_dir/inspector_cleaned_$$"
   if ! tr -d '\0' < "$outfile" > "$cleaned_file" 2>> "$log_file"; then
     echo "Failed to strip null bytes from output" >> "$log_file"
     log_warn "Failed to process WebSocket output"
@@ -1137,8 +1143,8 @@ collect_heap_dump_via_inspector() {
     echo "Fallback WebSocket URL: $fallback_ws_url" >> "$log_file"
 
     local remote_heap_file="${HEAP_DUMP_REMOTE_DIR:-/tmp}/heapdump-fallback-$$.heapsnapshot"
-    local fallback_fifo="/tmp/inspector_fallback_fifo_$$"
-    local fallback_out="/tmp/inspector_fallback_out_$$"
+    local fallback_fifo="$inspector_temp_dir/inspector_fallback_fifo_$$"
+    local fallback_out="$inspector_temp_dir/inspector_fallback_out_$$"
     rm -f "$fallback_fifo" "$fallback_out" 2>/dev/null || true
 
     if ! mkfifo "$fallback_fifo" 2>> "$log_file" || ! touch "$fallback_out" 2>> "$log_file"; then
