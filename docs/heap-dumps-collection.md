@@ -298,6 +298,7 @@ The following environment variables can be used to configure heap dump collectio
 | `HEAP_DUMP_TIMEOUT` | `600` | Timeout in seconds for heap dump collection |
 | `HEAP_DUMP_BUFFER_SIZE` | `16777216` | WebSocket buffer size in bytes (16MB) for inspector method |
 | `HEAP_DUMP_REMOTE_DIR` | `/tmp` | Directory in container where heap dumps are written |
+| `HEAP_DUMP_SIGUSR2_STABLE_SECONDS` | `150` | For SIGUSR2 method: seconds the file size must be stable before considering it complete |
 
 For very large heaps that take longer than 10 minutes to serialize, you can increase the timeout:
 

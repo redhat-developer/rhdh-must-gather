@@ -1559,8 +1559,12 @@ _process_container_heap_dump() {
         local search_paths="$remote_dir /tmp /app /opt/app-root/src"
         local poll_interval=5
         local max_wait="${HEAP_DUMP_TIMEOUT:-600}"
+        # How long the file size must be stable (non-zero, unchanged) before considering it complete
+        local stable_seconds="${HEAP_DUMP_SIGUSR2_STABLE_SECONDS:-150}"
         local waited=0
         local found_heap_file=""
+        local last_size=0
+        local stable_count=0
 
         {
           echo "Sending SIGUSR2 signal to Node.js process (PID: $node_pid)..."
@@ -1570,28 +1574,58 @@ _process_container_heap_dump() {
             echo "Failed to send SIGUSR2 signal"
           fi
           echo ""
-          echo "Polling for heap dump file (max ${max_wait}s, checking every ${poll_interval}s)..."
+          echo "Polling for heap dump file (max ${max_wait}s, stable for ${stable_seconds}s)..."
         } >> "$container_dir/heap-dump.log" 2>&1
 
-        # Poll for heap dump file instead of sleeping for the full timeout
+        # Poll for heap dump file and wait for it to be fully written
+        # The file is created immediately but V8 writes to it over time
+        # We wait until the file size is non-zero and stable for stable_seconds
         while [[ $waited -lt $max_wait ]]; do
-          for search_path in $search_paths; do
-            found_heap_file=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
-              "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
-            if [[ -n "$found_heap_file" ]]; then
-              break 2
+          # Find heap dump file if not already found
+          if [[ -z "$found_heap_file" ]]; then
+            for search_path in $search_paths; do
+              found_heap_file=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
+                "find $search_path -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1" 2>/dev/null || true)
+              if [[ -n "$found_heap_file" ]]; then
+                log_info "Found heap dump file: $found_heap_file (waiting for write to complete)"
+                echo "Found heap dump file: $found_heap_file" >> "$container_dir/heap-dump.log"
+                break
+              fi
+            done
+          fi
+
+          # If file found, check if it's fully written (size stable and non-zero)
+          if [[ -n "$found_heap_file" ]]; then
+            local current_size
+            current_size=$($KUBECTL_CMD exec -n "$ns" "$pod" -c "$container" -- sh -c \
+              "stat -c%s '$found_heap_file' 2>/dev/null || echo 0" 2>/dev/null || echo "0")
+
+            if [[ "$current_size" -gt 0 ]]; then
+              if [[ "$current_size" == "$last_size" ]]; then
+                stable_count=$((stable_count + poll_interval))
+                if [[ $stable_count -ge $stable_seconds ]]; then
+                  log_info "Heap dump file size stable at ${current_size} bytes for ${stable_count}s"
+                  echo "File size stable at ${current_size} bytes for ${stable_count}s - ready to copy" >> "$container_dir/heap-dump.log"
+                  break
+                fi
+              else
+                # Size changed, reset stability counter
+                stable_count=0
+                last_size="$current_size"
+                log_debug "Heap dump still being written... (${current_size} bytes, ${waited}s elapsed)"
+              fi
             fi
-          done
+          fi
+
           sleep "$poll_interval"
           waited=$((waited + poll_interval))
-          if (( waited % 30 == 0 )); then
-            log_debug "Still waiting for heap dump... (${waited}s elapsed)"
+          if [[ -z "$found_heap_file" ]] && (( waited % 30 == 0 )); then
+            log_debug "Still waiting for heap dump file... (${waited}s elapsed)"
           fi
         done
 
-        if [[ -n "$found_heap_file" ]]; then
-          log_info "Found heap dump file: $found_heap_file"
-          echo "Found heap dump file after ${waited}s: $found_heap_file" >> "$container_dir/heap-dump.log"
+        if [[ -n "$found_heap_file" && "$stable_count" -ge "$stable_seconds" ]]; then
+          echo "Heap dump ready after ${waited}s total wait" >> "$container_dir/heap-dump.log"
 
           local local_path="$container_dir/${heap_file}"
           if $KUBECTL_CMD cp -n "$ns" "${pod}:${found_heap_file}" "$local_path" -c "$container" >> "$container_dir/heap-dump.log" 2>&1; then
@@ -1605,6 +1639,9 @@ _process_container_heap_dump() {
 
             heap_collected=true
           fi
+        elif [[ -n "$found_heap_file" ]]; then
+          echo "Heap dump file found but not stable after ${max_wait}s (last size: ${last_size}, stable for: ${stable_count}s)" >> "$container_dir/heap-dump.log"
+          log_warn "Heap dump file found but write did not complete within timeout"
         else
           echo "No heap dump files found after ${max_wait}s in: $search_paths" >> "$container_dir/heap-dump.log"
         fi
