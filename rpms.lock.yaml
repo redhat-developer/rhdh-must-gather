@@ -11,6 +11,13 @@ arches:
     name: oniguruma
     evr: 6.9.6-1.el9.5
     sourcerpm: oniguruma-6.9.6-1.el9.5.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/b/bash-5.1.8-9.el9.aarch64.rpm
+    repoid: ubi-9-for-aarch64-baseos-rpms
+    size: 1760045
+    checksum: sha256:7dc1febec9c2fb184ed4407f8a188ab267b7e46b3534866f702c6266008ababa
+    name: bash
+    evr: 5.1.8-9.el9
+    sourcerpm: bash-5.1.8-9.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/c/cracklib-2.9.6-27.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-baseos-rpms
     size: 100995
@@ -32,6 +39,13 @@ arches:
     name: findutils
     evr: 1:4.8.0-7.el9
     sourcerpm: findutils-4.8.0-7.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/g/grep-3.6-5.el9.aarch64.rpm
+    repoid: ubi-9-for-aarch64-baseos-rpms
+    size: 276244
+    checksum: sha256:583a247a199901d44dc8a96d46010e15f6211f98f7c61ba089825155b0562520
+    name: grep
+    evr: 3.6-5.el9
+    sourcerpm: grep-3.6-5.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/g/gzip-1.12-1.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-baseos-rpms
     size: 169809
@@ -102,6 +116,20 @@ arches:
     name: rsync
     evr: 3.2.5-3.el9_7.2
     sourcerpm: rsync-3.2.5-3.el9_7.2.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/s/sed-4.8-9.el9.aarch64.rpm
+    repoid: ubi-9-for-aarch64-baseos-rpms
+    size: 314254
+    checksum: sha256:c67205a62c1ef2ad5689382d9f1d1ddc84ca4eada797209d7561e16fa049fde1
+    name: sed
+    evr: 4.8-9.el9
+    sourcerpm: sed-4.8-9.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/s/shadow-utils-4.9-15.el9.aarch64.rpm
+    repoid: ubi-9-for-aarch64-baseos-rpms
+    size: 1241888
+    checksum: sha256:93e53d8bf8f4bf2a3acf0f4f82967598570e24cb4bc2633cb3022a3c70217a74
+    name: shadow-utils
+    evr: 2:4.9-15.el9
+    sourcerpm: shadow-utils-4.9-15.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/t/tar-1.34-9.el9_7.aarch64.rpm
     repoid: ubi-9-for-aarch64-baseos-rpms
     size: 898317
@@ -130,6 +158,12 @@ arches:
     checksum: sha256:cba17754ccaffd886995aec7f152aadbc5d9932a2a2cdf1d983291c7b2838404
     name: oniguruma
     evr: 6.9.6-1.el9.5
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/b/bash-5.1.8-9.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 10512850
+    checksum: sha256:5d7bbbf2538361be1a11846602862c3a56809b3ea43b69b86bcf407538e9e260
+    name: bash
+    evr: 5.1.8-9.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/c/cracklib-2.9.6-27.el9.src.rpm
     repoid: ubi-9-for-aarch64-baseos-source-rpms
     size: 6414228
@@ -142,6 +176,12 @@ arches:
     checksum: sha256:48bd4d4dd081120bcc6ab772b930a150f30b2fc89a4a14a24220383d24a30b3f
     name: findutils
     evr: 1:4.8.0-7.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/g/grep-3.6-5.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 1620891
+    checksum: sha256:81b14432ebe1645b74b57592f1dcde8fab15ec13632f483f72ff2407ed16c33e
+    name: grep
+    evr: 3.6-5.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/g/gzip-1.12-1.el9.src.rpm
     repoid: ubi-9-for-aarch64-baseos-source-rpms
     size: 856147
@@ -196,6 +236,18 @@ arches:
     checksum: sha256:a0b3038cb71a7ab8450ef8141f32e8d05b47e1f6d703a0b0e4b927ca4729d662
     name: rsync
     evr: 3.2.5-3.el9_7.2
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/s/sed-4.8-9.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 1424192
+    checksum: sha256:0590550f0cbdce0a26f98a73c756f663a7f220486d10f9c16d1ce0c8c4d14378
+    name: sed
+    evr: 4.8-9.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/s/shadow-utils-4.9-15.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 1712227
+    checksum: sha256:c6feefc65a20ec4203979e0cde4d4a6d86981ac7c836e55148273bd9fc2b57b2
+    name: shadow-utils
+    evr: 2:4.9-15.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/t/tar-1.34-9.el9_7.src.rpm
     repoid: ubi-9-for-aarch64-baseos-source-rpms
     size: 2282680
@@ -218,6 +270,13 @@ arches:
     name: oniguruma
     evr: 6.9.6-1.el9.5
     sourcerpm: oniguruma-6.9.6-1.el9.5.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/b/bash-5.1.8-9.el9.x86_64.rpm
+    repoid: ubi-9-for-x86_64-baseos-rpms
+    size: 1769540
+    checksum: sha256:d3adf8b09aa0bf935c67aa12444e0ee02f70a82c2682bfb2b02bda0a989bb806
+    name: bash
+    evr: 5.1.8-9.el9
+    sourcerpm: bash-5.1.8-9.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/c/cracklib-2.9.6-27.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-baseos-rpms
     size: 100903
@@ -239,6 +298,13 @@ arches:
     name: findutils
     evr: 1:4.8.0-7.el9
     sourcerpm: findutils-4.8.0-7.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/g/grep-3.6-5.el9.x86_64.rpm
+    repoid: ubi-9-for-x86_64-baseos-rpms
+    size: 279174
+    checksum: sha256:5556895ff1817066ca71b50785615e944b0fcc7e1c94c983087c7c691819623d
+    name: grep
+    evr: 3.6-5.el9
+    sourcerpm: grep-3.6-5.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/g/gzip-1.12-1.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-baseos-rpms
     size: 171206
@@ -309,6 +375,20 @@ arches:
     name: rsync
     evr: 3.2.5-3.el9_7.2
     sourcerpm: rsync-3.2.5-3.el9_7.2.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/s/sed-4.8-9.el9.x86_64.rpm
+    repoid: ubi-9-for-x86_64-baseos-rpms
+    size: 316395
+    checksum: sha256:bf3baf444e49eba4189e57d562a7522ab714132d2960db87ef9b99f1b46a3cc4
+    name: sed
+    evr: 4.8-9.el9
+    sourcerpm: sed-4.8-9.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/s/shadow-utils-4.9-15.el9.x86_64.rpm
+    repoid: ubi-9-for-x86_64-baseos-rpms
+    size: 1250789
+    checksum: sha256:297d8d9785fb98fd8e0c13eec05ee2da08db24e4e6099730b18f6a820b851c51
+    name: shadow-utils
+    evr: 2:4.9-15.el9
+    sourcerpm: shadow-utils-4.9-15.el9.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/t/tar-1.34-9.el9_7.x86_64.rpm
     repoid: ubi-9-for-x86_64-baseos-rpms
     size: 906521
@@ -337,6 +417,12 @@ arches:
     checksum: sha256:cba17754ccaffd886995aec7f152aadbc5d9932a2a2cdf1d983291c7b2838404
     name: oniguruma
     evr: 6.9.6-1.el9.5
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/b/bash-5.1.8-9.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 10512850
+    checksum: sha256:5d7bbbf2538361be1a11846602862c3a56809b3ea43b69b86bcf407538e9e260
+    name: bash
+    evr: 5.1.8-9.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/c/cracklib-2.9.6-27.el9.src.rpm
     repoid: ubi-9-for-x86_64-baseos-source-rpms
     size: 6414228
@@ -349,6 +435,12 @@ arches:
     checksum: sha256:48bd4d4dd081120bcc6ab772b930a150f30b2fc89a4a14a24220383d24a30b3f
     name: findutils
     evr: 1:4.8.0-7.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/g/grep-3.6-5.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 1620891
+    checksum: sha256:81b14432ebe1645b74b57592f1dcde8fab15ec13632f483f72ff2407ed16c33e
+    name: grep
+    evr: 3.6-5.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/g/gzip-1.12-1.el9.src.rpm
     repoid: ubi-9-for-x86_64-baseos-source-rpms
     size: 856147
@@ -403,6 +495,18 @@ arches:
     checksum: sha256:a0b3038cb71a7ab8450ef8141f32e8d05b47e1f6d703a0b0e4b927ca4729d662
     name: rsync
     evr: 3.2.5-3.el9_7.2
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/s/sed-4.8-9.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 1424192
+    checksum: sha256:0590550f0cbdce0a26f98a73c756f663a7f220486d10f9c16d1ce0c8c4d14378
+    name: sed
+    evr: 4.8-9.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/s/shadow-utils-4.9-15.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 1712227
+    checksum: sha256:c6feefc65a20ec4203979e0cde4d4a6d86981ac7c836e55148273bd9fc2b57b2
+    name: shadow-utils
+    evr: 2:4.9-15.el9
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/t/tar-1.34-9.el9_7.src.rpm
     repoid: ubi-9-for-x86_64-baseos-source-rpms
     size: 2282680

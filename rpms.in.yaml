@@ -18,15 +18,18 @@ contentOrigin:
     - repoid: ubi-9-for-$basearch-baseos-source-rpms
       baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/source/SRPMS
 
-# Keep in sync with RUN microdnf install lines in Containerfile (explicit RPM installs only).
+# New installs beyond ubi9-minimal (keep in sync with first RUN microdnf install in Containerfile).
 packages:
-  - bash
   - findutils
-  - grep
   - gzip
   - jq
   - rsync
-  - sed
-  - shadow-utils
   - tar
   - util-linux
+
+# Already on ubi9-minimal but listed in Containerfile microdnf lines; reinstall forces lockfile entries.
+reinstallPackages:
+  - bash
+  - grep
+  - sed
+  - shadow-utils
