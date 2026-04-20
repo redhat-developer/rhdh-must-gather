@@ -1,0 +1,35 @@
+# after editing, run (https://github.com/konflux-ci/rpm-lockfile-prototype):
+#   rpm-lockfile-prototype -f Containerfile rpms.in.yaml
+# to regen rpms.lock.yaml
+# Note that the repoid values are special, and must be from here:
+# https://github.com/release-engineering/rhtap-ec-policy/blob/main/data/known_rpm_repositories.yml
+arches:
+  - x86_64
+  - aarch64
+allowerasing: true
+contentOrigin:
+  repos:
+    - repoid: ubi-9-for-$basearch-appstream-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/os/
+    - repoid: ubi-9-for-$basearch-appstream-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/source/SRPMS
+    - repoid: ubi-9-for-$basearch-baseos-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/os/
+    - repoid: ubi-9-for-$basearch-baseos-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/source/SRPMS
+
+# New installs beyond ubi9-minimal (keep in sync with first RUN microdnf install in Containerfile).
+packages:
+  - findutils
+  - gzip
+  - jq
+  - rsync
+  - tar
+  - util-linux
+
+# Already on ubi9-minimal but listed in Containerfile microdnf lines; reinstall forces lockfile entries.
+reinstallPackages:
+  - bash
+  - grep
+  - sed
+  - shadow-utils
