@@ -78,7 +78,7 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 - **Node.js version**: Runtime Node.js version from `node --version`
 - **Container user ID**: Security context information from `id` command
 - **Dynamic plugins structure**: Directory listing of `dynamic-plugins-root` filesystem
-- **Running processes**: Complete list of all running processes in each container (collected via `/proc` filesystem enumeration)
+- **Running processes**: Complete list of all running processes in each container, including init containers (collected via `/proc` filesystem enumeration)
   - Process ID (PID) and Parent Process ID (PPID)
   - Process state (R=running, S=sleeping, D=disk sleep, Z=zombie, T=stopped)
   - Memory usage (RSS and Virtual Size in KB)
@@ -93,8 +93,9 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
     - **ConfigMaps** containing app configurations and dynamic plugin definitions
 
 #### Logs and Runtime Data
-- **Container logs** with configurable time windows (`MUST_GATHER_SINCE`, `MUST_GATHER_SINCE_TIME`)
-- **Multi-container logs**: Separate logs for `backstage-backend` and `install-dynamic-plugins` containers
+- **Per-pod, per-container logs**: Logs are collected from all pods (including non-running, for previous logs) and organized under `logs/pod=[pod-name]/container=[container-name]/` with `current.txt` and `previous.txt`. Containers are discovered dynamically (not hardcoded).
+- **Aggregated pod logs**: Each pod directory also contains `logs-app.current.txt` and `logs-app.previous.txt` combining all container logs with `--all-containers --prefix` for a unified view.
+- **Configurable time windows**: Use `MUST_GATHER_SINCE` or `MUST_GATHER_SINCE_TIME` to limit log collection.
 - **Local Database logs** from PostgreSQL StatefulSets, unless the app is configured to connect to external databases
 - **Must-gather container logs** (when running in pod)
 

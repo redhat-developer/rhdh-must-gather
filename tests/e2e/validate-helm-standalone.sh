@@ -103,8 +103,40 @@ check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$NAMESPACE" "stand
 
 # Verify that standalone deployments have the deployment data collected
 check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment" "deployment data in standalone directory"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/logs-app.txt" "logs for standalone deployment"
 check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/pods" "pod data for standalone deployment"
+
+# Validate per-pod logs structure for standalone deployment
+STANDALONE_DEPLOY_DIR="$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment"
+if [ -d "$STANDALONE_DEPLOY_DIR/logs" ]; then
+    standalone_log_pod_count=$(find "$STANDALONE_DEPLOY_DIR/logs" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+    if [ "$standalone_log_pod_count" -ge 1 ]; then
+        log_info "✓ Found $standalone_log_pod_count pod log directory(ies) for standalone deployment"
+        for pod_log_dir in "$STANDALONE_DEPLOY_DIR/logs"/pod=*; do
+            if [ -d "$pod_log_dir" ]; then
+                pod_name=$(basename "$pod_log_dir")
+                container_count=$(find "$pod_log_dir" -mindepth 1 -maxdepth 1 -type d -name 'container=*' 2>/dev/null | wc -l)
+                if [ "$container_count" -ge 1 ]; then
+                    log_info "✓ Found $container_count container log directory(ies) in $pod_name"
+                else
+                    log_error "✗ No container log directories in $pod_name"
+                    ((ERRORS++))
+                fi
+                if [ -f "$pod_log_dir/logs-app.current.txt" ]; then
+                    log_info "✓ Found aggregated current logs in $pod_name"
+                else
+                    log_error "✗ Missing logs-app.current.txt in $pod_name"
+                    ((ERRORS++))
+                fi
+            fi
+        done
+    else
+        log_error "✗ No pod log directories found in $STANDALONE_DEPLOY_DIR/logs"
+        ((ERRORS++))
+    fi
+else
+    log_error "✗ logs directory not found in $STANDALONE_DEPLOY_DIR"
+    ((ERRORS++))
+fi
 
 # Verify process collection from the running standalone deployment
 # Unlike the native Helm deployment (which is in CreateContainerConfigError), the standalone deployment is running

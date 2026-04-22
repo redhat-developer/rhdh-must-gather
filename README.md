@@ -302,30 +302,34 @@ Usage: ./must_gather [params...]
 │   │           ├── deployment/         # Application deployment info
 │   │           │   ├── deployment.yaml
 │   │           │   ├── deployment.describe.txt
-│   │           │   ├── env-vars.txt                # RHDH/Backstage environment variables
-│   │           │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
-│   │           │   ├── backstage.json              # {"version": "1.39.1"}
-│   │           │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
-│   │           │   ├── node-version.txt            # "v22.16.0"
-│   │           │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
-│   │           │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
-│   │           │   ├── logs-app.txt                # All container logs (2MB+ files)
-│   │           │   ├── logs-app-previous.txt       # All container logs (previous instances)
-│   │           │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
-│   │           │   ├── logs-app--backstage-backend-previous.txt
-│   │           │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
-│   │           │   ├── logs-app--install-dynamic-plugins-previous.txt
+│   │           │   ├── logs/           # Per-pod, per-container logs (all replicas)
+│   │           │   │   └── pod=[pod-name]/
+│   │           │   │       ├── logs-app.current.txt  # Aggregated current logs (all containers)
+│   │           │   │       ├── logs-app.previous.txt # Aggregated previous logs (all containers)
+│   │           │   │       └── container=[container-name]/
+│   │           │   │           ├── current.txt     # Current container logs
+│   │           │   │           └── previous.txt    # Previous container instance logs
+│   │           │   ├── data/           # Per-pod application data (all running replicas)
+│   │           │   │   └── pod=[pod-name]/
+│   │           │   │       └── container=backstage-backend/
+│   │           │   │           ├── env-vars.txt                # RHDH/Backstage environment variables
+│   │           │   │           ├── app-container-userid.txt    # "uid=1001 gid=0(root) groups=0(root)"
+│   │           │   │           ├── backstage.json              # {"version": "1.39.1"}
+│   │           │   │           ├── build-metadata.json         # RHDH version, source repos
+│   │           │   │           ├── node-version.txt            # "v22.16.0"
+│   │           │   │           ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
+│   │           │   │           └── app-config.dynamic-plugins.yaml # Generated app config
 │   │           │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
-│   │           │   │   └── pod=[pod-name]/         # Per-pod directory
+│   │           │   │   └── pod=[pod-name]/
+│   │           │   │       ├── pod-spec.yaml           # Pod specification
 │   │           │   │       └── container=[container-name]/
 │   │           │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
 │   │           │   │           ├── process-info.txt        # Process and memory info
-│   │           │   │           ├── heap-dump.log           # Collection logs
-│   │           │   │           └── pod-spec.yaml           # Pod specification
+│   │           │   │           └── heap-dump.log           # Collection logs
 │   │           │   ├── processes/      # Process list from running pods (all replicas)
-│   │           │   │   └── pod=[pod-name]/         # Per-pod directory
+│   │           │   │   └── pod=[pod-name]/
 │   │           │   │       └── container=[container-name].txt  # Process list per container
-│   │           │   └── pods/           # Pod details and logs
+│   │           │   └── pods/           # Pod listing and details
 │   │           │       ├── pods.txt
 │   │           │       ├── pods.yaml
 │   │           │       └── pods.describe.txt
@@ -346,7 +350,8 @@ Usage: ./must_gather [params...]
 │               ├── deployment.yaml       # Deployment YAML (or statefulset.yaml)
 │               ├── deployment.describe.txt
 │               ├── deployment/           # Application deployment info (same as native releases)
-│               │   ├── logs-app.txt
+│               │   ├── logs/
+│               │   ├── data/
 │               │   ├── pods/
 │               │   └── processes/
 │               └── dependencies/         # Dependent services (e.g., PostgreSQL from subchart)
@@ -400,6 +405,8 @@ Usage: ./must_gather [params...]
 │       ├── knative-serving.yaml            # KnativeServing CR details
 │       ├── knative-eventing-list.txt       # KnativeEventing CRs list
 │       ├── knative-eventing.yaml           # KnativeEventing CR details
+│       ├── knative-kafka-list.txt          # KnativeKafka CRs list
+│       ├── knative-kafka.yaml              # KnativeKafka CR details
 │       ├── knative-serving/                # knative-serving namespace resources
 │       │   ├── deployments.txt
 │       │   ├── pods.txt
@@ -448,30 +455,34 @@ Usage: ./must_gather [params...]
                 ├── deployment/         # RHDH workload (Deployment or StatefulSet)
                 │   ├── deployment.yaml              # or statefulset.yaml if kind is StatefulSet
                 │   ├── deployment.describe.txt      # or statefulset.describe.txt
-                │   ├── env-vars.txt                # RHDH/Backstage environment variables
-                │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
-                │   ├── backstage.json              # {"version": "1.39.1"}
-                │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
-                │   ├── node-version.txt            # "v22.16.0"
-                │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
-                │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
-                │   ├── logs-app.txt                # All container logs (2MB+ files)
-                │   ├── logs-app-previous.txt       # All container logs (previous instances)
-                │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
-                │   ├── logs-app--backstage-backend-previous.txt
-                │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
-                │   ├── logs-app--install-dynamic-plugins-previous.txt
+                │   ├── logs/           # Per-pod, per-container logs (all replicas)
+                │   │   └── pod=[pod-name]/
+                │   │       ├── logs-app.current.txt  # Aggregated current logs (all containers)
+                │   │       ├── logs-app.previous.txt # Aggregated previous logs (all containers)
+                │   │       └── container=[container-name]/
+                │   │           ├── current.txt     # Current container logs
+                │   │           └── previous.txt    # Previous container instance logs
+                │   ├── data/           # Per-pod application data (all running replicas)
+                │   │   └── pod=[pod-name]/
+                │   │       └── container=backstage-backend/
+                │   │           ├── env-vars.txt                # RHDH/Backstage environment variables
+                │   │           ├── app-container-userid.txt    # "uid=1001 gid=0(root) groups=0(root)"
+                │   │           ├── backstage.json              # {"version": "1.39.1"}
+                │   │           ├── build-metadata.json         # RHDH version, source repos
+                │   │           ├── node-version.txt            # "v22.16.0"
+                │   │           ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
+                │   │           └── app-config.dynamic-plugins.yaml # Generated app config
                 │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
-                │   │   └── pod=[pod-name]/         # Per-pod directory
+                │   │   └── pod=[pod-name]/
+                │   │       ├── pod-spec.yaml           # Pod specification
                 │   │       └── container=[container-name]/
                 │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
                 │   │           ├── process-info.txt        # Process and memory info
-                │   │           ├── heap-dump.log           # Collection logs
-                │   │           └── pod-spec.yaml           # Pod specification
+                │   │           └── heap-dump.log           # Collection logs
                 │   ├── processes/      # Process list from running pods (all replicas)
-                │   │   └── pod=[pod-name]/         # Per-pod directory
+                │   │   └── pod=[pod-name]/
                 │   │       └── container=[container-name].txt  # Process list per container
-                │   └── pods/           # Application pods
+                │   └── pods/           # Pod listing and details
                 │       ├── pods.txt
                 │       ├── pods.yaml
                 │       └── pods.describe.txt
