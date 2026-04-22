@@ -401,17 +401,18 @@ collect_container_processes() {
   local processes_dir="$output_dir/processes/pod=${pod}"
   ensure_directory "$processes_dir"
 
-  # Get all containers in the pod
-  local containers
+  # Get all containers (including init containers) in the pod
+  local containers init_containers
   containers=$($KUBECTL_CMD get pod -n "$ns" "$pod" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)
+  init_containers=$($KUBECTL_CMD get pod -n "$ns" "$pod" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
 
-  if [[ -z "$containers" ]]; then
+  if [[ -z "$containers" && -z "$init_containers" ]]; then
     log_warn "No containers found in pod $pod"
     echo "No containers found" > "$processes_dir/no-containers.txt"
     return 0
   fi
 
-  for container in $containers; do
+  for container in $containers $init_containers; do
     log_debug "Collecting processes from container: $container"
 
     local container_file="$processes_dir/container=${container}.txt"
@@ -1841,6 +1842,12 @@ _collect_pod_logs() {
     safe_exec "$KUBECTL_CMD -n '$ns' logs '$pod' -c '$container' --previous ${log_collection_args:-}" \
       "$container_dir/previous.txt" "previous logs for $pod/$container"
   done
+
+  # Aggregated logs across all containers
+  safe_exec "$KUBECTL_CMD -n '$ns' logs '$pod' --all-containers --prefix ${log_collection_args:-}" \
+    "$pod_logs_dir/logs-app.current.txt" "aggregated current logs for $pod"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs '$pod' --all-containers --prefix --previous ${log_collection_args:-}" \
+    "$pod_logs_dir/logs-app.previous.txt" "aggregated previous logs for $pod"
 }
 
 collect_rhdh_db_statefulset() {

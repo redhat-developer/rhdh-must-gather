@@ -199,6 +199,13 @@ for spec in "${CR_SPECS[@]}"; do
                             log_error "✗ No container log directories in $pod_name"
                             ((ERRORS++))
                         fi
+                        # Check aggregated log files
+                        if [ -f "$pod_log_dir/logs-app.current.txt" ]; then
+                            log_info "✓ Found aggregated current logs in $pod_name"
+                        else
+                            log_error "✗ Missing logs-app.current.txt in $pod_name"
+                            ((ERRORS++))
+                        fi
                     fi
                 done
             else

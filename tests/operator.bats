@@ -166,6 +166,19 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+@test "_collect_pod_logs collects aggregated logs per pod" {
+    run grep -q 'logs-app.current.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'logs-app.previous.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "_collect_pod_logs aggregated logs use --all-containers flag" {
+    run grep -A 2 'logs-app.current.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '--all-containers' ]]
+}
+
 @test "_collect_pod_data function exists in common.sh" {
     run grep -q '^_collect_pod_data()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
@@ -203,6 +216,12 @@ teardown() {
     run grep -A 15 'collect_rhdh_info_from_running_pods()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" =~ 'owner_kind="${4:-}"' ]]
+}
+
+@test "collect_container_processes discovers init containers" {
+    run grep -A 15 'collect_container_processes()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'init_containers' ]]
 }
 
 @test "collect_heap_dumps_for_pods filters by owner kind" {

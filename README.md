@@ -304,6 +304,8 @@ Usage: ./must_gather [params...]
 │   │           │   ├── deployment.describe.txt
 │   │           │   ├── logs/           # Per-pod, per-container logs (all replicas)
 │   │           │   │   └── pod=[pod-name]/
+│   │           │   │       ├── logs-app.current.txt  # Aggregated current logs (all containers)
+│   │           │   │       ├── logs-app.previous.txt # Aggregated previous logs (all containers)
 │   │           │   │       └── container=[container-name]/
 │   │           │   │           ├── current.txt     # Current container logs
 │   │           │   │           └── previous.txt    # Previous container instance logs
@@ -453,6 +455,8 @@ Usage: ./must_gather [params...]
                 │   ├── deployment.describe.txt      # or statefulset.describe.txt
                 │   ├── logs/           # Per-pod, per-container logs (all replicas)
                 │   │   └── pod=[pod-name]/
+                │   │       ├── logs-app.current.txt  # Aggregated current logs (all containers)
+                │   │       ├── logs-app.previous.txt # Aggregated previous logs (all containers)
                 │   │       └── container=[container-name]/
                 │   │           ├── current.txt     # Current container logs
                 │   │           └── previous.txt    # Previous container instance logs
