@@ -68,7 +68,7 @@ make clean-out              # Remove only the local output directory (./out)
 6. Respect `RHDH_WITH_SECRETS` when collecting secrets
 
 ### Safe Command Execution
-Always use `safe_exec` for kubectl/helm commands:
+Always use `safe_exec` for kubectl/helm commands — never use bare `timeout`/`kubectl` calls. `safe_exec` provides timeout handling, `RHDH_INTERRUPTED` (Ctrl-C) checking, and detailed error reporting to the output file on failure.
 ```bash
 safe_exec "$KUBECTL_CMD -n '$ns' get pods -o yaml" "$output_dir/pods.yaml" "Description"
 ```
