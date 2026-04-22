@@ -321,11 +321,11 @@ Usage: ./must_gather [params...]
 │   │           │   │           └── app-config.dynamic-plugins.yaml # Generated app config
 │   │           │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
 │   │           │   │   └── pod=[pod-name]/
+│   │           │   │       ├── pod-spec.yaml           # Pod specification
 │   │           │   │       └── container=[container-name]/
 │   │           │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
 │   │           │   │           ├── process-info.txt        # Process and memory info
-│   │           │   │           ├── heap-dump.log           # Collection logs
-│   │           │   │           └── pod-spec.yaml           # Pod specification
+│   │           │   │           └── heap-dump.log           # Collection logs
 │   │           │   ├── processes/      # Process list from running pods (all replicas)
 │   │           │   │   └── pod=[pod-name]/
 │   │           │   │       └── container=[container-name].txt  # Process list per container
@@ -405,6 +405,8 @@ Usage: ./must_gather [params...]
 │       ├── knative-serving.yaml            # KnativeServing CR details
 │       ├── knative-eventing-list.txt       # KnativeEventing CRs list
 │       ├── knative-eventing.yaml           # KnativeEventing CR details
+│       ├── knative-kafka-list.txt          # KnativeKafka CRs list
+│       ├── knative-kafka.yaml              # KnativeKafka CR details
 │       ├── knative-serving/                # knative-serving namespace resources
 │       │   ├── deployments.txt
 │       │   ├── pods.txt
@@ -472,11 +474,11 @@ Usage: ./must_gather [params...]
                 │   │           └── app-config.dynamic-plugins.yaml # Generated app config
                 │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
                 │   │   └── pod=[pod-name]/
+                │   │       ├── pod-spec.yaml           # Pod specification
                 │   │       └── container=[container-name]/
                 │   │           ├── heapdump-[timestamp].heapsnapshot  # Heap dump (100MB-1GB+)
                 │   │           ├── process-info.txt        # Process and memory info
-                │   │           ├── heap-dump.log           # Collection logs
-                │   │           └── pod-spec.yaml           # Pod specification
+                │   │           └── heap-dump.log           # Collection logs
                 │   ├── processes/      # Process list from running pods (all replicas)
                 │   │   └── pod=[pod-name]/
                 │   │       └── container=[container-name].txt  # Process list per container
