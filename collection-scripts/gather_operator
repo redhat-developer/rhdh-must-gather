@@ -211,10 +211,7 @@ function gather_backstage_crs() {
               log_warn "The Backstage CR spec.deployment.kind is set to '$intended_kind'."
           fi
 
-          local warnings_dir="$cr_dir/warnings"
-          ensure_directory "$warnings_dir"
-
-          cat > "$warnings_dir/dual-workload.txt" << WARN_EOF
+          cat > "$cr_dir/warning-dual-workload.txt" << WARN_EOF
 WARNING: Duplicate RHDH workloads detected
 
 Both a Deployment and a StatefulSet named '$deploy' were found in namespace '$cr_ns'.

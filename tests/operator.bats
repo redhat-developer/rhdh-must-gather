@@ -50,13 +50,8 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
-@test "gather_operator creates warnings directory for dual workload" {
-    run grep -q 'warnings_dir.*warnings' "${SCRIPTS_DIR}/gather_operator"
-    [ "$status" -eq 0 ]
-}
-
-@test "gather_operator writes dual-workload.txt warning file" {
-    run grep -qF 'dual-workload.txt' "${SCRIPTS_DIR}/gather_operator"
+@test "gather_operator writes warning-dual-workload.txt at CR directory level" {
+    run grep -qF 'warning-dual-workload.txt' "${SCRIPTS_DIR}/gather_operator"
     [ "$status" -eq 0 ]
 }
 

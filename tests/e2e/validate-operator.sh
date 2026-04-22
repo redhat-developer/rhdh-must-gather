@@ -236,21 +236,18 @@ for spec in "${CR_SPECS[@]}"; do
     fi
 
     # Validate dual workload detection (both Deployment and StatefulSet with same name)
-    warnings_dir="$cr_base_dir/warnings"
-    if [ -d "$warnings_dir" ]; then
-        if [ -f "$warnings_dir/dual-workload.txt" ]; then
-            log_warn "⚠ Dual workload detected: both Deployment and StatefulSet exist for $cr_name"
-            check_file_not_empty "$warnings_dir/dual-workload.txt" "dual-workload warning"
-            # Validate that the rhdh-statefulset directory was also created
-            sts_dir="$cr_base_dir/rhdh-statefulset"
-            if [ -d "$sts_dir" ]; then
-                log_info "✓ Found rhdh-statefulset directory for dual workload collection"
-                check_file_not_empty "$sts_dir/statefulset.yaml" "RHDH StatefulSet YAML"
-                check_file_not_empty "$sts_dir/statefulset.describe.txt" "RHDH StatefulSet description"
-            else
-                log_error "✗ rhdh-statefulset directory not found despite dual-workload warning"
-                ((ERRORS++))
-            fi
+    if [ -f "$cr_base_dir/warning-dual-workload.txt" ]; then
+        log_warn "⚠ Dual workload detected: both Deployment and StatefulSet exist for $cr_name"
+        check_file_not_empty "$cr_base_dir/warning-dual-workload.txt" "dual-workload warning"
+        # Validate that the rhdh-statefulset directory was also created
+        sts_dir="$cr_base_dir/rhdh-statefulset"
+        if [ -d "$sts_dir" ]; then
+            log_info "✓ Found rhdh-statefulset directory for dual workload collection"
+            check_file_not_empty "$sts_dir/statefulset.yaml" "RHDH StatefulSet YAML"
+            check_file_not_empty "$sts_dir/statefulset.describe.txt" "RHDH StatefulSet description"
+        else
+            log_error "✗ rhdh-statefulset directory not found despite dual-workload warning"
+            ((ERRORS++))
         fi
     fi
 done
