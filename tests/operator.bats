@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2016 # Single quotes are intentional: grep patterns match literal $var in source files
 # Unit tests for gather_operator script
 
 load 'test_helper'
