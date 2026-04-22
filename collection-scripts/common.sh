@@ -1795,41 +1795,12 @@ collect_rhdh_workload() {
     collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
     collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
 
-    # Filter pods by owner kind to avoid collecting pods from a different workload
-    # that shares the same labels (e.g., during a Deployment-to-StatefulSet migration)
-    local _owner_ref_kind=""
-    if [[ "$kind" == "deployment" ]]; then
-      _owner_ref_kind="ReplicaSet"
-    elif [[ "$kind" == "statefulset" ]]; then
-      _owner_ref_kind="StatefulSet"
-    fi
-
-    local pod_names
-    if [[ -n "$_owner_ref_kind" ]]; then
-      pod_names=$(
-        $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
-          | jq -r --arg ok "$_owner_ref_kind" \
-            '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' \
-          | tr '\n' ' ' || true
-      )
-    fi
-
     local pods_dir="$output_dir/pods"
     ensure_directory "$pods_dir"
 
-    if [[ -n "${pod_names:-}" ]]; then
-      # Use filtered pod names for targeted collection
-      # shellcheck disable=SC2086
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
-      # shellcheck disable=SC2086
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
-      # shellcheck disable=SC2086
-      safe_exec "$KUBECTL_CMD -n '$ns' describe pods $pod_names" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
-    else
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
-      safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
-    fi
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
   fi
 }
 
