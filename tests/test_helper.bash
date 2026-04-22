@@ -60,6 +60,8 @@ load_common() {
     export -f get_kubectl_cmd
     export -f check_cluster_connectivity
     export -f validate_environment
+    export -f collect_rhdh_workload
+    export -f collect_rhdh_db_statefulset
 }
 
 # Create a mock secret YAML file for testing

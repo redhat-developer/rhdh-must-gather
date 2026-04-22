@@ -40,7 +40,7 @@ make clean-out              # Remove only the local output directory (./out)
 
 ### Collection Scripts (`collection-scripts/`)
 - **`must_gather`** - Main orchestrator; parses flags, runs collectors in sequence, triggers sanitization on exit
-- **`common.sh`** - Shared utilities: logging, namespace filtering, `safe_exec()` for timeout-wrapped commands, `collect_rhdh_data()` for app introspection
+- **`common.sh`** - Shared utilities: logging, namespace filtering, `safe_exec()` for timeout-wrapped commands, `collect_rhdh_workload()` for app workload collection, `collect_rhdh_db_statefulset()` for database collection
 - **`gather_*`** - Individual collectors (helm, operator, orchestrator, platform, route, ingress, namespace-inspect, cluster-info)
 - **`sanitize`** - Post-collection data sanitization (secrets, tokens, SSH keys, passwords)
 - **`logs.sh`** - Collects must-gather container logs when running in a pod
