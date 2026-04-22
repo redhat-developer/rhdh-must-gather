@@ -138,9 +138,43 @@ teardown() {
     [ "$status" -ne 0 ]
 }
 
+@test "collect_rhdh_workload always filters pods by owner" {
+    run grep '_collect_pods_filtered_by_owner' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "_collect_pods_filtered_by_owner function exists in common.sh" {
+    run grep -q '^_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "_collect_pods_filtered_by_owner filters by ReplicaSet for deployment kind" {
+    run grep -A 10 '_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '_owner_ref_kind="ReplicaSet"' ]]
+}
+
+@test "_collect_pods_filtered_by_owner filters by StatefulSet for statefulset kind" {
+    run grep -A 15 '_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ '_owner_ref_kind="StatefulSet"' ]]
+}
+
 @test "gather_operator detects workload kind for single-workload case" {
     run grep -qF 'workload_kind="deployment"' "${SCRIPTS_DIR}/gather_operator"
     [ "$status" -eq 0 ]
     run grep -qF 'workload_kind="statefulset"' "${SCRIPTS_DIR}/gather_operator"
     [ "$status" -eq 0 ]
+}
+
+@test "collect_rhdh_info_from_running_pods filters by owner kind" {
+    run grep -A 15 'collect_rhdh_info_from_running_pods()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'owner_kind="${4:-}"' ]]
+}
+
+@test "collect_heap_dumps_for_pods filters by owner kind" {
+    run grep -A 10 'collect_heap_dumps_for_pods()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'owner_kind="${6:-}"' ]]
 }

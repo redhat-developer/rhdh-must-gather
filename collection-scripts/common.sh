@@ -1798,9 +1798,43 @@ collect_rhdh_workload() {
     local pods_dir="$output_dir/pods"
     ensure_directory "$pods_dir"
 
-    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
-    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
-    safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
+    _collect_pods_filtered_by_owner "$ns" "$labels" "$kind" "$pods_dir" "$name"
+  fi
+}
+
+_collect_pods_filtered_by_owner() {
+  local ns="$1"
+  local labels="$2"
+  local kind="$3"
+  local pods_dir="$4"
+  local name="$5"
+
+  local _owner_ref_kind=""
+  if [[ "$kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
+  fi
+
+  local -a pod_array=()
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && pod_array+=("$p")
+  done < <(
+    $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
+      | jq -r --arg ok "$_owner_ref_kind" \
+        '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+  )
+
+  if [[ ${#pod_array[@]} -gt 0 ]]; then
+    log_info "\tCollecting: $kind pods for $ns/$name (filtered by owner: $_owner_ref_kind, ${#pod_array[@]} pod(s))"
+    timeout "$CMD_TIMEOUT" $KUBECTL_CMD -n "$ns" get pods "${pod_array[@]}" > "$pods_dir/pods.txt" 2>&1 || true
+    timeout "$CMD_TIMEOUT" $KUBECTL_CMD -n "$ns" get pods "${pod_array[@]}" -o yaml > "$pods_dir/pods.yaml" 2>&1 || true
+    timeout "$CMD_TIMEOUT" $KUBECTL_CMD -n "$ns" describe pods "${pod_array[@]}" > "$pods_dir/pods.describe.txt" 2>&1 || true
+  else
+    log_warn "\tNo pods found for $kind $ns/$name with owner $_owner_ref_kind"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.txt"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.yaml"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.describe.txt"
   fi
 }
 
