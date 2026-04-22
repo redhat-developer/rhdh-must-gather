@@ -1826,10 +1826,10 @@ _collect_pods_filtered_by_owner() {
   )
 
   if [[ ${#pod_array[@]} -gt 0 ]]; then
-    log_info "\tCollecting: $kind pods for $ns/$name (filtered by owner: $_owner_ref_kind, ${#pod_array[@]} pod(s))"
-    timeout "$CMD_TIMEOUT" "$KUBECTL_CMD" -n "$ns" get pods "${pod_array[@]}" > "$pods_dir/pods.txt" 2>&1 || true
-    timeout "$CMD_TIMEOUT" "$KUBECTL_CMD" -n "$ns" get pods "${pod_array[@]}" -o yaml > "$pods_dir/pods.yaml" 2>&1 || true
-    timeout "$CMD_TIMEOUT" "$KUBECTL_CMD" -n "$ns" describe pods "${pod_array[@]}" > "$pods_dir/pods.describe.txt" 2>&1 || true
+    local pod_names="${pod_array[*]}"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names" "$pods_dir/pods.txt" "$kind pods for $ns/$name (owner: $_owner_ref_kind, ${#pod_array[@]} pod(s))"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name (owner: $_owner_ref_kind)"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe pods $pod_names" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name (owner: $_owner_ref_kind)"
   else
     log_warn "\tNo pods found for $kind $ns/$name with owner $_owner_ref_kind"
     echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.txt"
