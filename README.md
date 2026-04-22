@@ -280,6 +280,7 @@ Usage: ./must_gather [params...]
 │   └── platform.txt                # Human-readable platform summary
 ├── helm/                           # Helm deployment data (native releases + standalone)
 │   ├── all-rhdh-releases.txt       # List of all detected RHDH deployments (native + standalone)
+│   ├── all-rhdh-releases.json      # Same data in JSON format
 │   ├── releases/                   # Native Helm releases (tracked by Helm)
 │   │   └── ns=[namespace]/         # Per-namespace organization
 │   │       ├── _configmaps/        # Namespace-wide ConfigMaps with both formats
@@ -301,6 +302,7 @@ Usage: ./must_gather [params...]
 │   │           ├── deployment/         # Application deployment info
 │   │           │   ├── deployment.yaml
 │   │           │   ├── deployment.describe.txt
+│   │           │   ├── env-vars.txt                # RHDH/Backstage environment variables
 │   │           │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
 │   │           │   ├── backstage.json              # {"version": "1.39.1"}
 │   │           │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
@@ -308,8 +310,11 @@ Usage: ./must_gather [params...]
 │   │           │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
 │   │           │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
 │   │           │   ├── logs-app.txt                # All container logs (2MB+ files)
+│   │           │   ├── logs-app-previous.txt       # All container logs (previous instances)
 │   │           │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
+│   │           │   ├── logs-app--backstage-backend-previous.txt
 │   │           │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
+│   │           │   ├── logs-app--install-dynamic-plugins-previous.txt
 │   │           │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
 │   │           │   │   └── pod=[pod-name]/         # Per-pod directory
 │   │           │   │       └── container=[container-name]/
@@ -328,6 +333,7 @@ Usage: ./must_gather [params...]
 │   │               ├── db-statefulset.yaml
 │   │               ├── db-statefulset.describe.txt
 │   │               ├── logs-db.txt     # Database logs
+│   │               ├── logs-db-previous.txt
 │   │               └── pods/           # Database pod details
 │   │                   ├── pods.txt
 │   │                   ├── pods.yaml
@@ -424,7 +430,8 @@ Usage: ./must_gather [params...]
     │   │   ├── all-deployments.txt
     │   │   ├── [deployment-selector].yaml
     │   │   └── [deployment-selector].describe.txt
-    │   └── logs.txt               # Operator logs
+    │   ├── logs.txt               # Operator logs
+    │   └── logs-previous.txt      # Operator logs (previous instances)
     └── backstage-crs/              # Backstage Custom Resources
         ├── all-backstage-crs.txt   # List of all Backstage CRs
         └── ns=[cr-namespace]/      # Per-CR-namespace data (where Backstage CRs are deployed)
@@ -437,9 +444,11 @@ Usage: ./must_gather [params...]
             └── [cr-name]/          # Per-CR directory
                 ├── [cr-name].yaml      # CR definition
                 ├── describe.txt        # CR description
-                ├── deployment/         # Application deployment (same structure as Helm)
-                │   ├── deployment.yaml
-                │   ├── deployment.describe.txt
+                ├── warning-dual-workload.txt  # Warning if both Deployment and StatefulSet exist
+                ├── deployment/         # RHDH workload (Deployment or StatefulSet)
+                │   ├── deployment.yaml              # or statefulset.yaml if kind is StatefulSet
+                │   ├── deployment.describe.txt      # or statefulset.describe.txt
+                │   ├── env-vars.txt                # RHDH/Backstage environment variables
                 │   ├── app-container-userid.txt      # "uid=1001 gid=0(root) groups=0(root)"
                 │   ├── backstage.json              # {"version": "1.39.1"}
                 │   ├── build-metadata.json         # RHDH version, Backstage version, source repos, build time
@@ -447,8 +456,11 @@ Usage: ./must_gather [params...]
                 │   ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
                 │   ├── app-config.dynamic-plugins.yaml # Generated app config (9KB files)
                 │   ├── logs-app.txt                # All container logs (2MB+ files)
+                │   ├── logs-app-previous.txt       # All container logs (previous instances)
                 │   ├── logs-app--backstage-backend.txt # Backend logs (2MB+ files)
+                │   ├── logs-app--backstage-backend-previous.txt
                 │   ├── logs-app--install-dynamic-plugins.txt # Init container logs (17KB files)
+                │   ├── logs-app--install-dynamic-plugins-previous.txt
                 │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
                 │   │   └── pod=[pod-name]/         # Per-pod directory
                 │   │       └── container=[container-name]/
@@ -463,10 +475,13 @@ Usage: ./must_gather [params...]
                 │       ├── pods.txt
                 │       ├── pods.yaml
                 │       └── pods.describe.txt
+                ├── rhdh-statefulset/   # Only if dual workload detected (see warning-dual-workload.txt)
+                │   └── [same structure as deployment/ above, with statefulset.yaml]
                 └── db-statefulset/     # Database StatefulSet (if database enabled)
                     ├── db-statefulset.yaml
                     ├── db-statefulset.describe.txt
                     ├── logs-db.txt     # Database logs
+                    ├── logs-db-previous.txt
                     └── pods/           # Database pods
                         ├── pods.txt
                         ├── pods.yaml
