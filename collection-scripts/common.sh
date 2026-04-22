@@ -1809,7 +1809,8 @@ collect_rhdh_workload() {
       pod_names=$(
         $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
           | jq -r --arg ok "$_owner_ref_kind" \
-            '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+            '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' \
+          | tr '\n' ' ' || true
       )
     fi
 
