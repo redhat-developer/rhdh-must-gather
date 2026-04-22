@@ -185,7 +185,74 @@ function gather_backstage_crs() {
       # Collect app-specific info (pass CR name for heap dump filtering)
       deploy="backstage-$cr_name"
       statefulset="backstage-psql-$cr_name"
-      collect_rhdh_data "$cr_ns" "$deploy" "$statefulset" "$cr_dir" "$cr_name"
+
+      # Detect dual workload: both a Deployment and StatefulSet with the same name.
+      # This happens when spec.deployment.kind is changed in the Backstage CR
+      # (RHDH Operator 1.9+), and the previous workload was not cleaned up.
+      local has_deploy has_sts
+      has_deploy=$($KUBECTL_CMD -n "$cr_ns" get deployment "$deploy" -o name 2>/dev/null || true)
+      has_sts=$($KUBECTL_CMD -n "$cr_ns" get statefulset "$deploy" -o name 2>/dev/null || true)
+
+      if [[ -n "$has_deploy" ]] && [[ -n "$has_sts" ]]; then
+          local intended_kind
+          intended_kind=$($KUBECTL_CMD -n "$cr_ns" get backstages.rhdh.redhat.com "$cr_name" \
+              -o jsonpath='{.spec.deployment.kind}' 2>/dev/null || echo "")
+
+          local leftover_kind
+          if [[ "$intended_kind" == "StatefulSet" ]]; then
+              leftover_kind="Deployment"
+          else
+              leftover_kind="StatefulSet"
+          fi
+
+          log_warn "Both a Deployment and a StatefulSet named '$deploy' exist in namespace '$cr_ns'."
+          log_warn "This may indicate a workload type migration where the previous $leftover_kind was not cleaned up."
+          if [[ -n "$intended_kind" ]]; then
+              log_warn "The Backstage CR spec.deployment.kind is set to '$intended_kind'."
+          fi
+
+          cat > "$cr_dir/warning-dual-workload.txt" << WARN_EOF
+WARNING: Duplicate RHDH workloads detected
+
+Both a Deployment and a StatefulSet named '$deploy' were found in namespace '$cr_ns'.
+
+This typically happens when the Backstage CR's spec.deployment.kind field is changed
+(e.g., from Deployment to StatefulSet), causing the RHDH Operator to create a new
+workload of the desired type while the previous one remains running, as it is no
+longer managed by the Operator.
+
+$(if [[ -n "$intended_kind" ]]; then
+echo "The Backstage CR spec.deployment.kind is currently set to: $intended_kind"
+echo "This means the $leftover_kind is likely a leftover that should be manually deleted."
+else
+echo "The Backstage CR spec.deployment.kind is not set (defaults to Deployment)."
+echo "This means the StatefulSet may be a leftover that should be manually deleted."
+fi)
+
+Recommended action:
+  Delete the leftover $(echo "$leftover_kind" | tr '[:upper:]' '[:lower:]') that is no longer managed by the Operator:
+    kubectl -n $cr_ns delete $(echo "$leftover_kind" | tr '[:upper:]' '[:lower:]') $deploy
+
+Refer to the RHDH Operator documentation for more details on workload type migration.
+
+Collected data:
+  - deployment/          contains the Deployment workload data
+  - rhdh-statefulset/    contains the StatefulSet workload data
+  - db-statefulset/      contains the database StatefulSet data (if applicable)
+WARN_EOF
+
+          collect_rhdh_workload "$cr_ns" "$deploy" "deployment" "$cr_dir/deployment" "$cr_name"
+          collect_rhdh_workload "$cr_ns" "$deploy" "statefulset" "$cr_dir/rhdh-statefulset" "$cr_name"
+      else
+          # Determine which workload kind exists
+          local workload_kind="deployment"
+          if [[ -z "$has_deploy" ]] && [[ -n "$has_sts" ]]; then
+              workload_kind="statefulset"
+          fi
+          collect_rhdh_workload "$cr_ns" "$deploy" "$workload_kind" "$cr_dir/deployment" "$cr_name"
+      fi
+
+      collect_rhdh_db_statefulset "$cr_ns" "$statefulset" "$cr_dir"
   done
 }
 

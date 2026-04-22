@@ -274,14 +274,31 @@ collect_rhdh_info_from_running_pods() {
   local ns="$1"
   local labels="$2"
   local output_dir="$3"
+  local owner_kind="${4:-}"  # Optional: "deployment" or "statefulset" to filter by owner
 
-  # Get all running pods matching the labels
+  # Get all running pods matching the labels, optionally filtered by owner kind.
+  # Deployment pods are owned by ReplicaSets; StatefulSet pods are owned directly.
   local running_pods
-  running_pods=$(
-    $KUBECTL_CMD get pods -n "$ns" \
-      -l "$labels" \
-      -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}'
-  )
+  local _owner_ref_kind=""
+  if [[ "$owner_kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$owner_kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
+  fi
+
+  if [[ -n "$_owner_ref_kind" ]]; then
+    running_pods=$(
+      $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
+        | jq -r --arg ok "$_owner_ref_kind" \
+          '.items[] | select(.status.phase == "Running") | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+    )
+  else
+    running_pods=$(
+      $KUBECTL_CMD get pods -n "$ns" \
+        -l "$labels" \
+        -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}'
+    )
+  fi
 
   if [ -z "$running_pods" ]; then
     log_warn "No running pod found in $ns namespace with labels: $labels => no data will be fetched from the running app"
@@ -1286,6 +1303,7 @@ collect_heap_dumps_for_pods() {
   local output_dir="$3"
   local deploy_name="${4:-}"      # Deployment/StatefulSet name
   local instance_name="${5:-}"    # Helm release name or CR name (optional)
+  local owner_kind="${6:-}"       # Optional: "deployment" or "statefulset" to filter by owner
 
   # Only collect heap dumps if explicitly enabled
   if [[ "${RHDH_WITH_HEAP_DUMPS:-false}" != "true" ]]; then
@@ -1337,16 +1355,29 @@ collect_heap_dumps_for_pods() {
   # Timeout for heap dump generation (per pod)
   local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-600}"
   
-  # Get list of running pods matching the labels
+  # Get list of running pods matching the labels, optionally filtered by owner kind
   local pods
-  pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  
+  local _owner_ref_kind=""
+  if [[ "$owner_kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$owner_kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
+  fi
+
+  if [[ -n "$_owner_ref_kind" ]]; then
+    pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o json 2>/dev/null \
+      | jq -r --arg ok "$_owner_ref_kind" \
+        '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true)
+  else
+    pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  fi
+
   if [[ -z "$pods" ]]; then
     log_warn "No running pods found with labels: $labels in namespace: $ns"
     echo "No running pods found" > "$heap_dump_dir/no-pods.txt"
     return 0
   fi
-  
+
   for pod in $pods; do
     log_info "Processing pod: $pod for heap dump collection"
 
@@ -1734,78 +1765,109 @@ _process_container_heap_dump() {
   return 0
 }
 
-collect_rhdh_data() {
+collect_rhdh_workload() {
   local ns="$1"
-  local deploy="$2"
-  local statefulset="$3"
+  local name="$2"
+  local kind="$3"  # "deployment" or "statefulset"
   local output_dir="$4"
-  local instance_name="${5:-}"  # Optional: Helm release name or CR name for heap dump filtering
+  local instance_name="${5:-}"
 
-  log_debug "deploy=$deploy"
-  if [[ -n "$deploy" ]]; then
-    local deploy_dir="${output_dir}/deployment"
-    ensure_directory "$deploy_dir"
+  log_debug "Collecting $kind $name in $ns"
+  ensure_directory "$output_dir"
 
-    safe_exec "$KUBECTL_CMD -n '$ns' get deployment $deploy -o yaml || $KUBECTL_CMD -n '$ns' get statefulset $deploy -o yaml" "$deploy_dir/deployment.yaml" "app deployment for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' describe deployment $deploy || $KUBECTL_CMD -n '$ns' describe statefulset $deploy" "$deploy_dir/deployment.describe.txt" "app deployment for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c install-dynamic-plugins --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c install-dynamic-plugins --prefix ${log_collection_args:-}" "$deploy_dir/logs-app--install-dynamic-plugins.txt" "app init-container logs for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c install-dynamic-plugins --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c install-dynamic-plugins --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app--install-dynamic-plugins-previous.txt" "app init-container logs (previous) for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c backstage-backend --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c backstage-backend --prefix ${log_collection_args:-}" "$deploy_dir/logs-app--backstage-backend.txt" "app backstage-backend logs for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy -c backstage-backend --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy -c backstage-backend --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app--backstage-backend-previous.txt" "app backstage-backend logs (previous) for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy --all-containers --prefix ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy --all-containers --prefix ${log_collection_args:-}" "$deploy_dir/logs-app.txt" "app deployment logs for $ns/$deploy"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs deployments/$deploy --all-containers --prefix --previous ${log_collection_args:-} || $KUBECTL_CMD -n '$ns' logs statefulsets/$deploy --all-containers --prefix --previous ${log_collection_args:-}" "$deploy_dir/logs-app-previous.txt" "app deployment logs (previous) for $ns/$deploy"
-  
-    labels=$(
-      $KUBECTL_CMD -n "$ns" get deployment "$deploy" -o json \
-        | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")'  || true
-    )
-     if [[ -z "$labels" ]]; then
-      log_debug "No labels found for deployment $deploy, trying statefulset"
-      labels=$(
-        $KUBECTL_CMD -n "$ns" get statefulset "$deploy" -o json \
-          | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
-      )
-     fi
-    if [[ -n "$labels" ]]; then
-      # Retrieve some information from the running pods
-      collect_rhdh_info_from_running_pods "$ns" "$labels" "$deploy_dir"
+  local resource_path="${kind}s/$name"
 
-      # Collect heap dumps right after collecting logs (if enabled)
-      # Use || true to ensure heap dump failures don't stop the entire collection
-      # Pass deploy name and instance name for filtering (instance_name may be Helm release or CR name)
-      collect_heap_dumps_for_pods "$ns" "$labels" "$deploy_dir" "$deploy" "$instance_name" || true
+  safe_exec "$KUBECTL_CMD -n '$ns' get $kind $name -o yaml" "$output_dir/$kind.yaml" "$kind for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' describe $kind $name" "$output_dir/$kind.describe.txt" "$kind description for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path -c backstage-backend --prefix ${log_collection_args:-}" "$output_dir/logs-app--backstage-backend.txt" "$kind backstage-backend logs for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path -c backstage-backend --prefix --previous ${log_collection_args:-}" "$output_dir/logs-app--backstage-backend-previous.txt" "$kind backstage-backend logs (previous) for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path -c install-dynamic-plugins --prefix ${log_collection_args:-}" "$output_dir/logs-app--install-dynamic-plugins.txt" "$kind init-container logs for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path -c install-dynamic-plugins --prefix --previous ${log_collection_args:-}" "$output_dir/logs-app--install-dynamic-plugins-previous.txt" "$kind init-container logs (previous) for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path --all-containers --prefix ${log_collection_args:-}" "$output_dir/logs-app.txt" "$kind logs for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs $resource_path --all-containers --prefix --previous ${log_collection_args:-}" "$output_dir/logs-app-previous.txt" "$kind logs (previous) for $ns/$name"
 
-      pods_dir="$deploy_dir/pods"
-      ensure_directory "$pods_dir"
+  local labels
+  labels=$(
+    $KUBECTL_CMD -n "$ns" get "$kind" "$name" -o json \
+      | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
+  )
+  if [[ -n "$labels" ]]; then
+    collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
+    collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
 
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "app deployment pods for $ns/$deploy"
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "app deployment pods for $ns/$deploy"
-      safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "app deployment pods for $ns/$deploy"
-    fi
+    local pods_dir="$output_dir/pods"
+    ensure_directory "$pods_dir"
+
+    _collect_pods_filtered_by_owner "$ns" "$labels" "$kind" "$pods_dir" "$name"
+  fi
+}
+
+_collect_pods_filtered_by_owner() {
+  local ns="$1"
+  local labels="$2"
+  local kind="$3"
+  local pods_dir="$4"
+  local name="$5"
+
+  local _owner_ref_kind=""
+  if [[ "$kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
   fi
 
-  log_debug "statefulset=$statefulset"
-  if [[ -n "$statefulset" ]]; then
-    statefulset_dir="$output_dir/db-statefulset"
-    ensure_directory "$statefulset_dir"
+  local -a pod_array=()
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && pod_array+=("$p")
+  done < <(
+    $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
+      | jq -r --arg ok "$_owner_ref_kind" \
+        '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+  )
 
-    safe_exec "$KUBECTL_CMD -n '$ns' get statefulset $statefulset -o yaml" "$statefulset_dir/db-statefulset.yaml" "DB statefulset for $ns/$statefulset"
-    safe_exec "$KUBECTL_CMD -n '$ns' describe statefulset $statefulset" "$statefulset_dir/db-statefulset.describe.txt" "DB statefulset for $ns/$statefulset"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$statefulset --all-containers --prefix ${log_collection_args:-}" "$statefulset_dir/logs-db.txt" "DB StatefulSet logs for $ns/$statefulset"
-    safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$statefulset --all-containers --prefix --previous ${log_collection_args:-}" "$statefulset_dir/logs-db-previous.txt" "DB StatefulSet logs (previous) for $ns/$statefulset"
+  if [[ ${#pod_array[@]} -gt 0 ]]; then
+    local pod_names="${pod_array[*]}"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names" "$pods_dir/pods.txt" "$kind pods for $ns/$name (owner: $_owner_ref_kind, ${#pod_array[@]} pod(s))"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name (owner: $_owner_ref_kind)"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe pods $pod_names" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name (owner: $_owner_ref_kind)"
+  else
+    log_warn "\tNo pods found for $kind $ns/$name with owner $_owner_ref_kind"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.txt"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.yaml"
+    echo "No pods found with owner kind $_owner_ref_kind" > "$pods_dir/pods.describe.txt"
+  fi
+}
 
-    labels=$(
-      $KUBECTL_CMD -n "$ns" get statefulset "$statefulset" -o json \
-        | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
-    )
-    if [[ -n "$labels" ]]; then
-      pods_dir="$statefulset_dir/pods"
-      ensure_directory "$pods_dir"
+collect_rhdh_db_statefulset() {
+  local ns="$1"
+  local name="$2"
+  local output_dir="$3"
 
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "DB statefulset pods for $ns/$statefulset"
-      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "DB statefulset pods for $ns/$statefulset"
-      safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "DB statefulset pods for $ns/$statefulset"
-    fi
+  log_debug "db-statefulset=$name"
+  if [[ -z "$name" ]]; then
+    return 0
+  fi
+
+  local statefulset_dir="$output_dir/db-statefulset"
+  ensure_directory "$statefulset_dir"
+
+  safe_exec "$KUBECTL_CMD -n '$ns' get statefulset $name -o yaml" "$statefulset_dir/db-statefulset.yaml" "DB statefulset for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' describe statefulset $name" "$statefulset_dir/db-statefulset.describe.txt" "DB statefulset for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$name --all-containers --prefix ${log_collection_args:-}" "$statefulset_dir/logs-db.txt" "DB StatefulSet logs for $ns/$name"
+  safe_exec "$KUBECTL_CMD -n '$ns' logs statefulsets/$name --all-containers --prefix --previous ${log_collection_args:-}" "$statefulset_dir/logs-db-previous.txt" "DB StatefulSet logs (previous) for $ns/$name"
+
+  local labels
+  labels=$(
+    $KUBECTL_CMD -n "$ns" get statefulset "$name" -o json \
+      | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
+  )
+  if [[ -n "$labels" ]]; then
+    local pods_dir="$statefulset_dir/pods"
+    ensure_directory "$pods_dir"
+
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "DB statefulset pods for $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "DB statefulset pods for $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "DB statefulset pods for $ns/$name"
   fi
 }
 
