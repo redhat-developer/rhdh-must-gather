@@ -274,14 +274,31 @@ collect_rhdh_info_from_running_pods() {
   local ns="$1"
   local labels="$2"
   local output_dir="$3"
+  local owner_kind="${4:-}"  # Optional: "deployment" or "statefulset" to filter by owner
 
-  # Get all running pods matching the labels
+  # Get all running pods matching the labels, optionally filtered by owner kind.
+  # Deployment pods are owned by ReplicaSets; StatefulSet pods are owned directly.
   local running_pods
-  running_pods=$(
-    $KUBECTL_CMD get pods -n "$ns" \
-      -l "$labels" \
-      -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}'
-  )
+  local _owner_ref_kind=""
+  if [[ "$owner_kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$owner_kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
+  fi
+
+  if [[ -n "$_owner_ref_kind" ]]; then
+    running_pods=$(
+      $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
+        | jq -r --arg ok "$_owner_ref_kind" \
+          '.items[] | select(.status.phase == "Running") | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+    )
+  else
+    running_pods=$(
+      $KUBECTL_CMD get pods -n "$ns" \
+        -l "$labels" \
+        -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}'
+    )
+  fi
 
   if [ -z "$running_pods" ]; then
     log_warn "No running pod found in $ns namespace with labels: $labels => no data will be fetched from the running app"
@@ -1286,6 +1303,7 @@ collect_heap_dumps_for_pods() {
   local output_dir="$3"
   local deploy_name="${4:-}"      # Deployment/StatefulSet name
   local instance_name="${5:-}"    # Helm release name or CR name (optional)
+  local owner_kind="${6:-}"       # Optional: "deployment" or "statefulset" to filter by owner
 
   # Only collect heap dumps if explicitly enabled
   if [[ "${RHDH_WITH_HEAP_DUMPS:-false}" != "true" ]]; then
@@ -1337,16 +1355,29 @@ collect_heap_dumps_for_pods() {
   # Timeout for heap dump generation (per pod)
   local HEAP_DUMP_TIMEOUT="${HEAP_DUMP_TIMEOUT:-600}"
   
-  # Get list of running pods matching the labels
+  # Get list of running pods matching the labels, optionally filtered by owner kind
   local pods
-  pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-  
+  local _owner_ref_kind=""
+  if [[ "$owner_kind" == "deployment" ]]; then
+    _owner_ref_kind="ReplicaSet"
+  elif [[ "$owner_kind" == "statefulset" ]]; then
+    _owner_ref_kind="StatefulSet"
+  fi
+
+  if [[ -n "$_owner_ref_kind" ]]; then
+    pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o json 2>/dev/null \
+      | jq -r --arg ok "$_owner_ref_kind" \
+        '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true)
+  else
+    pods=$($KUBECTL_CMD get pods -n "$ns" -l "$labels" --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  fi
+
   if [[ -z "$pods" ]]; then
     log_warn "No running pods found with labels: $labels in namespace: $ns"
     echo "No running pods found" > "$heap_dump_dir/no-pods.txt"
     return 0
   fi
-  
+
   for pod in $pods; do
     log_info "Processing pod: $pod for heap dump collection"
 
@@ -1761,15 +1792,43 @@ collect_rhdh_workload() {
       | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
   )
   if [[ -n "$labels" ]]; then
-    collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir"
-    collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" || true
+    collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
+    collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
+
+    # Filter pods by owner kind to avoid collecting pods from a different workload
+    # that shares the same labels (e.g., during a Deployment-to-StatefulSet migration)
+    local _owner_ref_kind=""
+    if [[ "$kind" == "deployment" ]]; then
+      _owner_ref_kind="ReplicaSet"
+    elif [[ "$kind" == "statefulset" ]]; then
+      _owner_ref_kind="StatefulSet"
+    fi
+
+    local pod_names
+    if [[ -n "$_owner_ref_kind" ]]; then
+      pod_names=$(
+        $KUBECTL_CMD get pods -n "$ns" -l "$labels" -o json 2>/dev/null \
+          | jq -r --arg ok "$_owner_ref_kind" \
+            '.items[] | select(any(.metadata.ownerReferences[]?; .kind == $ok)) | .metadata.name' || true
+      )
+    fi
 
     local pods_dir="$output_dir/pods"
     ensure_directory "$pods_dir"
 
-    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
-    safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
-    safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
+    if [[ -n "${pod_names:-}" ]]; then
+      # Use filtered pod names for targeted collection
+      # shellcheck disable=SC2086
+      safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
+      # shellcheck disable=SC2086
+      safe_exec "$KUBECTL_CMD -n '$ns' get pods $pod_names -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
+      # shellcheck disable=SC2086
+      safe_exec "$KUBECTL_CMD -n '$ns' describe pods $pod_names" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
+    else
+      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "$kind pods for $ns/$name"
+      safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "$kind pods YAML for $ns/$name"
+      safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "$kind pods description for $ns/$name"
+    fi
   fi
 }
 
