@@ -98,8 +98,35 @@ check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/all-
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/manifest.yaml" "manifest.yaml"
 check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/hooks.yaml" "hooks.yaml"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment" "all deployment data in Helm collection directory"
-check_file_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/logs-app.txt" "deployment logs"
 check_dir_not_empty "$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/pods" "all pod data in Helm collection directory"
+
+# Validate per-pod logs structure
+DEPLOY_DIR="$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment"
+if [ -d "$DEPLOY_DIR/logs" ]; then
+    log_pod_count=$(find "$DEPLOY_DIR/logs" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+    if [ "$log_pod_count" -ge 1 ]; then
+        log_info "✓ Found $log_pod_count pod log directory(ies)"
+        for pod_log_dir in "$DEPLOY_DIR/logs"/pod=*; do
+            if [ -d "$pod_log_dir" ]; then
+                pod_name=$(basename "$pod_log_dir")
+                # Check for at least one container log directory
+                container_count=$(find "$pod_log_dir" -mindepth 1 -maxdepth 1 -type d -name 'container=*' 2>/dev/null | wc -l)
+                if [ "$container_count" -ge 1 ]; then
+                    log_info "✓ Found $container_count container log directory(ies) in $pod_name"
+                else
+                    log_error "✗ No container log directories in $pod_name"
+                    ((ERRORS++))
+                fi
+            fi
+        done
+    else
+        log_error "✗ No pod log directories found in $DEPLOY_DIR/logs"
+        ((ERRORS++))
+    fi
+else
+    log_error "✗ logs directory not found in $DEPLOY_DIR"
+    ((ERRORS++))
+fi
 
 # Validate expected number of pods
 PODS_FILE="$OUTPUT_DIR/helm/releases/ns=$NAMESPACE/$RELEASE_NAME/deployment/pods/pods.txt"

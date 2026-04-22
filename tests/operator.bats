@@ -138,32 +138,64 @@ teardown() {
     [ "$status" -ne 0 ]
 }
 
-@test "collect_rhdh_workload always filters pods by owner" {
-    run grep '_collect_pods_filtered_by_owner' "${SCRIPTS_DIR}/common.sh"
+# ============================================================================
+# Per-pod collection structure tests
+# ============================================================================
+
+@test "collect_rhdh_workload filters pods by ownerReferences" {
+    run grep -q '_owner_ref_kind="ReplicaSet"' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q '_owner_ref_kind="StatefulSet"' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
 }
 
-@test "_collect_pods_filtered_by_owner function exists in common.sh" {
-    run grep -q '^_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+@test "_collect_pod_logs function exists in common.sh" {
+    run grep -q '^_collect_pod_logs()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
 }
 
-@test "_collect_pods_filtered_by_owner filters by ReplicaSet for deployment kind" {
-    run grep -A 10 '_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+@test "_collect_pod_logs discovers containers and init containers" {
+    run grep -A 10 '_collect_pod_logs()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ '_owner_ref_kind="ReplicaSet"' ]]
+    [[ "$output" =~ 'containers' ]]
+    [[ "$output" =~ 'init_containers' ]]
 }
 
-@test "_collect_pods_filtered_by_owner filters by StatefulSet for statefulset kind" {
-    run grep -A 15 '_collect_pods_filtered_by_owner()' "${SCRIPTS_DIR}/common.sh"
+@test "_collect_pod_logs creates per-container log directories" {
+    run grep 'container=$container' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ '_owner_ref_kind="StatefulSet"' ]]
 }
 
-@test "gather_operator detects workload kind for single-workload case" {
-    run grep -qF 'workload_kind="deployment"' "${SCRIPTS_DIR}/gather_operator"
+@test "_collect_pod_data function exists in common.sh" {
+    run grep -q '^_collect_pod_data()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
-    run grep -qF 'workload_kind="statefulset"' "${SCRIPTS_DIR}/gather_operator"
+}
+
+@test "_collect_pod_data collects env vars, metadata, and filesystem data" {
+    run grep -A 5 '_collect_pod_data()' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    # Verify key data files are collected
+    run grep -q 'env-vars.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'backstage.json' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'build-metadata.json' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'node-version.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'dynamic-plugins-root.fs.txt' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+    run grep -q 'app-config.dynamic-plugins.yaml' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "collect_rhdh_workload calls _collect_pod_logs per pod" {
+    run grep '_collect_pod_logs.*logs/pod=' "${SCRIPTS_DIR}/common.sh"
+    [ "$status" -eq 0 ]
+}
+
+@test "collect_rhdh_info_from_running_pods calls _collect_pod_data per pod" {
+    run grep '_collect_pod_data.*data/pod=' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
 }
 
@@ -177,4 +209,11 @@ teardown() {
     run grep -A 10 'collect_heap_dumps_for_pods()' "${SCRIPTS_DIR}/common.sh"
     [ "$status" -eq 0 ]
     [[ "$output" =~ 'owner_kind="${6:-}"' ]]
+}
+
+@test "gather_operator detects workload kind for single-workload case" {
+    run grep -qF 'workload_kind="deployment"' "${SCRIPTS_DIR}/gather_operator"
+    [ "$status" -eq 0 ]
+    run grep -qF 'workload_kind="statefulset"' "${SCRIPTS_DIR}/gather_operator"
+    [ "$status" -eq 0 ]
 }

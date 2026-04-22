@@ -184,12 +184,29 @@ for spec in "${CR_SPECS[@]}"; do
             log_warn "○ Could not verify pod count (pods.txt not found)"
         fi
         
-        # Validate logs
-        log_files=$(find "$workload_dir" -maxdepth 1 -name 'logs-*.txt' 2>/dev/null | wc -l)
-        if [ "$log_files" -ge 1 ]; then
-            log_info "✓ Found $log_files log file(s)"
+        # Validate per-pod logs structure
+        if [ -d "$workload_dir/logs" ]; then
+            log_pod_count=$(find "$workload_dir/logs" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+            if [ "$log_pod_count" -ge 1 ]; then
+                log_info "✓ Found $log_pod_count pod log directory(ies)"
+                for pod_log_dir in "$workload_dir/logs"/pod=*; do
+                    if [ -d "$pod_log_dir" ]; then
+                        pod_name=$(basename "$pod_log_dir")
+                        container_count=$(find "$pod_log_dir" -mindepth 1 -maxdepth 1 -type d -name 'container=*' 2>/dev/null | wc -l)
+                        if [ "$container_count" -ge 1 ]; then
+                            log_info "✓ Found $container_count container log directory(ies) in $pod_name"
+                        else
+                            log_error "✗ No container log directories in $pod_name"
+                            ((ERRORS++))
+                        fi
+                    fi
+                done
+            else
+                log_error "✗ No pod log directories found in $workload_dir/logs"
+                ((ERRORS++))
+            fi
         else
-            log_error "✗ No log files found in workload directory"
+            log_error "✗ logs directory not found in $workload_dir"
             ((ERRORS++))
         fi
         
