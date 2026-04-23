@@ -1,0 +1,20 @@
+---
+# Hermeto generic lockfile (x86_64/amd64 only; keep in sync with Containerfile curl URLs).
+# Used with rpm prefetch: Konflux prefetch-input 
+#   e.g. [{"type": "rpm", "path": "."}, {"type": "generic", "path": "."}]
+# Prefetched files appear at /cachi2/output/deps/generic/<filename> during build.
+metadata:
+  version: "1.0"
+artifacts:
+  - download_url: "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux.tar.gz"
+    checksum: "sha256:22ac28b763f469accc2c35b638a44d4e0b77219211c99557ad0f6689fdda2c88"
+    filename: "openshift-client-linux.tar.gz"
+  - download_url: "https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64.tar.gz"
+    checksum: "sha256:44c3c6df6c58ef1460d98425954ca5e832926e0e8a1d75c5c8fd261691351510"
+    filename: "yq_linux_amd64.tar.gz"
+  - download_url: "https://get.helm.sh/helm-v4.1.4-linux-amd64.tar.gz"
+    checksum: "sha256:70b2c30a19da4db264dfd68c8a3664e05093a361cefd89572ffb36f8abfa3d09"
+    filename: "helm-linux-amd64.tar.gz"
+  - download_url: "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl"
+    checksum: "sha256:33a80fcbf2313e3c6e816ddafec333c1a04cc34464d4ba4970d938275775a12f"
+    filename: "websocat.x86_64-unknown-linux-musl"

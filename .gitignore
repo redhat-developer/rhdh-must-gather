@@ -19,6 +19,8 @@ Thumbs.db
 # Container build cache
 .buildah/
 .podman/
+hermeto-cache/
+Containerfile.hermeto
 
 # Backup files
 *.backup

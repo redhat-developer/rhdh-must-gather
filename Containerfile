@@ -31,40 +31,52 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     rsync \
     && microdnf clean all
 
+# Hermetic builds: use Hermeto generic (artifacts.lock.yaml).
+# Prefetched files appear at /cachi2/output/deps/generic/<filename> during build.
+
 # Install oc and kubectl (OpenShift CLI)
 # The OpenShift client package includes both oc and kubectl
 # oc is required for OpenShift-specific features like 'oc adm inspect' and routes
 # renovate: datasource=custom.openshift-client
-RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux.tar.gz \
-    | tar xz -C /usr/local/bin/ oc kubectl \
-    && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl \
-    && oc version --client \
-    && kubectl version --client
+RUN GEN=/cachi2/output/deps/generic \
+    OC_PREF=openshift-client-linux.tar.gz \
+    && if [ -f "${GEN}/${OC_PREF}" ]; then \
+         tar xzf "${GEN}/${OC_PREF}" -C /usr/local/bin/ oc kubectl; \
+       else \
+         curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux.tar.gz" \
+           | tar xz -C /usr/local/bin/ oc kubectl; \
+       fi \
+    && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl
 
 # Install yq (YAML processor)
 # Used for filtering manifests and processing YAML data
-RUN curl -sSLo- https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64.tar.gz | tar xz \
-    && mv -f yq_linux_amd64 /usr/local/bin/yq \
-    && yq --version
+RUN GEN=/cachi2/output/deps/generic \
+    YQ_PREF=yq_linux_amd64.tar.gz \
+    && if [ -f "${GEN}/${YQ_PREF}" ]; then tar xzf "${GEN}/${YQ_PREF}"; \
+       else curl -sSLo- "https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64.tar.gz" | tar xz; fi \
+    && mv -f yq_linux_amd64 /usr/local/bin/yq
 
 # Install Helm (Kubernetes package manager)
 # Required for collecting Helm-based RHDH deployments
 # Installing directly from GitHub releases instead of using the install script
 # to avoid dependency on openssl for checksum verification
-RUN curl -fsSL "https://get.helm.sh/helm-v4.1.4-linux-amd64.tar.gz" -o helm.tar.gz \
-    && tar xzf helm.tar.gz \
+RUN GEN=/cachi2/output/deps/generic \
+    HELM_PREF=helm-linux-amd64.tar.gz \
+    && if [ -f "${GEN}/${HELM_PREF}" ]; then tar xzf "${GEN}/${HELM_PREF}"; \
+       else curl -fsSL "https://get.helm.sh/helm-v4.1.4-linux-amd64.tar.gz" | tar xz; fi \
     && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf helm.tar.gz linux-amd64 \
-    && helm version
+    && rm -rf linux-amd64
 
 # Install websocat (WebSocket CLI client)
 # Required for heap dump collection via the Node.js inspector protocol
 # Used to communicate with the Chrome DevTools Protocol over WebSocket
 # renovate: datasource=github-releases depName=vi/websocat
-RUN curl -fsSL "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl" \
-    -o /usr/local/bin/websocat \
-    && chmod +x /usr/local/bin/websocat \
-    && websocat --version
+RUN GEN=/cachi2/output/deps/generic \
+    WS_PREF=websocat.x86_64-unknown-linux-musl \
+    && if [ -f "${GEN}/${WS_PREF}" ]; then cp "${GEN}/${WS_PREF}" /usr/local/bin/websocat; \
+       else curl -fsSL "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl" -o /usr/local/bin/websocat; \
+       fi \
+    && chmod +x /usr/local/bin/websocat
 
 # Create non-root user for running the container
 # Using UID 1001 which is commonly used and works well with OpenShift's arbitrary UID assignment
