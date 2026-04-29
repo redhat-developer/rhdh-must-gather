@@ -1,12 +1,4 @@
-# Stage 1: Build yq from vendored source
-# yq v4.53.2 — update via: git subtree pull --prefix=vendor/yq https://github.com/mikefarah/yq.git v<NEW> --squash
-FROM registry.access.redhat.com/ubi9/go-toolset:latest AS yq-builder
-COPY vendor/yq /src/yq
-WORKDIR /src/yq
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/yq . && \
-    /tmp/yq --version
-
-# Stage 2: Build websocat from vendored source
+# Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
@@ -19,7 +11,7 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 3: Final image
+# Stage 2: Final image
 FROM registry.access.redhat.com/ubi9-minimal:latest@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
 
 # Define build argument before using it in LABEL
@@ -39,6 +31,7 @@ LABEL name="rhdh-must-gather" \
 # findutils: provides find, xargs
 # grep, sed: text processing used in sanitization and data collection
 # jq: JSON processing (validated in common.sh)
+# python3, python3-pip: required for yq (kislyuk/yq — jq wrapper for YAML)
 # util-linux: provides setsid (required by oc adm must-gather)
 # rsync: file synchronization tool (required by oc adm must-gather)
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
@@ -49,8 +42,11 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     grep \
     sed \
     jq \
+    python3 \
+    python3-pip \
     util-linux \
     rsync \
+    && pip3 install --no-cache-dir yq \
     && microdnf clean all
 
 # Install oc and kubectl (OpenShift CLI)
@@ -62,9 +58,6 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && chmod +x /usr/local/bin/oc /usr/local/bin/kubectl \
     && oc version --client \
     && kubectl version --client
-
-# Copy yq binary built from source (vendor/yq)
-COPY --from=yq-builder /tmp/yq /usr/local/bin/yq
 
 # Install Helm (Kubernetes package manager)
 # Required for collecting Helm-based RHDH deployments

@@ -19,8 +19,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: yq
-            repo: mikefarah/yq
           - name: websocat
             repo: vi/websocat
 

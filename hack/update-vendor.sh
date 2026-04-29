@@ -6,7 +6,6 @@
 #   hack/update-vendor.sh <name> <version>
 #
 # Examples:
-#   hack/update-vendor.sh yq v4.53.2
 #   hack/update-vendor.sh websocat v1.14.1
 #
 # The script will:
@@ -20,7 +19,6 @@
 set -euo pipefail
 
 declare -A REPOS=(
-    [yq]="https://github.com/mikefarah/yq.git"
     [websocat]="https://github.com/vi/websocat.git"
 )
 
@@ -62,27 +60,6 @@ fi
 
 echo "Pruning non-essential files from ${PREFIX}..."
 
-prune_yq() {
-    local dir="$1"
-
-    # Remove test files
-    find "$dir" -name '*_test.go' -delete
-
-    # Remove non-essential top-level directories
-    local -a remove_dirs=(.github acceptance_tests examples github-action scripts snap test)
-    for d in "${remove_dirs[@]}"; do
-        rm -rf "${dir:?}/${d}"
-    done
-
-    # Remove non-essential top-level files (keep *.go, go.mod, go.sum, LICENSE*)
-    find "$dir" -maxdepth 1 -type f \
-        ! -name '*.go' \
-        ! -name 'go.mod' \
-        ! -name 'go.sum' \
-        ! -name 'LICENSE*' \
-        -delete
-}
-
 prune_websocat() {
     local dir="$1"
 
@@ -101,7 +78,6 @@ prune_websocat() {
 }
 
 case "$NAME" in
-    yq)       prune_yq "$PREFIX" ;;
     websocat) prune_websocat "$PREFIX" ;;
 esac
 

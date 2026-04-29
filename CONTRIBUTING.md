@@ -36,14 +36,15 @@ make clean
 
 ### Vendored Dependencies
 
-The sources for [yq](https://github.com/mikefarah/yq) and [websocat](https://github.com/vi/websocat) are vendored as [Git subtrees](https://www.atlassian.com/git/tutorials/git-subtree) under `vendor/`. They are built from source in the Containerfile using multi-stage builds, since neither tool is available as an RPM package and pre-built binary downloads are not compatible with hermetic build requirements downstream.
+The source for [websocat](https://github.com/vi/websocat) is vendored as a [Git subtree](https://www.atlassian.com/git/tutorials/git-subtree) under `vendor/`. It is built from source in the Containerfile using a multi-stage build, since it is not available as an RPM package and pre-built binary downloads are not compatible with hermetic build requirements downstream.
 
-A weekly GitHub Actions workflow ([vendor-update.yaml](.github/workflows/vendor-update.yaml)) checks for new releases and automatically opens a PR to update each subtree.
+[yq](https://github.com/kislyuk/yq) (a jq wrapper for YAML) is installed via `pip` in the Containerfile.
 
-To manually update a vendored dependency, use the update script which handles the subtree sync and prunes non-essential files (docs, CI, tests, examples):
+A weekly GitHub Actions workflow ([vendor-update.yaml](.github/workflows/vendor-update.yaml)) checks for new releases and automatically opens a PR to update the subtree.
+
+To manually update the vendored dependency, use the update script which handles the subtree sync and prunes non-essential files (docs, CI, tests, examples):
 
 ```bash
-hack/update-vendor.sh yq v<NEW_VERSION>
 hack/update-vendor.sh websocat v<NEW_VERSION>
 ```
 

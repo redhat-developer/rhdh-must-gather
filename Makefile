@@ -30,10 +30,8 @@ TESTS_OPTIONS ?= --timing --print-output-on-failure --report-formatter junit --o
 TESTS_DIR := ./tests
 
 # Local tools configuration
-YQ_VERSION := 4.50.1
-YQ_ARCHIVE_DIR := $(TOOLS_DIR)/yq-$(YQ_VERSION)
-YQ_BIN_DL := $(YQ_ARCHIVE_DIR)/yq
-YQ_BIN := $(TOOLS_DIR)/yq
+YQ_VENV := $(TOOLS_DIR)/yq-venv
+YQ_BIN := $(YQ_VENV)/bin/yq
 
 WEBSOCAT_VERSION := 1.14.0
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
@@ -55,7 +53,7 @@ local-output:
 	@mkdir -p ./out
 
 .PHONY: local-setup
-local-setup: $(YQ_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
+local-setup: $(YQ_BIN) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
 
 .PHONY: run-local
 run-local: local-output local-setup ## Test the script locally (requires jq, kubectl, oc and cluster access)
@@ -65,7 +63,7 @@ run-local: local-output local-setup ## Test the script locally (requires jq, kub
 		exit 1; \
 	fi
 	@echo "Running local test (requires cluster access)..."
-	PATH="$(abspath $(TOOLS_DIR)):$$PATH" \
+	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
 		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
@@ -79,7 +77,7 @@ run-script: local-output local-setup ## Test the specified gather-<SCRIPT> scrip
 	fi
 	@echo "Testing gather-${SCRIPT} must-gather script locally..."
 	@echo "Running local test (requires cluster access)..."
-	PATH="$(abspath $(TOOLS_DIR)):$$PATH" \
+	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
 		BASE_COLLECTION_PATH=./out \
 		LOG_LEVEL=$(LOG_LEVEL)\
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
@@ -144,20 +142,15 @@ endif
 $(TOOLS_DIR):
 	@mkdir -p "$(TOOLS_DIR)"
 
-.PHONY: $(YQ_BIN_DL)
-$(YQ_BIN_DL): $(TOOLS_DIR)
-	@mkdir -p "$(YQ_ARCHIVE_DIR)"
-	@if [ ! -f "$(YQ_BIN_DL)" ]; then \
-		echo "Downloading yq v$(YQ_VERSION) for $(OS)/$(ARCH)..."; \
-		curl -sSL "https://github.com/mikefarah/yq/releases/download/v$(YQ_VERSION)/yq_$(OS)_$(ARCH).tar.gz" | tar xz -C "$(TOOLS_DIR)"; \
-		mv -f "$(TOOLS_DIR)/yq_$(OS)_$(ARCH)" "$(YQ_BIN_DL)"; \
-		chmod +x "$(YQ_BIN_DL)"; \
-		echo "yq installed successfully: $$($(YQ_BIN_DL) --version)"; \
+$(YQ_BIN): $(TOOLS_DIR)
+	@if [ ! -f "$(YQ_BIN)" ]; then \
+		echo "Installing yq (kislyuk/yq) via pip..."; \
+		python3 -m venv "$(YQ_VENV)"; \
+		"$(YQ_VENV)/bin/pip" install --quiet yq; \
+		echo "yq installed successfully: $$($(YQ_BIN) --help | head -1)"; \
 	else \
-		echo "yq $(YQ_VERSION) already installed: $(YQ_BIN_DL)"; \
+		echo "yq already installed: $(YQ_BIN)"; \
 	fi
-	@ln -sf "$(shell echo $(YQ_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(YQ_BIN)"
-	@"$(YQ_BIN)" --version
 
 .PHONY: $(WEBSOCAT_BIN_DL)
 $(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
@@ -265,7 +258,7 @@ help: ## Display this help.
 	@echo "  HELM_VALUES_FILE		- Override Helm values file for test-e2e"
 	@echo "  LOCAL				- Set to 'false' to run test-e2e with container image (default: true, local mode)"
 	@echo "  SCRIPT			- Script name for run-script"
-	@echo "  TOOLS_DIR			- Directory for local tools like yq (default: $(TOOLS_DIR))"
+	@echo "  TOOLS_DIR			- Directory for local tools like websocat and yq (default: $(TOOLS_DIR))"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make test                                          # Run all unit tests"
