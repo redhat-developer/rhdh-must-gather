@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/yq . && \
     /tmp/yq --version
 
 # Stage 2: Build websocat from vendored source
-# websocat v1.14.0 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
+# websocat v1.14.1 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
 FROM registry.access.redhat.com/hi/rust:latest AS websocat-builder
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
