@@ -25,15 +25,6 @@
       "customType": "regex",
       "fileMatch": ["^Containerfile$"],
       "matchStrings": [
-        "https://github\\.com/mikefarah/yq/releases/download/(?<currentValue>v[\\d.]+)/yq_linux_amd64"
-      ],
-      "depNameTemplate": "mikefarah/yq",
-      "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "fileMatch": ["^Containerfile$"],
-      "matchStrings": [
         "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
       ],
       "depNameTemplate": "helm/helm",

@@ -1,3 +1,22 @@
+# Stage 1: Build yq from vendored source
+# yq v4.53.2 — update via: git subtree pull --prefix=vendor/yq https://github.com/mikefarah/yq.git v<NEW> --squash
+FROM registry.access.redhat.com/ubi9/go-toolset:latest AS yq-builder
+COPY vendor/yq /src/yq
+WORKDIR /src/yq
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/yq . && \
+    /tmp/yq --version
+
+# Stage 2: Build websocat from vendored source
+# websocat v1.14.0 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
+FROM registry.access.redhat.com/hi/rust:latest AS websocat-builder
+COPY vendor/websocat /src/websocat
+WORKDIR /src/websocat
+RUN cargo build --release \
+        --no-default-features --features signal_handler,unix_stdio && \
+    cp target/release/websocat /tmp/websocat && \
+    /tmp/websocat --version
+
+# Stage 3: Final image
 FROM registry.access.redhat.com/ubi9-minimal:latest@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
 
 # Define build argument before using it in LABEL
@@ -41,11 +60,8 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Install yq (YAML processor)
-# Used for filtering manifests and processing YAML data
-RUN curl -sSLo- https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64.tar.gz | tar xz \
-    && mv -f yq_linux_amd64 /usr/local/bin/yq \
-    && yq --version
+# Copy yq binary built from source (vendor/yq)
+COPY --from=yq-builder /tmp/yq /usr/local/bin/yq
 
 # Install Helm (Kubernetes package manager)
 # Required for collecting Helm-based RHDH deployments
@@ -57,14 +73,8 @@ RUN curl -fsSL "https://get.helm.sh/helm-v4.1.4-linux-amd64.tar.gz" -o helm.tar.
     && rm -rf helm.tar.gz linux-amd64 \
     && helm version
 
-# Install websocat (WebSocket CLI client)
-# Required for heap dump collection via the Node.js inspector protocol
-# Used to communicate with the Chrome DevTools Protocol over WebSocket
-# renovate: datasource=github-releases depName=vi/websocat
-RUN curl -fsSL "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl" \
-    -o /usr/local/bin/websocat \
-    && chmod +x /usr/local/bin/websocat \
-    && websocat --version
+# Copy websocat binary built from source (vendor/websocat)
+COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
 
 # Create non-root user for running the container
 # Using UID 1001 which is commonly used and works well with OpenShift's arbitrary UID assignment
