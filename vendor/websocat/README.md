@@ -88,10 +88,6 @@ See [moreexamples.md](./moreexamples.md) for further examples.
 
 There are multiple options for installing WebSocat. From easy to hard:
 
-## Fedora
-
-[Copr](https://copr.fedorainfracloud.org/coprs/atim/websocat/): `sudo dnf copr enable atim/websocat -y && sudo dnf install websocat`
-
 ## FreeBSD
 
 `pkg install websocat`
@@ -107,7 +103,7 @@ There are multiple options for installing WebSocat. From easy to hard:
 [MacPorts](https://www.macports.org): `sudo port install websocat`
 
 ## From source
-* Install the [Rust toolchain](https://rustup.rs/) and do `cargo install --features=ssl websocat`. If something fails with a `-sys` crate, try without `--features=ssl`;
+* Install the [Rust toolchain](https://rustup.rs/) and do `cargo install websocat`. If something fails with a `-sys` crate, try with `--no-default-features`;
 * Build Websocat from source code (see below), then move `target/release/websocat` somewhere to the PATH.
 
 ## Pre-built binaries
@@ -118,7 +114,7 @@ Building from source code
 ---
 
 1. Install the [Rust toolchain](https://rustup.rs/). Note that Websocat v1 (i.e. the current stable version) may fail to support too new Rust due to its old dependencies which can be broken by e.g. [this](https://github.com/rust-lang/rust/pull/78802).
-2. `cargo build --release --features=ssl`.
+2. `cargo build --release`.
 3. Find the executable somewhere under `target/`, e.g. in `target/release/websocat`.
 
 ### Rust versions
@@ -126,6 +122,8 @@ Building from source code
 
 |Websocat versions|Minimal Rust version|Maximal Rust version|
 |----|----|----|
+| 4.0.0-alpha1 | 1.84 | ?   |
+| 1.12+     | ?    | ?          |
 | 1.9 - 1.11| 1.46 | maybe 1.63 |
 | 1.6 - 1.8 | 1.34 | maybe 1.63  |
 | 1.3 - 1.5 | 1.31 | 1.47? |
@@ -537,6 +535,12 @@ Limitations
 * Current version of Websocat don't receive notification about closed sockets. This makes serving without `-E` or `-u` options or in backpressure scenarios prone to socket leak.
 * Readline is not integrated. Users are advices to wrap websocat using [`rlwrap`](https://linux.die.net/man/1/rlwrap) tool for more convenient CLI.
 * Build process of current version of Websocat is not properly automated and is fragile.
+* Main version (v1) is based on obsolete dependency versions that trigger security warnings and may become tricky to build. There is [new version (v4)](https://github.com/vi/websocat/tree/websocat4), but is not yet considered stable and [has many missing features](https://github.com/vi/websocat/issues/276).
+
+Bindings
+---
+
+* Node.js: [`seamapi/node-websocat`](https://github.com/seamapi/node-websocat)
 
 See also
 ---
