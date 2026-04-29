@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    outputs:
+      image-built: ${{ steps.changed-files.outputs.any_changed }}
+      image-tag: ${{ steps.prep.outputs.IMAGE_TAG }}
 
     steps:
       - name: Checkout
@@ -133,7 +136,7 @@ jobs:
           for tag in ${EXTRA_TAGS}; do
             ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
           done
-          
+
           echo "### Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
@@ -142,3 +145,92 @@ jobs:
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
+
+  e2e-tests:
+    name: E2E Tests (Container Image)
+    needs: pr-build
+    if: needs.pr-build.outputs.image-built == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download image artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pr-image
+
+      - name: Load image into podman
+        env:
+          TAG: ${{ needs.pr-build.outputs.image-tag }}
+          NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          gunzip -c image.tar.gz | podman load
+          podman tag "${NAME}:${TAG}" "localhost/${NAME}:${TAG}"
+          podman images
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+          # Install yq
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          # Install oc CLI (needed for namespace-inspect)
+          curl -sLO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          rm -f openshift-client-linux.tar.gz kubectl
+          # Install websocat (needed for heap dump collection via inspector protocol)
+          curl -sLO https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl
+          chmod +x websocat.x86_64-unknown-linux-musl
+          sudo mv websocat.x86_64-unknown-linux-musl /usr/local/bin/websocat
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: rhdh-must-gather-e2e
+          wait: 120s
+
+      - name: Load image into Kind cluster
+        env:
+          TAG: ${{ needs.pr-build.outputs.image-tag }}
+          NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          podman save --format docker-archive "localhost/${NAME}:${TAG}" \
+            | kind load image-archive /dev/stdin --name rhdh-must-gather-e2e
+
+      - name: Run E2E tests
+        env:
+          TAG: ${{ needs.pr-build.outputs.image-tag }}
+          NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          make test-e2e \
+            LOCAL=false \
+            FULL_IMAGE_NAME="localhost/${NAME}:${TAG}" \
+            HELM_SET="image.pullPolicy=Never"
+
+      - name: Upload E2E must-gather output in case of failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-must-gather-output-pr-${{ github.event.pull_request.number }}
+          path: e2e-cluster.mustgather.tar.gz
+          retention-days: 7
+
+      - name: Upload must-gather output
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: must-gather-output-e2e-image
+          path: |
+            rhdh-must-gather-output.k8s.*.tar.gz
+            rhdh-must-gather-output.k8s.*/
+          retention-days: 5
