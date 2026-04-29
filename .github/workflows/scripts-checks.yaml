@@ -41,6 +41,8 @@ jobs:
         uses: redhat-plumbers-in-action/differential-shellcheck@d965e66ec0b3b2f821f75c8eff9b12442d9a7d1e # v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          exclude-path: |
+            vendor/**
 
       - if: always()
         name: Upload artifact with ShellCheck defects in SARIF format
