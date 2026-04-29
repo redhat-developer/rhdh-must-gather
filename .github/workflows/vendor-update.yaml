@@ -57,8 +57,14 @@ jobs:
 
           head_before=$(git rev-parse HEAD)
           hack/update-vendor.sh "${{ matrix.name }}" "${{ steps.latest.outputs.version }}"
-          head_after=$(git rev-parse HEAD)
 
+          # Stage and commit pruned files (the script leaves changes unstaged)
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add vendor/${{ matrix.name }} Containerfile
+            git commit -m "chore(vendor): prune ${{ matrix.name }} ${{ steps.latest.outputs.version }} to build-essential files"
+          fi
+
+          head_after=$(git rev-parse HEAD)
           echo "changed=$([ "$head_before" != "$head_after" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request

@@ -13,7 +13,8 @@
 #   1. Add or update the Git subtree under vendor/<name>
 #   2. Remove non-essential files (docs, CI, tests, examples)
 #   3. Update the version comment in the Containerfile
-#   4. Stage and commit the pruned result
+#
+# Changes are left unstaged for the caller to review and commit.
 #
 
 set -euo pipefail
@@ -114,16 +115,4 @@ echo "Remaining files:"
 find "$PREFIX" -type f | sort
 
 echo ""
-echo "Staging changes..."
-git add "${PREFIX}" Containerfile
-git commit -m "$(cat <<EOF
-chore(vendor): sync ${NAME} ${VERSION} and prune non-essential files
-
-Update vendored ${NAME} to ${VERSION} and remove files not needed
-for the build (docs, CI, tests, examples).
-
-Assisted-by: Claude
-EOF
-)"
-
-echo "Done. ${NAME} ${VERSION} vendored and pruned."
+echo "Done. Review changes with 'git status' and commit when ready."
