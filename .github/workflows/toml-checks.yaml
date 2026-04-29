@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - '**.toml'
+      - '!vendor/**'
   pull_request:
     paths:
       - '**.toml'
+      - '!vendor/**'
 
 jobs:
   validate:
