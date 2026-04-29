@@ -8,7 +8,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tmp/yq . && \
 
 # Stage 2: Build websocat from vendored source
 # websocat v1.14.1 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
-FROM registry.access.redhat.com/hi/rust:latest AS websocat-builder
+# Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
+FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
+RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
+    dnf clean all
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
 RUN cargo build --release \
