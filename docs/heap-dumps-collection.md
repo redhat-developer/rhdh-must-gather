@@ -2,6 +2,19 @@
 
 When heap dumps are collected using `--with-heap-dumps`, they can be analyzed using various tools to investigate memory leaks, high memory usage, and performance issues.
 
+### Important Warnings
+
+<blockquote>
+<p>[!IMPORTANT]
+
+- **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take several seconds or minutes during which the RHDH application will stop responding to requests. The application **automatically resumes** after the heap snapshot is written. Plan heap dump collection during maintenance windows or low-traffic periods.
+- **Liveness probe failures**: Since the RHDH application stops responding to requests during heap dump collection, the RHDH container may start failing its liveness probe. See [Liveness Probe Considerations](#liveness-probe-considerations) below for important guidance on preventing pod restarts during heap dump collection. Otherwise, the heap dump collection might timeout if the pod is restarted in the middle.
+- **Inspector remains active**: When using the inspector method, SIGUSR1 activates the Node.js inspector which remains active after heap dump collection. This is harmless but means the inspector port stays open until the pod is restarted.
+- **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
+
+</p>
+</blockquote>
+
 ### Prerequisites for Heap Dump Collection
 
 The must-gather tool supports two methods to collect heap dumps:
@@ -224,13 +237,6 @@ Each heap dump collection includes metadata files:
 - **`process-info.txt`**: Node.js version, process details, memory usage at collection time
 - **`heap-dump.log`**: Collection logs, any errors or warnings
 - **`pod-spec.yaml`**: Complete pod specification for context
-
-### Important Warnings
-
-- **Application pause**: During heap dump collection, the Node.js event loop is **paused** while the V8 engine writes the heap snapshot. For large heaps (1GB+), this can take 30-60+ seconds during which the application will not respond to requests. The application **automatically resumes** after the heap snapshot is written. Plan heap dump collection during maintenance windows or low-traffic periods.
-- **Liveness probe failures**: See [Liveness Probe Considerations](#liveness-probe-considerations) below for important guidance on preventing pod restarts during heap dump collection.
-- **Inspector remains active**: When using the inspector method, SIGUSR1 activates the Node.js inspector which remains active after heap dump collection. This is harmless but means the inspector port stays open until the pod is restarted.
-- **Timeout for large heaps**: The default `HEAP_DUMP_TIMEOUT` is 600 seconds (10 minutes). For very large heaps (multi-GB), the `v8.writeHeapSnapshot()` call may exceed this timeout. See [Overriding HEAP_DUMP_TIMEOUT](#overriding-heap_dump_timeout) below.
 
 ### Liveness Probe Considerations
 
