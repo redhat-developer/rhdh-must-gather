@@ -20,10 +20,8 @@ jobs:
       matrix:
         include:
           - name: yq
-            prefix: vendor/yq
             repo: mikefarah/yq
           - name: websocat
-            prefix: vendor/websocat
             repo: vi/websocat
 
     steps:
@@ -50,24 +48,21 @@ jobs:
           pr_count=$(gh pr list --head "$branch" --state open --json number --jq 'length')
           echo "exists=$([ "$pr_count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Attempt subtree pull
+      - name: Update vendor subtree
         if: steps.existing-pr.outputs.exists == 'false'
-        id: pull
+        id: update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           head_before=$(git rev-parse HEAD)
-          git subtree pull --prefix=${{ matrix.prefix }} \
-            "https://github.com/${{ matrix.repo }}.git" \
-            "${{ steps.latest.outputs.version }}" --squash \
-            -m "chore(vendor): update ${{ matrix.name }} to ${{ steps.latest.outputs.version }}"
+          hack/update-vendor.sh "${{ matrix.name }}" "${{ steps.latest.outputs.version }}"
           head_after=$(git rev-parse HEAD)
 
           echo "changed=$([ "$head_before" != "$head_after" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request
-        if: steps.existing-pr.outputs.exists == 'false' && steps.pull.outputs.changed == 'true'
+        if: steps.existing-pr.outputs.exists == 'false' && steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

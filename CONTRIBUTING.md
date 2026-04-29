@@ -40,14 +40,11 @@ The sources for [yq](https://github.com/mikefarah/yq) and [websocat](https://git
 
 A weekly GitHub Actions workflow ([vendor-update.yaml](.github/workflows/vendor-update.yaml)) checks for new releases and automatically opens a PR to update each subtree.
 
-To manually update a vendored dependency:
+To manually update a vendored dependency, use the update script which handles the subtree sync and prunes non-essential files (docs, CI, tests, examples):
 
 ```bash
-# Update yq
-git subtree pull --prefix=vendor/yq https://github.com/mikefarah/yq.git v<NEW_VERSION> --squash
-
-# Update websocat
-git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW_VERSION> --squash
+hack/update-vendor.sh yq v<NEW_VERSION>
+hack/update-vendor.sh websocat v<NEW_VERSION>
 ```
 
 #### Building the Image
