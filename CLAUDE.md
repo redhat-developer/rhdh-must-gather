@@ -111,6 +111,7 @@ A weekly GitHub Actions workflow (`vendor-update.yaml`) checks for new releases 
 Scripts in `hack/` must work on both Linux and macOS:
 - No Bash 4+ features (e.g., `declare -A` associative arrays) — use `case` statements instead
 - Use `sed -i.bak '...' file && rm -f file.bak` instead of `sed -i '...'` (GNU vs BSD incompatibility)
+- Use `cp -pPR` instead of `cp -a` (`-a` is GNU-specific)
 
 ## Commit Guidelines
 

@@ -58,7 +58,7 @@ trap 'rm -rf "${TMPDIR}"' EXIT
 git clone --depth=1 --branch="${VERSION}" "${REPO}" "${TMPDIR}/${NAME}"
 rm -rf "${PREFIX}"
 mkdir -p "${PREFIX}"
-cp -a "${TMPDIR}/${NAME}/." "${PREFIX}/"
+cp -pPR "${TMPDIR}/${NAME}/." "${PREFIX}/"
 rm -rf "${PREFIX}/.git"
 
 echo "Pruning non-essential files from ${PREFIX}..."
