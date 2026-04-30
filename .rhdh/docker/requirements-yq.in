@@ -1,0 +1,2 @@
+# Keep in sync with Makefile YQ_VERSION (kislyuk/yq).
+yq==3.4.3
