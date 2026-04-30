@@ -338,6 +338,8 @@ while ! kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o name 2>/dev/n
     ELAPSED=$(($(date +%s) - WAIT_START))
     if [[ ${ELAPSED} -ge ${POD_CREATION_TIMEOUT} ]]; then
         echo "Error: Timed out waiting for pod to be created"
+        echo ""
+        kubectl -n "${NAMESPACE}" describe pods -l "${POD_SELECTOR}" 2>/dev/null || true
         exit 1
     fi
     sleep 2
@@ -350,6 +352,8 @@ while true; do
     ELAPSED=$(($(date +%s) - WAIT_START))
     if [[ ${ELAPSED} -ge ${POD_CREATION_TIMEOUT} ]]; then
         echo "Error: Timed out waiting for gather container to start"
+        echo ""
+        kubectl -n "${NAMESPACE}" describe pods -l "${POD_SELECTOR}" 2>/dev/null || true
         exit 1
     fi
 
