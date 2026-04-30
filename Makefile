@@ -30,6 +30,8 @@ TESTS_OPTIONS ?= --timing --print-output-on-failure --report-formatter junit --o
 TESTS_DIR := ./tests
 
 # Local tools configuration
+# renovate: datasource=pypi depName=yq
+YQ_VERSION := 3.4.3
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
@@ -146,7 +148,7 @@ $(YQ_BIN): $(TOOLS_DIR)
 	@if [ ! -f "$(YQ_BIN)" ]; then \
 		echo "Installing yq (kislyuk/yq) via pip..."; \
 		python3 -m venv "$(YQ_VENV)"; \
-		"$(YQ_VENV)/bin/pip" install --quiet 'yq~=3.0'; \
+		"$(YQ_VENV)/bin/pip" install --quiet "yq==$(YQ_VERSION)"; \
 		echo "yq installed successfully: $$($(YQ_BIN) --help | head -1)"; \
 	else \
 		echo "yq already installed: $(YQ_BIN)"; \

@@ -38,6 +38,14 @@
       ],
       "depNameTemplate": "openshift-client",
       "datasourceTemplate": "custom.openshift-client"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^Makefile$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=pypi\\s+depName=(?<depName>\\S+)\\nYQ_VERSION := (?<currentValue>[\\d.]+)"
+      ],
+      "datasourceTemplate": "pypi"
     }
   ]
 }

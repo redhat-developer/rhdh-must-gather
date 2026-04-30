@@ -46,8 +46,11 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     python3-pip \
     util-linux \
     rsync \
-    && pip3 install --no-cache-dir 'yq~=3.0' \
     && microdnf clean all
+COPY Makefile /tmp/Makefile
+RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
+    && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
 # The OpenShift client package includes both oc and kubectl
