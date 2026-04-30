@@ -7,6 +7,7 @@ on:
       - 'collection-scripts/**'
       - '.github/workflows/scripts-checks.yaml'
       - 'tests/e2e/**'
+      - '!vendor/**'
     branches: [ main ]
   pull_request:
     paths:
@@ -14,6 +15,7 @@ on:
       - 'collection-scripts/**'
       - '.github/workflows/scripts-checks.yaml'
       - 'tests/e2e/**'
+      - '!vendor/**'
     branches: [ 'main' ]
 
 permissions:
@@ -39,6 +41,8 @@ jobs:
         uses: redhat-plumbers-in-action/differential-shellcheck@d965e66ec0b3b2f821f75c8eff9b12442d9a7d1e # v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          exclude-path: |
+            vendor/**
 
       - if: always()
         name: Upload artifact with ShellCheck defects in SARIF format

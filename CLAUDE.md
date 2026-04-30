@@ -81,6 +81,38 @@ if ! should_include_namespace "$ns"; then
 fi
 ```
 
+## Vendored Dependencies
+
+This project is built downstream via Konflux with hermetic builds (no network access during `docker build`). All build-time dependencies must be available locally in the repo or installable from vendored sources.
+
+### What's vendored and why
+- **websocat** — vendored as a Git subtree under `vendor/websocat/` and built from Rust source in a multi-stage Containerfile. Not available as an RPM, and pre-built binary downloads are incompatible with hermetic build requirements.
+- **yq** ([kislyuk/yq](https://github.com/kislyuk/yq)) — installed via `pip` in the Containerfile. It is a thin Python wrapper around jq for YAML processing, so vendoring is not needed — pip can install from a pre-fetched package index in hermetic mode.
+
+### Updating vendored dependencies
+Sync all vendored subtrees to the versions declared in the Makefile:
+```bash
+make vendor
+```
+To update a specific dependency to a new version (also bumps the version in the Makefile and Containerfile):
+```bash
+make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1
+```
+A weekly GitHub Actions workflow (`vendor-update.yaml`) checks for new releases and auto-creates PRs.
+
+### Adding a new vendored dependency
+1. Add a `case` entry in `hack/update-vendor.sh` mapping the name to its Git repo URL
+2. Add a `prune_<name>()` function to strip non-essential files after subtree sync
+3. Add a builder stage in the Containerfile to compile from source
+4. Add the dependency to the `vendor-update.yaml` workflow matrix
+5. Add a `<NAME>_VERSION` variable to the Makefile and a sync line in the `vendor` target
+
+### Script portability
+Scripts in `hack/` must work on both Linux and macOS:
+- No Bash 4+ features (e.g., `declare -A` associative arrays) — use `case` statements instead
+- Use `sed -i.bak '...' file && rm -f file.bak` instead of `sed -i '...'` (GNU vs BSD incompatibility)
+- Use `cp -pPR` instead of `cp -a` (`-a` is GNU-specific)
+
 ## Commit Guidelines
 
 Follow Conventional Commits format with required body and trailers:

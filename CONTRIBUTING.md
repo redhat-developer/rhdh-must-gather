@@ -34,6 +34,26 @@ make deploy-k8s
 make clean
 ```
 
+### Vendored Dependencies
+
+The source for [websocat](https://github.com/vi/websocat) is vendored as a [Git subtree](https://www.atlassian.com/git/tutorials/git-subtree) under `vendor/`. It is built from source in the Containerfile using a multi-stage build, since it is not available as an RPM package and pre-built binary downloads are not compatible with hermetic build requirements downstream.
+
+[yq](https://github.com/kislyuk/yq) (a jq wrapper for YAML) is installed via `pip` in the Containerfile.
+
+A weekly GitHub Actions workflow ([vendor-update.yaml](.github/workflows/vendor-update.yaml)) checks for new releases and automatically opens a PR to update the subtree.
+
+To manually sync the vendored dependency to the version declared in the Makefile:
+
+```bash
+make vendor
+```
+
+To update to a specific new version:
+
+```bash
+make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW_VERSION>
+```
+
 #### Building the Image
 
 ```bash

@@ -130,11 +130,11 @@ for release_info in $releases; do
     if [[ "${RHDH_WITH_SECRETS:-false}" != "true" ]]; then
         if [[ -f "$release_dir/manifest.yaml" ]]; then
             # Create a temporary file without Secret resources
-            yq eval 'select(.kind != "Secret")' "$release_dir/manifest.yaml" > "$release_dir/manifest.yaml.tmp" && mv "$release_dir/manifest.yaml.tmp" "$release_dir/manifest.yaml"
+            yq -y 'select(.kind != "Secret")' "$release_dir/manifest.yaml" > "$release_dir/manifest.yaml.tmp" && mv "$release_dir/manifest.yaml.tmp" "$release_dir/manifest.yaml"
             log_debug "Removed Secret resources from Helm manifest for $release_name"
         fi
         if [[ -f "$release_dir/hooks.yaml" ]]; then
-            yq eval 'select(.kind != "Secret")' "$release_dir/hooks.yaml" > "$release_dir/hooks.yaml.tmp" && mv "$release_dir/hooks.yaml.tmp" "$release_dir/hooks.yaml"
+            yq -y 'select(.kind != "Secret")' "$release_dir/hooks.yaml" > "$release_dir/hooks.yaml.tmp" && mv "$release_dir/hooks.yaml.tmp" "$release_dir/hooks.yaml"
             log_debug "Removed Secret resources from Helm hooks for $release_name"
         fi
     fi

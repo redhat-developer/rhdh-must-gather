@@ -22,3 +22,9 @@ examples/
 test/
 tests/
 *_test.sh
+
+# Vendored source: exclude non-essential files to reduce build context
+vendor/*/docs/
+vendor/*/.github/
+vendor/*/examples/
+vendor/*/*.md

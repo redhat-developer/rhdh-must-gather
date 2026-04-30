@@ -1,3 +1,17 @@
+# Stage 1: Build websocat from vendored source
+# websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
+# Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
+FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
+RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
+    dnf clean all
+COPY vendor/websocat /src/websocat
+WORKDIR /src/websocat
+RUN cargo build --release \
+        --no-default-features --features signal_handler,unix_stdio && \
+    cp target/release/websocat /tmp/websocat && \
+    /tmp/websocat --version
+
+# Stage 2: Final image
 FROM registry.access.redhat.com/ubi9-minimal:latest@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
 
 # Define build argument before using it in LABEL
@@ -17,6 +31,7 @@ LABEL name="rhdh-must-gather" \
 # findutils: provides find, xargs
 # grep, sed: text processing used in sanitization and data collection
 # jq: JSON processing (validated in common.sh)
+# python3, python3-pip: required for yq (kislyuk/yq — jq wrapper for YAML)
 # util-linux: provides setsid (required by oc adm must-gather)
 # rsync: file synchronization tool (required by oc adm must-gather)
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
@@ -27,9 +42,15 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     grep \
     sed \
     jq \
+    python3 \
+    python3-pip \
     util-linux \
     rsync \
     && microdnf clean all
+COPY Makefile /tmp/Makefile
+RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
+    && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
 # The OpenShift client package includes both oc and kubectl
@@ -41,12 +62,6 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Install yq (YAML processor)
-# Used for filtering manifests and processing YAML data
-RUN curl -sSLo- https://github.com/mikefarah/yq/releases/download/v4.53.2/yq_linux_amd64.tar.gz | tar xz \
-    && mv -f yq_linux_amd64 /usr/local/bin/yq \
-    && yq --version
-
 # Install Helm (Kubernetes package manager)
 # Required for collecting Helm-based RHDH deployments
 # Installing directly from GitHub releases instead of using the install script
@@ -57,14 +72,8 @@ RUN curl -fsSL "https://get.helm.sh/helm-v4.1.4-linux-amd64.tar.gz" -o helm.tar.
     && rm -rf helm.tar.gz linux-amd64 \
     && helm version
 
-# Install websocat (WebSocket CLI client)
-# Required for heap dump collection via the Node.js inspector protocol
-# Used to communicate with the Chrome DevTools Protocol over WebSocket
-# renovate: datasource=github-releases depName=vi/websocat
-RUN curl -fsSL "https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl" \
-    -o /usr/local/bin/websocat \
-    && chmod +x /usr/local/bin/websocat \
-    && websocat --version
+# Copy websocat binary built from source (vendor/websocat)
+COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
 
 # Create non-root user for running the container
 # Using UID 1001 which is commonly used and works well with OpenShift's arbitrary UID assignment
