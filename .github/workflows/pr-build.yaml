@@ -203,7 +203,7 @@ jobs:
           make test-e2e \
             LOCAL=false \
             FULL_IMAGE_NAME="localhost/${NAME}:${TAG}" \
-            HELM_SET="image.pullPolicy=Never"
+            HELM_SET="image.pullPolicy=Never,resources=null,dataHolder.resources=null"
 
       - name: Upload E2E must-gather output in case of failure
         if: ${{ failure() }}
