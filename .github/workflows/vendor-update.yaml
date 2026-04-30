@@ -46,24 +46,26 @@ jobs:
           pr_count=$(gh pr list --head "$branch" --state open --json number --jq 'length')
           echo "exists=$([ "$pr_count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Update vendor subtree
+      - name: Update vendor
         if: steps.existing-pr.outputs.exists == 'false'
         id: update
+        env:
+          VENDOR_NAME: ${{ matrix.name }}
+          VENDOR_VERSION: ${{ steps.latest.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          head_before=$(git rev-parse HEAD)
-          hack/update-vendor.sh "${{ matrix.name }}" "${{ steps.latest.outputs.version }}"
+          make vendor-update VENDOR_NAME="$VENDOR_NAME" VENDOR_VERSION="$VENDOR_VERSION"
 
-          # Stage and commit pruned files (the script leaves changes unstaged)
+          # Stage and commit changes (the script leaves them unstaged)
           if ! git diff --quiet || ! git diff --cached --quiet; then
-            git add vendor/${{ matrix.name }} Containerfile
-            git commit -m "chore(vendor): prune ${{ matrix.name }} ${{ steps.latest.outputs.version }} to build-essential files"
+            git add "vendor/$VENDOR_NAME" Containerfile Makefile
+            git commit -m "chore(vendor): update $VENDOR_NAME to $VENDOR_VERSION"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-
-          head_after=$(git rev-parse HEAD)
-          echo "changed=$([ "$head_before" != "$head_after" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request
         if: steps.existing-pr.outputs.exists == 'false' && steps.update.outputs.changed == 'true'

@@ -1,5 +1,5 @@
 # Stage 1: Build websocat from vendored source
-# websocat v1.14.1 — update via: git subtree pull --prefix=vendor/websocat https://github.com/vi/websocat.git v<NEW> --squash
+# websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \

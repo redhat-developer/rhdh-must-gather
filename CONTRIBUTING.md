@@ -42,10 +42,16 @@ The source for [websocat](https://github.com/vi/websocat) is vendored as a [Git 
 
 A weekly GitHub Actions workflow ([vendor-update.yaml](.github/workflows/vendor-update.yaml)) checks for new releases and automatically opens a PR to update the subtree.
 
-To manually update the vendored dependency, use the update script which handles the subtree sync and prunes non-essential files (docs, CI, tests, examples):
+To manually sync the vendored dependency to the version declared in the Makefile:
 
 ```bash
-hack/update-vendor.sh websocat v<NEW_VERSION>
+make vendor
+```
+
+To update to a specific new version:
+
+```bash
+make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW_VERSION>
 ```
 
 #### Building the Image

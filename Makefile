@@ -33,7 +33,7 @@ TESTS_DIR := ./tests
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
-WEBSOCAT_VERSION := 1.14.0
+WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
 WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
@@ -166,6 +166,22 @@ $(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
 	@ln -sf "$(shell echo $(WEBSOCAT_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(WEBSOCAT_BIN)"
 	@"$(WEBSOCAT_BIN)" --version
 
+VENDOR_NAME ?= ## Vendor name for vendor-update (e.g., websocat)
+VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
+
+.PHONY: vendor
+vendor: ## Sync all vendored Git subtrees to their declared versions
+	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
+
+.PHONY: vendor-update
+vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_NAME, VENDOR_VERSION required)
+	@if [ -z "$(VENDOR_NAME)" ] || [ -z "$(VENDOR_VERSION)" ]; then \
+		echo "Error: VENDOR_NAME and VENDOR_VERSION are required."; \
+		echo "Usage: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1"; \
+		exit 1; \
+	fi
+	./hack/update-vendor.sh "$(VENDOR_NAME)" "$(VENDOR_VERSION)"
+
 ##@ Build
 
 .PHONY: image-build
@@ -259,6 +275,8 @@ help: ## Display this help.
 	@echo "  LOCAL				- Set to 'false' to run test-e2e with container image (default: true, local mode)"
 	@echo "  SCRIPT			- Script name for run-script"
 	@echo "  TOOLS_DIR			- Directory for local tools like websocat and yq (default: $(TOOLS_DIR))"
+	@echo "  VENDOR_NAME			- Vendor name for vendor-update (e.g., websocat)"
+	@echo "  VENDOR_VERSION		- Vendor version for vendor-update (e.g., v1.14.1)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make test                                          # Run all unit tests"
