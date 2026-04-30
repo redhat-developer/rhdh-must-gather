@@ -46,7 +46,7 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     python3-pip \
     util-linux \
     rsync \
-    && pip3 install --no-cache-dir yq \
+    && pip3 install --no-cache-dir 'yq~=3.0' \
     && microdnf clean all
 
 # Install oc and kubectl (OpenShift CLI)

@@ -146,7 +146,7 @@ $(YQ_BIN): $(TOOLS_DIR)
 	@if [ ! -f "$(YQ_BIN)" ]; then \
 		echo "Installing yq (kislyuk/yq) via pip..."; \
 		python3 -m venv "$(YQ_VENV)"; \
-		"$(YQ_VENV)/bin/pip" install --quiet yq; \
+		"$(YQ_VENV)/bin/pip" install --quiet 'yq~=3.0'; \
 		echo "yq installed successfully: $$($(YQ_BIN) --help | head -1)"; \
 	else \
 		echo "yq already installed: $(YQ_BIN)"; \
