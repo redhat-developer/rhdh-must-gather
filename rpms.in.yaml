@@ -26,8 +26,7 @@ contentOrigin:
     - repoid: ocp-tools-4.18-for-rhel-9-$basearch-source-rpms
       baseurl: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/$basearch/ocp-tools/4.18/source/SRPMS
 
-# New installs beyond ubi9-minimal (keep in sync with root Containerfile and Konflux
-# `.rhdh/docker/Containerfile`: final-stage microdnf + websocat-builder `rust-toolset`).
+# New installs beyond base image
 packages:
   - findutils
   - gzip

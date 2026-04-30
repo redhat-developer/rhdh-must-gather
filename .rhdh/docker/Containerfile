@@ -3,7 +3,7 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
+FROM registry.access.redhat.com/ubi9:latest@sha256:0879eaf704bf508379bdb0f465b8ea184c1ec9f1f40a413422fc17f6d3fb2389 AS websocat-builder
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     arch=$(uname -m); \
@@ -35,15 +35,7 @@ RUN set -eu; \
 # Stage 2: Final image
 FROM registry.access.redhat.com/ubi9-minimal:latest@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
 
-# Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
-
-# Must-gather image for Red Hat Developer Hub (RHDH)
-LABEL name="rhdh-must-gather" \
-      vendor="Red Hat" \
-      version="$RHDH_MUST_GATHER_VERSION" \
-      summary="Red Hat Developer Hub (RHDH) must-gather tool" \
-      description="Collects diagnostic information from RHDH deployments on Kubernetes and OpenShift clusters"
 
 RUN set -eu; \
     . /cachi2/cachi2.env; \
@@ -77,11 +69,11 @@ RUN set -eu; \
       openshift-clients \
       helm \
       && microdnf clean all
-COPY .rhdh/docker/requirements-yq.txt /tmp/requirements-yq.txt
+COPY .rhdh/docker/requirements.txt /tmp/requirements.txt
 RUN set -eu; \
     . /cachi2/cachi2.env; \
-    pip3 install --no-cache-dir --require-hashes -r /tmp/requirements-yq.txt && \
-    rm -f /tmp/requirements-yq.txt
+    pip3 install --no-cache-dir --require-hashes -r /tmp/requirements.txt && \
+    rm -f /tmp/requirements.txt
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
