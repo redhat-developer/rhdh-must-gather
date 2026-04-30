@@ -453,8 +453,19 @@ BACKSTAGE_CR_STATEFULSET=""
 if [ "$SKIP_OPERATOR" = false ]; then
     log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
     OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
-    kubectl apply -f "$OPERATOR_MANIFEST"
-    CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST --wait=false")
+    if [ "$EFFECTIVE_OPERATOR_BRANCH" = "main" ]; then
+        # On main, the manifest references the downstream operator image
+        # (quay.io/rhdh/rhdh-rhel9-operator), which may be outdated or unavailable.
+        # Swap it for the upstream 'next' tag so E2E tests always run against a
+        # current build of the operator.
+        UPSTREAM_OPERATOR_IMAGE="quay.io/rhdh-community/operator:next"
+        curl -sSL "$OPERATOR_MANIFEST" \
+            | sed "s|quay.io/rhdh/rhdh-rhel9-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
+            | kubectl apply -f -
+    else
+        kubectl apply -f "$OPERATOR_MANIFEST"
+    fi
+    CLEANUP_TASKS+=("curl -sSL $OPERATOR_MANIFEST | kubectl delete -f - --wait=false")
 
     log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
     if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=${RHDH_READY_TIMEOUT}s; then
