@@ -330,14 +330,16 @@ helm upgrade --install "${RELEASE_NAME}" redhat-developer-hub-must-gather \
 echo ""
 echo "Helm release installed, waiting for pod to be created..."
 
-# Wait for the pod to exist
+# Wait for the pod to exist (5 minutes should be plenty for scheduling)
 POD_SELECTOR="app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather"
-TIMEOUT_SECONDS=$(echo "${HELM_TIMEOUT}" | sed 's/m/*60/;s/h/*3600/;s/s//' | bc)
+POD_CREATION_TIMEOUT=300
 WAIT_START=$(date +%s)
 while ! kubectl -n "${NAMESPACE}" get pods -l "${POD_SELECTOR}" -o name 2>/dev/null | grep -q .; do
     ELAPSED=$(($(date +%s) - WAIT_START))
-    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+    if [[ ${ELAPSED} -ge ${POD_CREATION_TIMEOUT} ]]; then
         echo "Error: Timed out waiting for pod to be created"
+        echo ""
+        kubectl -n "${NAMESPACE}" describe pods -l "${POD_SELECTOR}" 2>/dev/null || true
         exit 1
     fi
     sleep 2
@@ -348,8 +350,10 @@ echo "Pod created, waiting for gather container to start..."
 # Wait for the gather init container to be running
 while true; do
     ELAPSED=$(($(date +%s) - WAIT_START))
-    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+    if [[ ${ELAPSED} -ge ${POD_CREATION_TIMEOUT} ]]; then
         echo "Error: Timed out waiting for gather container to start"
+        echo ""
+        kubectl -n "${NAMESPACE}" describe pods -l "${POD_SELECTOR}" 2>/dev/null || true
         exit 1
     fi
 
@@ -383,9 +387,10 @@ echo ""
 echo "Gather logs finished, waiting for init container to terminate..."
 
 # Wait for the gather init container to terminate (in case logs exited early)
+GATHER_TIMEOUT_SECONDS=$(echo "${HELM_TIMEOUT}" | sed 's/m/*60/;s/h/*3600/;s/s//' | bc)
 while true; do
     ELAPSED=$(($(date +%s) - WAIT_START))
-    if [[ ${ELAPSED} -ge ${TIMEOUT_SECONDS} ]]; then
+    if [[ ${ELAPSED} -ge ${GATHER_TIMEOUT_SECONDS} ]]; then
         echo "Error: Timed out waiting for gather init container to terminate"
         exit 1
     fi
