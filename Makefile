@@ -149,7 +149,7 @@ $(YQ_BIN): $(TOOLS_DIR)
 		echo "Installing yq (kislyuk/yq) via pip..."; \
 		python3 -m venv "$(YQ_VENV)"; \
 		"$(YQ_VENV)/bin/pip" install --quiet "yq==$(YQ_VERSION)"; \
-		echo "yq installed successfully: $$($(YQ_BIN) --help | head -1)"; \
+		echo "yq installed successfully: $$($(YQ_BIN) --version)"; \
 	else \
 		echo "yq already installed: $(YQ_BIN)"; \
 	fi
