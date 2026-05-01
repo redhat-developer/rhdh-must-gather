@@ -1,7 +1,7 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-FROM registry.access.redhat.com/ubi9:latest AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.7-1777525589@sha256:0879eaf704bf508379bdb0f465b8ea184c1ec9f1f40a413422fc17f6d3fb2389 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -12,7 +12,7 @@ RUN cargo build --release \
     /tmp/websocat --version
 
 # Stage 2: Final image
-FROM registry.access.redhat.com/ubi9-minimal:latest@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
+FROM registry.access.redhat.com/ubi9-minimal:9.7-1776833838@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"

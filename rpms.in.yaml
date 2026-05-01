@@ -17,13 +17,26 @@ contentOrigin:
       baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/os/
     - repoid: ubi-9-for-$basearch-baseos-source-rpms
       baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/source/SRPMS
+    # OpenShift clients RPM (oc, kubectl)
+    - repoid: rhocp-4.21-for-rhel-9-$basearch-rpms
+      baseurl: https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/4.21-el9-beta/
+    # Helm RPM and related tools. 
+    - repoid: ocp-tools-4.18-for-rhel-9-$basearch-rpms
+      baseurl: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/$basearch/ocp-tools/4.18/os/
+    - repoid: ocp-tools-4.18-for-rhel-9-$basearch-source-rpms
+      baseurl: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/$basearch/ocp-tools/4.18/source/SRPMS
 
-# New installs beyond ubi9-minimal (keep in sync with first RUN microdnf install in Containerfile).
+# New installs beyond base image
 packages:
   - findutils
   - gzip
+  - helm
   - jq
+  - openshift-clients
+  - python3
+  - python3-pip
   - rsync
+  - rust-toolset
   - tar
   - util-linux
 

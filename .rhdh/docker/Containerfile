@@ -1,0 +1,116 @@
+# Konflux hermetic: prefetch rpm (repo root), pip (`.rhdh/docker`), cargo (`vendor/websocat`); network off during RUN.
+#
+# Stage 1: Build websocat from vendored source
+# websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
+# Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
+FROM registry.access.redhat.com/ubi9:9.7-1777525589@sha256:0879eaf704bf508379bdb0f465b8ea184c1ec9f1f40a413422fc17f6d3fb2389 AS websocat-builder
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    arch=$(uname -m); \
+    rm -rf /etc/yum.repos.d/*; \
+    if [ -d "/cachi2/output/deps/rpm/${arch}/repos.d" ]; then \
+      cp -a "/cachi2/output/deps/rpm/${arch}/repos.d/." /etc/yum.repos.d/; \
+    else \
+      for repod in /cachi2/output/deps/rpm/"${arch}"/*/repos.d; do \
+        [ -d "${repod}" ] || continue; \
+        suffix=$(basename "$(dirname "$repod")"); \
+        for rf in "${repod}"/*.repo; do \
+          [ -f "${rf}" ] || continue; \
+          install -m0644 "${rf}" "/etc/yum.repos.d/${suffix}-$(basename "${rf}")"; \
+        done; \
+      done; \
+    fi; \
+    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
+    dnf clean all
+COPY vendor/websocat /src/websocat
+WORKDIR /src/websocat
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    cargo build --release --locked \
+        --no-default-features --features signal_handler,unix_stdio && \
+    cp target/release/websocat /tmp/websocat && \
+    /tmp/websocat --version
+
+# Stage 2: Final image
+FROM registry.access.redhat.com/ubi9-minimal:9.7-1776833838@sha256:7d4e47500f28ac3a2bff06c25eff9127ff21048538ae03ce240d57cf756acd00
+
+ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
+
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    arch=$(uname -m); \
+    rm -rf /etc/yum.repos.d/*; \
+    if [ -d "/cachi2/output/deps/rpm/${arch}/repos.d" ]; then \
+      cp -a "/cachi2/output/deps/rpm/${arch}/repos.d/." /etc/yum.repos.d/; \
+    else \
+      for repod in /cachi2/output/deps/rpm/"${arch}"/*/repos.d; do \
+        [ -d "${repod}" ] || continue; \
+        suffix=$(basename "$(dirname "$repod")"); \
+        for rf in "${repod}"/*.repo; do \
+          [ -f "${rf}" ] || continue; \
+          install -m0644 "${rf}" "/etc/yum.repos.d/${suffix}-$(basename "${rf}")"; \
+        done; \
+      done; \
+    fi; \
+    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    microdnf install -y --setopt=install_weak_deps=0 --nodocs \
+      tar \
+      gzip \
+      bash \
+      findutils \
+      grep \
+      sed \
+      jq \
+      python3 \
+      python3-pip \
+      util-linux \
+      rsync \
+      openshift-clients \
+      helm \
+      && microdnf clean all
+COPY .rhdh/docker/requirements.txt /tmp/requirements.txt
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    pip3 install --no-cache-dir --require-hashes -r /tmp/requirements.txt && \
+    rm -f /tmp/requirements.txt
+
+# Copy websocat binary built from source (vendor/websocat)
+COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
+
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    arch=$(uname -m); \
+    rm -rf /etc/yum.repos.d/*; \
+    if [ -d "/cachi2/output/deps/rpm/${arch}/repos.d" ]; then \
+      cp -a "/cachi2/output/deps/rpm/${arch}/repos.d/." /etc/yum.repos.d/; \
+    else \
+      for repod in /cachi2/output/deps/rpm/"${arch}"/*/repos.d; do \
+        [ -d "${repod}" ] || continue; \
+        suffix=$(basename "$(dirname "$repod")"); \
+        for rf in "${repod}"/*.repo; do \
+          [ -f "${rf}" ] || continue; \
+          install -m0644 "${rf}" "/etc/yum.repos.d/${suffix}-$(basename "${rf}")"; \
+        done; \
+      done; \
+    fi; \
+    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils && \
+    groupadd -g 1001 must-gather && \
+    useradd -u 1001 -g must-gather -s /bin/bash -m must-gather && \
+    microdnf remove -y shadow-utils && \
+    microdnf clean all
+
+# Use our gather script in place of the original one
+# Copy collection scripts
+COPY collection-scripts/* /usr/bin/
+
+RUN mv /usr/bin/must_gather /usr/bin/gather
+
+# Set environment variable from build argument
+ENV RHDH_MUST_GATHER_VERSION=$RHDH_MUST_GATHER_VERSION
+
+# Run as non-root user
+USER 1001
+
+ENTRYPOINT ["/usr/bin/gather"]
