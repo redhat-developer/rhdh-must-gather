@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-requirements-version
+        name: check yq version sync (Makefile vs requirements.in)
+        entry: hack/check-requirements-version.sh
+        language: script
+        pass_filenames: false
+        files: (^Makefile$|^\.rhdh/docker/requirements\.in$)
+
+  - repo: https://github.com/jazzband/pip-tools
+    rev: v7.5.3
+    hooks:
+      - id: pip-compile
+        name: pip-compile (.rhdh/docker)
+        args:
+          - --allow-unsafe
+          - --generate-hashes
+          - --output-file=.rhdh/docker/requirements.txt
+          - .rhdh/docker/requirements.in
+        files: ^\.rhdh/docker/requirements\.(in|txt)$

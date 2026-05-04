@@ -1,0 +1,106 @@
+name: Pre-commit comment
+
+on:
+  workflow_run:
+    workflows: ["Pre-commit"]
+    types:
+      - completed
+
+jobs:
+  comment:
+    name: Comment on PR
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Get the PR number from the workflow run
+        id: pr-number
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const prs = context.payload.workflow_run.pull_requests;
+            if (prs.length > 0) {
+              const num = prs[0].number;
+              if (Number.isInteger(num)) {
+                core.setOutput('number', num);
+              } else {
+                core.setFailed(`Invalid PR number detected: ${num}`);
+              }
+            }
+
+      - name: Delete previous pre-commit failure comments
+        if: steps.pr-number.outputs.number
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ steps.pr-number.outputs.number }}
+        with:
+          script: |
+            const prNumber = parseInt(process.env.PR_NUMBER, 10);
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComments = comments.filter(comment => {
+              return comment.user.login === 'github-actions[bot]' &&
+                     comment.body &&
+                     comment.body.includes('Pre-commit hook failures');
+            });
+
+            for (const comment of botComments) {
+              try {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id,
+                });
+              } catch (error) {
+                console.warn(`Failed to delete comment ${comment.id}:`, error.message);
+              }
+            }
+
+      - name: Post comment
+        if: steps.pr-number.outputs.number && github.event.workflow_run.conclusion == 'failure'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ steps.pr-number.outputs.number }}
+        with:
+          script: |
+            const prNumber = parseInt(process.env.PR_NUMBER, 10);
+
+            const body = `
+            ## Pre-commit hook failures
+
+            The pre-commit hooks detected issues that need to be fixed.
+
+            **To fix these issues:**
+
+            1. Install [pre-commit](https://pre-commit.com/#install)
+
+            2. Run pre-commit on all files:
+               \`\`\`bash
+               pre-commit run --all-files
+               \`\`\`
+
+            3. Review and commit any auto-fixed changes:
+               \`\`\`bash
+               git add -u
+               pre-commit run --all-files  # verify everything passes
+               git commit
+               \`\`\`
+
+            **What the hooks check:**
+            - \`check-requirements-version\` — ensures \`.rhdh/docker/requirements.in\` matches the \`YQ_VERSION\` in the Makefile (auto-fixes on failure)
+            - \`pip-compile\` — regenerates \`.rhdh/docker/requirements.txt\` from \`requirements.in\` with pinned hashes (auto-fixes on failure)
+            `.trim().replace(/^ {12}/gm, '');
+
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
