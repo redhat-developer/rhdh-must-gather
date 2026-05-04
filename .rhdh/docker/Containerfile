@@ -20,7 +20,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -53,7 +53,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs \
       tar \
       gzip \
@@ -94,7 +94,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils && \
     groupadd -g 1001 must-gather && \
     useradd -u 1001 -g must-gather -s /bin/bash -m must-gather && \
