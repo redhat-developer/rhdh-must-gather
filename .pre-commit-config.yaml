@@ -19,3 +19,12 @@ repos:
           - --output-file=.rhdh/docker/requirements.txt
           - .rhdh/docker/requirements.in
         files: ^\.rhdh/docker/requirements\.(in|txt)$
+
+  - repo: local
+    hooks:
+      - id: strip-sdist-hashes
+        name: strip sdist hashes (hermetic build compat)
+        entry: hack/strip-sdist-hashes.py
+        language: script
+        files: ^\.rhdh/docker/requirements\.txt$
+        pass_filenames: true
