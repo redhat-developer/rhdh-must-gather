@@ -18,6 +18,10 @@ ensure_directory "$orchestrator_dir"
 # Flag to track if any Orchestrator components were found
 orchestrator_detected=false
 
+# File to track orchestrator-related namespaces for gather_namespace-inspect
+ORCH_NAMESPACES_FILE="$orchestrator_dir/detected-namespaces.txt"
+: > "$ORCH_NAMESPACES_FILE"
+
 # ============================================================================
 # Serverless Operators Detection and Collection
 # ============================================================================
@@ -33,6 +37,7 @@ function gather_serverless_operators() {
     if $KUBECTL_CMD get namespace "$serverless_ns" >/dev/null 2>&1; then
         log_info "\tFound OpenShift Serverless namespace: $serverless_ns"
         orchestrator_detected=true
+        echo "$serverless_ns" >> "$ORCH_NAMESPACES_FILE"
 
         local serverless_ns_dir="$serverless_dir/ns=$serverless_ns"
         ensure_directory "$serverless_ns_dir"
@@ -72,6 +77,7 @@ function gather_serverless_operators() {
     if $KUBECTL_CMD get namespace "$logic_ns" >/dev/null 2>&1; then
         log_info "\tFound OpenShift Serverless Logic namespace: $logic_ns"
         orchestrator_detected=true
+        echo "$logic_ns" >> "$ORCH_NAMESPACES_FILE"
 
         local logic_ns_dir="$serverless_dir/ns=$logic_ns"
         ensure_directory "$logic_ns_dir"
@@ -194,6 +200,8 @@ function gather_sonataflow_platforms() {
             sfp_name=$(echo "$sfp_info" | cut -d'/' -f2)
         fi
 
+        [[ -n "$sfp_ns" ]] && echo "$sfp_ns" >> "$ORCH_NAMESPACES_FILE"
+
         log_info "--> Processing SonataFlowPlatform $sfp_name in namespace $sfp_ns"
 
         local sfp_cr_dir="$sfp_dir/ns=$sfp_ns/$sfp_name"
@@ -264,6 +272,8 @@ function gather_sonataflow_workflows() {
             wf_name=$(echo "$wf_info" | cut -d'/' -f2)
         fi
 
+        [[ -n "$wf_ns" ]] && echo "$wf_ns" >> "$ORCH_NAMESPACES_FILE"
+
         local ns_dir="$sfw_dir/ns=$wf_ns"
 
         # Collect per-namespace workflow list once
@@ -320,6 +330,7 @@ function gather_knative_resources() {
     # Check knative-serving namespace for resources
     if $KUBECTL_CMD get namespace knative-serving >/dev/null 2>&1; then
         orchestrator_detected=true
+        echo "knative-serving" >> "$ORCH_NAMESPACES_FILE"
         local serving_dir="$knative_dir/knative-serving"
         ensure_directory "$serving_dir"
 
@@ -337,6 +348,7 @@ function gather_knative_resources() {
     # Check knative-eventing namespace for resources
     if $KUBECTL_CMD get namespace knative-eventing >/dev/null 2>&1; then
         orchestrator_detected=true
+        echo "knative-eventing" >> "$ORCH_NAMESPACES_FILE"
         local eventing_dir="$knative_dir/knative-eventing"
         ensure_directory "$eventing_dir"
 
@@ -422,6 +434,13 @@ gather_orchestrator_crds
 gather_sonataflow_platforms
 gather_sonataflow_workflows
 gather_knative_resources
+
+# Deduplicate the detected namespaces file
+if [[ -s "$ORCH_NAMESPACES_FILE" ]]; then
+    sort -u -o "$ORCH_NAMESPACES_FILE" "$ORCH_NAMESPACES_FILE"
+    log_info "Orchestrator namespaces for namespace-inspect: $(tr '\n' ',' < "$ORCH_NAMESPACES_FILE" | sed 's/,$//')"
+fi
+
 generate_orchestrator_summary
 
 if [[ "$orchestrator_detected" == "true" ]]; then

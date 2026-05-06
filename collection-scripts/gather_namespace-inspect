@@ -77,12 +77,6 @@ else
     # Combine and deduplicate
     all_namespaces=$(echo -e "${helm_namespaces}\n${standalone_namespaces}\n${cr_namespaces}\n${operator_namespaces}" | grep -v '^$' | sort | uniq || echo "")
     
-    if [[ -z "$all_namespaces" ]]; then
-        log_warn "No RHDH deployments found in cluster"
-        echo "No RHDH namespaces detected" > "$inspect_dir/no-namespaces.txt"
-        exit 0
-    fi
-    
     # Convert to array
     while IFS= read -r ns; do
         [[ -n "$ns" ]] && namespaces_to_inspect+=("$ns")
@@ -91,6 +85,34 @@ else
     # Log what was found
     if [[ -n "$operator_namespaces" ]]; then
         log_info "Auto-detected RHDH operator namespace(s): $operator_namespaces"
+    fi
+fi
+
+if [[ ${#namespaces_to_inspect[@]} -eq 0 ]]; then
+    log_warn "No RHDH deployments found in cluster"
+    echo "No RHDH namespaces detected" > "$inspect_dir/no-namespaces.txt"
+    exit 0
+fi
+
+# Add orchestrator-related namespaces when auto-detecting (not when user specifies --namespaces)
+if [[ -z "${RHDH_TARGET_NAMESPACES:-}" ]]; then
+    orch_ns_file="$BASE_COLLECTION_PATH/orchestrator/detected-namespaces.txt"
+    if [[ -s "$orch_ns_file" ]]; then
+        log_info "Adding orchestrator-related namespaces to inspection..."
+        while IFS= read -r orch_ns; do
+            [[ -z "$orch_ns" ]] && continue
+            already_included=false
+            for existing_ns in "${namespaces_to_inspect[@]:-}"; do
+                if [[ "$existing_ns" == "$orch_ns" ]]; then
+                    already_included=true
+                    break
+                fi
+            done
+            if [[ "$already_included" != "true" ]]; then
+                namespaces_to_inspect+=("$orch_ns")
+                log_info "Added orchestrator namespace: $orch_ns"
+            fi
+        done < "$orch_ns_file"
     fi
 fi
 
