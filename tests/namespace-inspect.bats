@@ -55,7 +55,7 @@ teardown() {
 }
 
 @test "gather_namespace-inspect exits when no namespaces found" {
-    run grep -q 'No RHDH deployments found in cluster' "${SCRIPTS_DIR}/gather_namespace-inspect"
+    run grep -q 'No RHDH deployments or orchestrator components found' "${SCRIPTS_DIR}/gather_namespace-inspect"
     [ "$status" -eq 0 ]
 }
 
