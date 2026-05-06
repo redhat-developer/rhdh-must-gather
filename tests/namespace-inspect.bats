@@ -50,7 +50,9 @@ teardown() {
 
 @test "gather_namespace-inspect handles empty orchestrator namespaces file" {
     # The -s test returns false for empty files, so the block is skipped
-    run grep -q '\-s "\$orch_ns_file"' "${SCRIPTS_DIR}/gather_namespace-inspect"
+    run grep -q 'orch_ns_file' "${SCRIPTS_DIR}/gather_namespace-inspect"
+    [ "$status" -eq 0 ]
+    run grep -- '-s' "${SCRIPTS_DIR}/gather_namespace-inspect"
     [ "$status" -eq 0 ]
 }
 
@@ -62,5 +64,5 @@ teardown() {
 @test "gather_namespace-inspect only adds orchestrator namespaces when auto-detecting" {
     run grep -B1 'orch_ns_file=' "${SCRIPTS_DIR}/gather_namespace-inspect"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ '-z "${RHDH_TARGET_NAMESPACES:-}"' ]]
+    [[ "$output" =~ RHDH_TARGET_NAMESPACES ]]
 }

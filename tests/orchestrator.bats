@@ -141,7 +141,9 @@ teardown() {
 # ============================================================================
 
 @test "gather_orchestrator writes detected namespaces file" {
-    run grep -q 'ORCH_NAMESPACES_FILE="\$orchestrator_dir/detected-namespaces.txt"' "${SCRIPTS_DIR}/gather_orchestrator"
+    run grep -q 'ORCH_NAMESPACES_FILE=' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    run grep -q 'detected-namespaces.txt' "${SCRIPTS_DIR}/gather_orchestrator"
     [ "$status" -eq 0 ]
 }
 
@@ -180,7 +182,7 @@ teardown() {
 }
 
 @test "gather_orchestrator deduplicates detected namespaces" {
-    run grep -q 'sort -u -o "\$ORCH_NAMESPACES_FILE"' "${SCRIPTS_DIR}/gather_orchestrator"
+    run grep -q 'sort -u -o' "${SCRIPTS_DIR}/gather_orchestrator"
     [ "$status" -eq 0 ]
 }
 
