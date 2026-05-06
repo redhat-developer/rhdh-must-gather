@@ -28,6 +28,8 @@ repos:
         entry: pybuild-deps compile --generate-hashes
           -o .rhdh/docker/requirements-build.txt
           .rhdh/docker/requirements.txt
-        language: system
+        language: python
+        language_version: "3.14"
+        additional_dependencies: [pybuild-deps]
         files: ^\.rhdh/docker/requirements\.txt$
         pass_filenames: false
