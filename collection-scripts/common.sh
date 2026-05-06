@@ -1821,6 +1821,8 @@ collect_rhdh_workload() {
   # Per-pod app data + processes (from running pods only)
   collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
   collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
+
+  collect_rollout_history "$ns" "$kind" "$name" "$output_dir"
 }
 
 _collect_pod_logs() {
@@ -1880,6 +1882,49 @@ collect_rhdh_db_statefulset() {
     safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels'" "$pods_dir/pods.txt" "DB statefulset pods for $ns/$name"
     safe_exec "$KUBECTL_CMD -n '$ns' get pods -l '$labels' -o yaml" "$pods_dir/pods.yaml" "DB statefulset pods for $ns/$name"
     safe_exec "$KUBECTL_CMD -n '$ns' describe pods -l '$labels'" "$pods_dir/pods.describe.txt" "DB statefulset pods for $ns/$name"
+  fi
+
+  collect_rollout_history "$ns" "statefulset" "$name" "$statefulset_dir"
+}
+
+collect_rollout_history() {
+  local ns="$1"
+  local kind="$2"
+  local name="$3"
+  local output_dir="$4"
+
+  log_debug "Collecting rollout history for $kind $name in $ns"
+
+  local history_dir="$output_dir/rollout-history"
+  ensure_directory "$history_dir"
+
+  safe_exec "$KUBECTL_CMD -n '$ns' rollout history $kind $name" \
+    "$history_dir/history.txt" "Rollout history for $kind $ns/$name"
+
+  local labels
+  labels=$(
+    $KUBECTL_CMD -n "$ns" get "$kind" "$name" -o json 2>/dev/null \
+      | jq -r '.spec.selector.matchLabels | to_entries | map("\(.key)=\(.value)") | join(",")' || true
+  )
+  if [[ -z "$labels" ]]; then
+    log_debug "No labels found for $kind $name in $ns, skipping revision object collection"
+    return 0
+  fi
+
+  if [[ "$kind" == "deployment" ]]; then
+    local rs_dir="$history_dir/replicasets"
+    ensure_directory "$rs_dir"
+    safe_exec "$KUBECTL_CMD -n '$ns' get replicasets -l '$labels' -o yaml" \
+      "$rs_dir/replicasets.yaml" "ReplicaSets for deployment $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe replicasets -l '$labels'" \
+      "$rs_dir/replicasets.describe.txt" "ReplicaSet descriptions for deployment $ns/$name"
+  elif [[ "$kind" == "statefulset" ]]; then
+    local cr_dir="$history_dir/controllerrevisions"
+    ensure_directory "$cr_dir"
+    safe_exec "$KUBECTL_CMD -n '$ns' get controllerrevisions -l '$labels' -o yaml" \
+      "$cr_dir/controllerrevisions.yaml" "ControllerRevisions for statefulset $ns/$name"
+    safe_exec "$KUBECTL_CMD -n '$ns' describe controllerrevisions -l '$labels'" \
+      "$cr_dir/controllerrevisions.describe.txt" "ControllerRevision descriptions for statefulset $ns/$name"
   fi
 }
 
