@@ -102,6 +102,12 @@ function gather_deployments() {
 
   safe_exec "$KUBECTL_CMD describe deployments -n $ns -l app=rhdh-operator" "$deployments_dir/app=rhdh-operator.describe.txt" \
     "Deployment description with label app=rhdh-operator in $ns"
+
+  local deploy_names
+  deploy_names=$($KUBECTL_CMD get deployments -n "$ns" -l app=rhdh-operator -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  for deploy_name in $deploy_names; do
+    collect_rollout_history "$ns" "deployment" "$deploy_name" "$deployments_dir/$deploy_name"
+  done
 }
 
 function gather_operator_logs() {
