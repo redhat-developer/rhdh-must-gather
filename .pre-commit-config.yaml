@@ -23,9 +23,13 @@ repos:
 
   - repo: local
     hooks:
-      - id: strip-sdist-hashes
-        name: strip sdist hashes (hermetic build compat)
-        entry: hack/strip-sdist-hashes.py
-        language: script
+      - id: pybuild-deps-compile
+        name: compile build requirements (.rhdh/docker)
+        entry: pybuild-deps compile --generate-hashes
+          -o .rhdh/docker/requirements-build.txt
+          .rhdh/docker/requirements.txt
+        language: python
+        language_version: "3.14"
+        additional_dependencies: [pybuild-deps]
         files: ^\.rhdh/docker/requirements\.txt$
-        pass_filenames: true
+        pass_filenames: false
