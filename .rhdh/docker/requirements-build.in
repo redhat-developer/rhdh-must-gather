@@ -5,14 +5,5 @@
 # To regenerate requirements-build.txt (targeting Python 3.9 / RHEL 9):
 #   uv pip compile --python-version=3.9 --python-platform=linux --generate-hashes \
 #     --output-file=requirements-build.txt requirements-build.in
-calver
-flit-core
-hatchling
-packaging
-pathspec
-pluggy<1.6
 poetry-core
 setuptools
-tomli
-trove-classifiers
-typing-extensions
