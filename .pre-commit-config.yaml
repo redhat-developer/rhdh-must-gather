@@ -20,12 +20,17 @@ repos:
           - --output-file=.rhdh/docker/requirements.txt
           - .rhdh/docker/requirements.in
         files: ^\.rhdh/docker/requirements\.(in|txt)$
-      - id: pip-compile
-        name: pip-compile build deps (.rhdh/docker)
-        language_version: "3.14"
-        args:
-          - --allow-unsafe
-          - --generate-hashes
-          - --output-file=.rhdh/docker/requirements-build.txt
-          - .rhdh/docker/requirements-build.in
+
+
+  - repo: local
+    hooks:
+      - id: uv-pip-compile-build-deps
+        name: uv pip compile build deps (.rhdh/docker)
+        entry: uv pip compile --python-version=3.9 --python-platform=linux
+          --generate-hashes
+          --output-file=.rhdh/docker/requirements-build.txt
+          .rhdh/docker/requirements-build.in
+        language: python
+        additional_dependencies: [uv]
         files: ^\.rhdh/docker/requirements-build\.(in|txt)$
+        pass_filenames: false

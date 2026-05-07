@@ -2,8 +2,9 @@
 # These are the PEP 517 build backends and their transitive deps needed to compile
 # all runtime sdists from requirements.txt in network isolation.
 #
-# To regenerate requirements-build.txt:
-#   pip-compile --allow-unsafe --generate-hashes --output-file=requirements-build.txt requirements-build.in
+# To regenerate requirements-build.txt (targeting Python 3.9 / RHEL 9):
+#   uv pip compile --python-version=3.9 --python-platform=linux --generate-hashes \
+#     --output-file=requirements-build.txt requirements-build.in
 calver
 Cython
 flit-core
@@ -11,11 +12,10 @@ hatch-vcs
 hatchling
 packaging
 pathspec
-pluggy
+pluggy<1.6
 poetry-core
 setuptools
-setuptools-scm
+setuptools-scm<8.0
 tomli
 trove-classifiers
 typing-extensions
-vcs-versioning
