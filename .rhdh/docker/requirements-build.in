@@ -1,0 +1,15 @@
+# Build dependencies for hermetic (Hermeto/Cachi2) sdist builds on RHEL 9 (Python 3.9).
+# These are the PEP 517 build backends and their transitive deps needed to compile
+# all runtime sdists from requirements.txt in network isolation.
+#
+# To regenerate requirements-build.txt (targeting Python 3.9 / RHEL 9):
+#   uv pip compile --python-version=3.9 --python-platform=linux --generate-hashes \
+#     --output-file=requirements-build.txt requirements-build.in
+calver
+flit-core
+hatch-vcs
+hatchling<1.22
+pluggy<1.6
+poetry-core
+setuptools
+setuptools-scm<8
