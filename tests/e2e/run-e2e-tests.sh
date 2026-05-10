@@ -261,8 +261,10 @@ global:
   catalogIndex:
     image:
       tag: "1.10-51"
+  # TODO(asoro): RHDHBUGS-3095: disable lightspeed plugins to avoid ghcr.io image references
+  lightspeed:
+    enabled: false
   dynamic:
-    # Faster startup by disabling all default dynamic plugins
     includes: []
 EOF
                 # Add NODE_OPTIONS for SIGUSR2 heap dump method
@@ -370,8 +372,8 @@ global:
     image:
       tag: "1.10-51"
   dynamic:
-    # Faster startup by disabling all default dynamic plugins
-    includes: []
+    includes:
+      - dynamic-plugins.default.yaml
 EOF
     # Add NODE_OPTIONS for SIGUSR2 heap dump method
     # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
@@ -494,7 +496,7 @@ if [ "$SKIP_OPERATOR" = false ]; then
 
     # Create ConfigMap to disable default dynamic plugins for faster startup
     DYNAMIC_PLUGINS_CM="dynamic-plugins-config"
-    log_info "Creating dynamic plugins ConfigMap to disable defaults..."
+    log_info "Creating dynamic plugins ConfigMap..."
     for ns in "$NS_OPERATOR" "$NS_STATEFULSET"; do
         kubectl -n "$ns" apply -f - <<EOF
 apiVersion: v1
@@ -503,7 +505,8 @@ metadata:
   name: $DYNAMIC_PLUGINS_CM
 data:
   dynamic-plugins.yaml: |
-    includes: []
+    includes:
+      - dynamic-plugins.default.yaml
 EOF
     done
 
