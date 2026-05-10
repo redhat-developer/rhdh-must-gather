@@ -140,6 +140,56 @@ teardown() {
 # Summary generation tests
 # ============================================================================
 
+@test "gather_orchestrator writes detected namespaces file" {
+    run grep -q 'ORCH_NAMESPACES_FILE=' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    run grep -q 'detected-namespaces.txt' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+}
+
+@test "gather_orchestrator tracks openshift-serverless namespace" {
+    run grep -A2 'Found OpenShift Serverless namespace' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'ORCH_NAMESPACES_FILE' ]]
+}
+
+@test "gather_orchestrator tracks openshift-serverless-logic namespace" {
+    run grep -A2 'Found OpenShift Serverless Logic namespace' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'ORCH_NAMESPACES_FILE' ]]
+}
+
+@test "gather_orchestrator tracks knative-serving namespace" {
+    run grep -B1 -A1 'knative-serving.*ORCH_NAMESPACES_FILE' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+}
+
+@test "gather_orchestrator tracks knative-eventing namespace" {
+    run grep -B1 -A1 'knative-eventing.*ORCH_NAMESPACES_FILE' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+}
+
+@test "gather_orchestrator tracks SonataFlowPlatform CR namespaces" {
+    run grep -B2 'Processing SonataFlowPlatform' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'ORCH_NAMESPACES_FILE' ]]
+}
+
+@test "gather_orchestrator tracks SonataFlow workflow namespaces" {
+    run grep -B2 'local ns_dir=' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ 'ORCH_NAMESPACES_FILE' ]]
+}
+
+@test "gather_orchestrator deduplicates detected namespaces" {
+    run grep -q 'sort -u -o' "${SCRIPTS_DIR}/gather_orchestrator"
+    [ "$status" -eq 0 ]
+}
+
+# ============================================================================
+# Summary generation tests
+# ============================================================================
+
 @test "gather_orchestrator generates summary file" {
     run grep -q 'summary_file="\$orchestrator_dir/summary.txt"' "${SCRIPTS_DIR}/gather_orchestrator"
     [ "$status" -eq 0 ]
