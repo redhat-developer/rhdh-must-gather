@@ -19,8 +19,8 @@ ensure_directory "$orchestrator_dir"
 orchestrator_detected=false
 
 # File to track orchestrator-related namespaces for gather_namespace-inspect
+# Created lazily on first write; gather_namespace-inspect uses [[ -s file ]] so absence is fine
 ORCH_NAMESPACES_FILE="$orchestrator_dir/detected-namespaces.txt"
-: > "$ORCH_NAMESPACES_FILE"
 
 # ============================================================================
 # Serverless Operators Detection and Collection
