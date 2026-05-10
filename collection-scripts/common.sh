@@ -1774,6 +1774,8 @@ collect_rhdh_workload() {
   safe_exec "$KUBECTL_CMD -n '$ns' get $kind $name -o yaml" "$output_dir/$kind.yaml" "$kind for $ns/$name"
   safe_exec "$KUBECTL_CMD -n '$ns' describe $kind $name" "$output_dir/$kind.describe.txt" "$kind description for $ns/$name"
 
+  collect_rollout_history "$ns" "$kind" "$name" "$output_dir"
+
   local labels
   labels=$(
     $KUBECTL_CMD -n "$ns" get "$kind" "$name" -o json \
@@ -1821,8 +1823,6 @@ collect_rhdh_workload() {
   # Per-pod app data + processes (from running pods only)
   collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
   collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
-
-  collect_rollout_history "$ns" "$kind" "$name" "$output_dir"
 }
 
 _collect_pod_logs() {
