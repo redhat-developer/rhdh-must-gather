@@ -20,7 +20,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -53,7 +53,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs \
       tar \
       gzip \
@@ -69,11 +69,15 @@ RUN set -eu; \
       openshift-clients \
       helm \
       && microdnf clean all
+COPY .rhdh/docker/requirements-build.txt /tmp/requirements-build.txt
 COPY .rhdh/docker/requirements.txt /tmp/requirements.txt
 RUN set -eu; \
     . /cachi2/cachi2.env; \
-    pip3 install --no-cache-dir --require-hashes -r /tmp/requirements.txt && \
-    rm -f /tmp/requirements.txt
+    pip3 install --no-cache-dir --no-deps --require-hashes \
+      -r /tmp/requirements-build.txt && \
+    pip3 install --no-cache-dir --no-build-isolation --require-hashes \
+      -r /tmp/requirements.txt && \
+    rm -f /tmp/requirements-build.txt /tmp/requirements.txt
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
@@ -94,7 +98,7 @@ RUN set -eu; \
         done; \
       done; \
     fi; \
-    test "$(find /etc/yum.repos.d -maxdepth 1 -name '*.repo' | wc -l)" -ge 1; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils && \
     groupadd -g 1001 must-gather && \
     useradd -u 1001 -g must-gather -s /bin/bash -m must-gather && \
@@ -109,6 +113,14 @@ RUN mv /usr/bin/must_gather /usr/bin/gather
 
 # Set environment variable from build argument
 ENV RHDH_MUST_GATHER_VERSION=$RHDH_MUST_GATHER_VERSION
+
+LABEL summary="Red Hat Developer Hub must-gather" \
+      description="A must-gather image for collecting diagnostic data from Red Hat Developer Hub deployments" \
+      io.k8s.description="A must-gather image for collecting diagnostic data from Red Hat Developer Hub deployments" \
+      io.k8s.display-name="Red Hat Developer Hub must-gather" \
+      io.openshift.tags="rhdh,must-gather" \
+      com.redhat.component="rhdh-must-gather-container" \
+      name="rhdh/rhdh-must-gather-rhel9"
 
 # Run as non-root user
 USER 1001
