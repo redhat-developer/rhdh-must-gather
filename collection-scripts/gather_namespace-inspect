@@ -94,9 +94,11 @@ if [[ -z "${RHDH_TARGET_NAMESPACES:-}" ]]; then
     if [[ -s "$orch_ns_file" ]]; then
         log_info "Adding orchestrator-related namespaces to inspection..."
         while IFS= read -r orch_ns; do
+            orch_ns=$(echo "$orch_ns" | xargs)
             [[ -z "$orch_ns" ]] && continue
             already_included=false
             for existing_ns in "${namespaces_to_inspect[@]:-}"; do
+                existing_ns=$(echo "$existing_ns" | xargs)
                 if [[ "$existing_ns" == "$orch_ns" ]]; then
                     already_included=true
                     break
@@ -116,10 +118,23 @@ if [[ ${#namespaces_to_inspect[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# Trim whitespace from namespace names
-for i in "${!namespaces_to_inspect[@]}"; do
-    namespaces_to_inspect[$i]=$(echo "${namespaces_to_inspect[$i]}" | xargs)
+# Trim whitespace, remove empty entries, and deduplicate
+declare -a cleaned_namespaces=()
+for ns in "${namespaces_to_inspect[@]}"; do
+    ns=$(echo "$ns" | xargs)
+    [[ -z "$ns" ]] && continue
+    already_present=false
+    for existing in "${cleaned_namespaces[@]:-}"; do
+        if [[ "$existing" == "$ns" ]]; then
+            already_present=true
+            break
+        fi
+    done
+    if [[ "$already_present" != "true" ]]; then
+        cleaned_namespaces+=("$ns")
+    fi
 done
+namespaces_to_inspect=("${cleaned_namespaces[@]:-}")
 
 log_info "Found ${#namespaces_to_inspect[@]} namespace(s) to inspect: ${namespaces_to_inspect[*]}"
 
