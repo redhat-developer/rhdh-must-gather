@@ -77,7 +77,11 @@ jobs:
 
             The pre-commit hooks detected issues that need to be fixed.
 
-            **To fix these issues:**
+            **To fix these issues, either:**
+
+            **Option A** — Comment \`/pre-commit\` on this PR to auto-fix and push changes (same-repo PRs only; not available for external forks).
+
+            **Option B** — Fix locally:
 
             1. Install [pre-commit](https://pre-commit.com/#install)
 
