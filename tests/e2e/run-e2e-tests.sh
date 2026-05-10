@@ -257,8 +257,15 @@ upstream:
     # Purposely disable the local database to simulate a misconfigured application (missing external database info)
     enabled: false
 global:
+  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
+  catalogIndex:
+    image:
+      tag: "1.10-51"
+  # Disabling lightspeed as the main RHDH container is expected to fail to start anyway
+  lightspeed:
+    enabled: false
   dynamic:
-    # Faster startup by disabling all default dynamic plugins
+    # Faster startup by disabling all default dynamic plugins (and Lightspeed is disabled)
     includes: []
 EOF
                 # Add NODE_OPTIONS for SIGUSR2 heap dump method
@@ -361,9 +368,13 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
 route:
   enabled: false
 global:
+  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
+  catalogIndex:
+    image:
+      tag: "1.10-51"
   dynamic:
-    # Faster startup by disabling all default dynamic plugins
-    includes: []
+    includes:
+      - dynamic-plugins.default.yaml
 EOF
     # Add NODE_OPTIONS for SIGUSR2 heap dump method
     # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
@@ -486,7 +497,7 @@ if [ "$SKIP_OPERATOR" = false ]; then
 
     # Create ConfigMap to disable default dynamic plugins for faster startup
     DYNAMIC_PLUGINS_CM="dynamic-plugins-config"
-    log_info "Creating dynamic plugins ConfigMap to disable defaults..."
+    log_info "Creating dynamic plugins ConfigMap..."
     for ns in "$NS_OPERATOR" "$NS_STATEFULSET"; do
         kubectl -n "$ns" apply -f - <<EOF
 apiVersion: v1
@@ -495,18 +506,25 @@ metadata:
   name: $DYNAMIC_PLUGINS_CM
 data:
   dynamic-plugins.yaml: |
-    includes: []
+    includes:
+      - dynamic-plugins.default.yaml
 EOF
     done
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
-    # Build CR spec - add NODE_OPTIONS for SIGUSR2 heap dump method
-    BACKSTAGE_CR_EXTRA_ENVS=""
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_EXTRA_ENVS='
+    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
+    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
+    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
+    BACKSTAGE_CR_EXTRA_ENVS='
     extraEnvs:
       envs:
+        - name: CATALOG_INDEX_IMAGE
+          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+          containers:
+            - install-dynamic-plugins'
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_EXTRA_ENVS="$BACKSTAGE_CR_EXTRA_ENVS"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi
@@ -523,12 +541,18 @@ EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-    # Build CR spec - add NODE_OPTIONS for SIGUSR2 heap dump method
-    BACKSTAGE_CR_STS_EXTRA=""
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_STS_EXTRA='
+    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
+    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
+    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
+    BACKSTAGE_CR_STS_EXTRA='
     extraEnvs:
       envs:
+        - name: CATALOG_INDEX_IMAGE
+          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+          containers:
+            - install-dynamic-plugins'
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_STS_EXTRA="$BACKSTAGE_CR_STS_EXTRA"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi

@@ -287,7 +287,7 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/g
 kubectl patch deployment backstage-developer-hub -p '{"spec":{"template":{"spec":{"containers":[{"name":"backstage-backend","livenessProbe":{"failureThreshold":3}}]}}}}'
 ```
 
-**For Operator-managed deployments**, patch the Backstage CR or the generated Deployment directly.
+**For Operator-managed deployments**, patch the Backstage CR using the `spec.deployment.patch` field. Do not the generated Deployment directly, otherwise your changes will be reverted upon the next reconciliation.
 
 **Why only the liveness probe?** The readiness probe does not need to be adjusted. When the readiness probe fails, the pod is removed from Service endpoints (stops receiving traffic) but continues running. This is expected during heap dump collection. Once the heap dump completes, the readiness probe passes again and traffic resumes. The liveness probe is what matters - if it fails, Kubernetes restarts the pod and you lose the heap dump.
 
