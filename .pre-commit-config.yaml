@@ -21,15 +21,16 @@ repos:
           - .rhdh/docker/requirements.in
         files: ^\.rhdh/docker/requirements\.(in|txt)$
 
+
   - repo: local
     hooks:
-      - id: pybuild-deps-compile
-        name: compile build requirements (.rhdh/docker)
-        entry: pybuild-deps compile --generate-hashes
-          -o .rhdh/docker/requirements-build.txt
-          .rhdh/docker/requirements.txt
+      - id: uv-pip-compile-build-deps
+        name: uv pip compile build deps (.rhdh/docker)
+        entry: uv pip compile --python-version=3.9 --python-platform=linux
+          --generate-hashes
+          --output-file=.rhdh/docker/requirements-build.txt
+          .rhdh/docker/requirements-build.in
         language: python
-        language_version: "3.14"
-        additional_dependencies: [pybuild-deps]
-        files: ^\.rhdh/docker/requirements\.txt$
+        additional_dependencies: [uv]
+        files: ^\.rhdh/docker/requirements-build\.(in|txt)$
         pass_filenames: false
