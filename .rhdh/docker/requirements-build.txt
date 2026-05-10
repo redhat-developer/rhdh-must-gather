@@ -38,9 +38,9 @@ pluggy==1.5.0 \
     # via
     #   -r .rhdh/docker/requirements-build.in
     #   hatchling
-poetry-core==2.2.1 \
-    --hash=sha256:97e50d8593c8729d3f49364b428583e044087ee3def1e010c6496db76bd65ac5 \
-    --hash=sha256:bdfce710edc10bfcf9ab35041605c480829be4ab23f5bc01202cfe5db8f125ab
+poetry-core==2.4.0 \
+    --hash=sha256:4305848477da00272bebd3f615bbec87f64bd117cdb858ab660b626a06a9d96c \
+    --hash=sha256:4e8c7496cf797998ffc493f2e23eba4b038c894c08eadacdcdf688945de6b43a
     # via -r .rhdh/docker/requirements-build.in
 setuptools==82.0.1 \
     --hash=sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9 \
