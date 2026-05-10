@@ -265,7 +265,7 @@ global:
   lightspeed:
     enabled: false
   dynamic:
-		# Faster startup by disabling all default dynamic plugins (and Lightspeed is disabled)
+    # Faster startup by disabling all default dynamic plugins (and Lightspeed is disabled)
     includes: []
 EOF
                 # Add NODE_OPTIONS for SIGUSR2 heap dump method
