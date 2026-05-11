@@ -237,11 +237,47 @@ for spec in "${CR_SPECS[@]}"; do
         else
             log_info "○ No processes directory (pods may not be running)"
         fi
+
+        # Validate rollout history collection
+        if [ -d "$workload_dir/rollout-history" ]; then
+            log_info "✓ Found rollout-history directory"
+            check_file_not_empty "$workload_dir/rollout-history/history.txt" "rollout history"
+            check_file_contains "$workload_dir/rollout-history/history.txt" "REVISION" "rollout history header"
+            check_file_no_error "$workload_dir/rollout-history/history.txt" "rollout history"
+            if [ -f "$workload_dir/deployment.yaml" ]; then
+                if [ -d "$workload_dir/rollout-history/replicasets" ]; then
+                    log_info "✓ Found replicasets directory in rollout-history"
+                    check_file_not_empty "$workload_dir/rollout-history/replicasets/replicasets.yaml" "ReplicaSets YAML"
+                    check_file_contains "$workload_dir/rollout-history/replicasets/replicasets.yaml" "kind: ReplicaSet" "ReplicaSets YAML content"
+                    check_file_no_error "$workload_dir/rollout-history/replicasets/replicasets.yaml" "ReplicaSets YAML"
+                    check_file_not_empty "$workload_dir/rollout-history/replicasets/replicasets.describe.txt" "ReplicaSets description"
+                    check_file_no_error "$workload_dir/rollout-history/replicasets/replicasets.describe.txt" "ReplicaSets description"
+                else
+                    log_error "✗ replicasets directory not found in rollout-history"
+                    ((ERRORS++))
+                fi
+            elif [ -f "$workload_dir/statefulset.yaml" ]; then
+                if [ -d "$workload_dir/rollout-history/controllerrevisions" ]; then
+                    log_info "✓ Found controllerrevisions directory in rollout-history"
+                    check_file_not_empty "$workload_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "ControllerRevisions YAML"
+                    check_file_contains "$workload_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "kind: ControllerRevision" "ControllerRevisions YAML content"
+                    check_file_no_error "$workload_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "ControllerRevisions YAML"
+                    check_file_not_empty "$workload_dir/rollout-history/controllerrevisions/controllerrevisions.describe.txt" "ControllerRevisions description"
+                    check_file_no_error "$workload_dir/rollout-history/controllerrevisions/controllerrevisions.describe.txt" "ControllerRevisions description"
+                else
+                    log_error "✗ controllerrevisions directory not found in rollout-history"
+                    ((ERRORS++))
+                fi
+            fi
+        else
+            log_error "✗ rollout-history directory not found in $workload_dir"
+            ((ERRORS++))
+        fi
     else
         log_error "✗ Workload directory not found at $workload_dir"
         ((ERRORS++))
     fi
-    
+
     # Validate dependent services (PostgreSQL) - stored in db-statefulset/
     deps_dir="$cr_base_dir/db-statefulset"
     if [ -d "$deps_dir" ]; then
@@ -254,6 +290,27 @@ for spec in "${CR_SPECS[@]}"; do
             log_info "✓ Found $postgres_log_files PostgreSQL log file(s)"
         else
             log_warn "○ No PostgreSQL log files found"
+        fi
+        # Validate rollout history for DB StatefulSet
+        if [ -d "$deps_dir/rollout-history" ]; then
+            log_info "✓ Found rollout-history directory for DB StatefulSet"
+            check_file_not_empty "$deps_dir/rollout-history/history.txt" "DB StatefulSet rollout history"
+            check_file_contains "$deps_dir/rollout-history/history.txt" "REVISION" "DB StatefulSet rollout history header"
+            check_file_no_error "$deps_dir/rollout-history/history.txt" "DB StatefulSet rollout history"
+            if [ -d "$deps_dir/rollout-history/controllerrevisions" ]; then
+                log_info "✓ Found controllerrevisions directory in DB StatefulSet rollout-history"
+                check_file_not_empty "$deps_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "DB ControllerRevisions YAML"
+                check_file_contains "$deps_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "kind: ControllerRevision" "DB ControllerRevisions YAML content"
+                check_file_no_error "$deps_dir/rollout-history/controllerrevisions/controllerrevisions.yaml" "DB ControllerRevisions YAML"
+                check_file_not_empty "$deps_dir/rollout-history/controllerrevisions/controllerrevisions.describe.txt" "DB ControllerRevisions description"
+                check_file_no_error "$deps_dir/rollout-history/controllerrevisions/controllerrevisions.describe.txt" "DB ControllerRevisions description"
+            else
+                log_error "✗ controllerrevisions directory not found in DB StatefulSet rollout-history"
+                ((ERRORS++))
+            fi
+        else
+            log_error "✗ rollout-history directory not found in $deps_dir"
+            ((ERRORS++))
         fi
     else
         log_info "○ No db-statefulset directory (external database may be configured)"

@@ -329,6 +329,11 @@ Usage: ./must_gather [params...]
 │   │           │   ├── processes/      # Process list from running pods (all replicas)
 │   │           │   │   └── pod=[pod-name]/
 │   │           │   │       └── container=[container-name].txt  # Process list per container
+│   │           │   ├── rollout-history/ # Rollout revision history
+│   │           │   │   ├── history.txt          # kubectl rollout history output
+│   │           │   │   └── replicasets/          # ReplicaSets backing deployment revisions
+│   │           │   │       ├── replicasets.yaml
+│   │           │   │       └── replicasets.describe.txt
 │   │           │   └── pods/           # Pod listing and details
 │   │           │       ├── pods.txt
 │   │           │       ├── pods.yaml
@@ -338,6 +343,11 @@ Usage: ./must_gather [params...]
 │   │               ├── db-statefulset.describe.txt
 │   │               ├── logs-db.txt     # Database logs
 │   │               ├── logs-db-previous.txt
+│   │               ├── rollout-history/ # Rollout revision history
+│   │               │   ├── history.txt              # kubectl rollout history output
+│   │               │   └── controllerrevisions/     # ControllerRevisions backing statefulset revisions
+│   │               │       ├── controllerrevisions.yaml
+│   │               │       └── controllerrevisions.describe.txt
 │   │               └── pods/           # Database pod details
 │   │                   ├── pods.txt
 │   │                   ├── pods.yaml
@@ -353,7 +363,8 @@ Usage: ./must_gather [params...]
 │               │   ├── logs/
 │               │   ├── data/
 │               │   ├── pods/
-│               │   └── processes/
+│               │   ├── processes/
+│               │   └── rollout-history/
 │               └── dependencies/         # Dependent services (e.g., PostgreSQL from subchart)
 │                   └── [dep-name]/       # Per-dependency directory
 │                       ├── statefulset.yaml    # Dependency workload YAML
@@ -482,6 +493,11 @@ Usage: ./must_gather [params...]
                 │   ├── processes/      # Process list from running pods (all replicas)
                 │   │   └── pod=[pod-name]/
                 │   │       └── container=[container-name].txt  # Process list per container
+                │   ├── rollout-history/ # Rollout revision history
+                │   │   ├── history.txt          # kubectl rollout history output
+                │   │   └── replicasets/          # or controllerrevisions/ for StatefulSets
+                │   │       ├── replicasets.yaml
+                │   │       └── replicasets.describe.txt
                 │   └── pods/           # Pod listing and details
                 │       ├── pods.txt
                 │       ├── pods.yaml
@@ -493,6 +509,11 @@ Usage: ./must_gather [params...]
                     ├── db-statefulset.describe.txt
                     ├── logs-db.txt     # Database logs
                     ├── logs-db-previous.txt
+                    ├── rollout-history/ # Rollout revision history
+                    │   ├── history.txt              # kubectl rollout history output
+                    │   └── controllerrevisions/     # ControllerRevisions backing statefulset revisions
+                    │       ├── controllerrevisions.yaml
+                    │       └── controllerrevisions.describe.txt
                     └── pods/           # Database pods
                         ├── pods.txt
                         ├── pods.yaml

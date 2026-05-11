@@ -99,6 +99,11 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 - **Local Database logs** from PostgreSQL StatefulSets, unless the app is configured to connect to external databases
 - **Must-gather container logs** (when running in pod)
 
+#### Rollout History
+- **Rollout history**: `kubectl rollout history` output for each collected Deployment and StatefulSet
+- **ReplicaSets** (for Deployments): Full YAML definitions and descriptions of all ReplicaSets backing deployment revisions
+- **ControllerRevisions** (for StatefulSets): Full YAML definitions and descriptions of all ControllerRevisions backing statefulset revisions
+
 #### RHDH Manifests (Detailed)
 - **Deployments and StatefulSets**: Full YAML definitions and kubectl describe output
 - **Pods**: Complete pod specifications, status, and logs for all related pods

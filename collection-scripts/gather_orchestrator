@@ -18,6 +18,10 @@ ensure_directory "$orchestrator_dir"
 # Flag to track if any Orchestrator components were found
 orchestrator_detected=false
 
+# File to track orchestrator-related namespaces for gather_namespace-inspect
+# Created lazily on first write; gather_namespace-inspect uses [[ -s file ]] so absence is fine
+ORCH_NAMESPACES_FILE="$orchestrator_dir/detected-namespaces.txt"
+
 # ============================================================================
 # Serverless Operators Detection and Collection
 # ============================================================================
@@ -33,6 +37,7 @@ function gather_serverless_operators() {
     if $KUBECTL_CMD get namespace "$serverless_ns" >/dev/null 2>&1; then
         log_info "\tFound OpenShift Serverless namespace: $serverless_ns"
         orchestrator_detected=true
+        echo "$serverless_ns" >> "$ORCH_NAMESPACES_FILE"
 
         local serverless_ns_dir="$serverless_dir/ns=$serverless_ns"
         ensure_directory "$serverless_ns_dir"
@@ -44,6 +49,13 @@ function gather_serverless_operators() {
         # Collect operator deployment
         safe_exec "$KUBECTL_CMD get deployments -n '$serverless_ns'" "$serverless_ns_dir/deployments.txt" "Deployments in $serverless_ns"
         safe_exec "$KUBECTL_CMD get deployments -n '$serverless_ns' -o yaml" "$serverless_ns_dir/deployments.yaml" "Deployment details in $serverless_ns"
+
+        # Collect rollout history for each deployment
+        local serverless_deploys
+        serverless_deploys=$($KUBECTL_CMD get deployments -n "$serverless_ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        for d in $serverless_deploys; do
+            collect_rollout_history "$serverless_ns" "deployment" "$d" "$serverless_ns_dir/deployments/$d"
+        done
 
         # Collect operator pods
         safe_exec "$KUBECTL_CMD get pods -n '$serverless_ns'" "$serverless_ns_dir/pods.txt" "Pods in $serverless_ns"
@@ -72,6 +84,7 @@ function gather_serverless_operators() {
     if $KUBECTL_CMD get namespace "$logic_ns" >/dev/null 2>&1; then
         log_info "\tFound OpenShift Serverless Logic namespace: $logic_ns"
         orchestrator_detected=true
+        echo "$logic_ns" >> "$ORCH_NAMESPACES_FILE"
 
         local logic_ns_dir="$serverless_dir/ns=$logic_ns"
         ensure_directory "$logic_ns_dir"
@@ -83,6 +96,13 @@ function gather_serverless_operators() {
         # Collect operator deployment
         safe_exec "$KUBECTL_CMD get deployments -n '$logic_ns'" "$logic_ns_dir/deployments.txt" "Deployments in $logic_ns"
         safe_exec "$KUBECTL_CMD get deployments -n '$logic_ns' -o yaml" "$logic_ns_dir/deployments.yaml" "Deployment details in $logic_ns"
+
+        # Collect rollout history for each deployment
+        local logic_deploys
+        logic_deploys=$($KUBECTL_CMD get deployments -n "$logic_ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        for d in $logic_deploys; do
+            collect_rollout_history "$logic_ns" "deployment" "$d" "$logic_ns_dir/deployments/$d"
+        done
 
         # Collect operator pods
         safe_exec "$KUBECTL_CMD get pods -n '$logic_ns'" "$logic_ns_dir/pods.txt" "Pods in $logic_ns"
@@ -194,6 +214,8 @@ function gather_sonataflow_platforms() {
             sfp_name=$(echo "$sfp_info" | cut -d'/' -f2)
         fi
 
+        [[ -n "$sfp_ns" ]] && echo "$sfp_ns" >> "$ORCH_NAMESPACES_FILE"
+
         log_info "--> Processing SonataFlowPlatform $sfp_name in namespace $sfp_ns"
 
         local sfp_cr_dir="$sfp_dir/ns=$sfp_ns/$sfp_name"
@@ -208,6 +230,13 @@ function gather_sonataflow_platforms() {
         # Collect Data Index Service info if present
         safe_exec "$KUBECTL_CMD -n '$sfp_ns' get deployments -l 'app.kubernetes.io/component=sonataflow-platform'" \
             "$sfp_cr_dir/related-deployments.txt" "SonataFlowPlatform related deployments"
+
+        # Collect rollout history for SonataFlowPlatform-related deployments
+        local sfp_deploys
+        sfp_deploys=$($KUBECTL_CMD get deployments -n "$sfp_ns" -l "app.kubernetes.io/component=sonataflow-platform" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        for d in $sfp_deploys; do
+            collect_rollout_history "$sfp_ns" "deployment" "$d" "$sfp_cr_dir/deployments/$d"
+        done
         safe_exec "$KUBECTL_CMD -n '$sfp_ns' get services -l 'sonataflow.org/platform=$sfp_name'" \
             "$sfp_cr_dir/related-services.txt" "SonataFlowPlatform related services"
         safe_exec "$KUBECTL_CMD -n '$sfp_ns' logs -l 'sonataflow.org/platform=$sfp_name' --all-containers --prefix ${log_collection_args:-}" \
@@ -263,6 +292,8 @@ function gather_sonataflow_workflows() {
             wf_ns=$(echo "$wf_info" | cut -d'/' -f1)
             wf_name=$(echo "$wf_info" | cut -d'/' -f2)
         fi
+
+        [[ -n "$wf_ns" ]] && echo "$wf_ns" >> "$ORCH_NAMESPACES_FILE"
 
         local ns_dir="$sfw_dir/ns=$wf_ns"
 
@@ -320,12 +351,19 @@ function gather_knative_resources() {
     # Check knative-serving namespace for resources
     if $KUBECTL_CMD get namespace knative-serving >/dev/null 2>&1; then
         orchestrator_detected=true
+        echo "knative-serving" >> "$ORCH_NAMESPACES_FILE"
         local serving_dir="$knative_dir/knative-serving"
         ensure_directory "$serving_dir"
 
         safe_exec "$KUBECTL_CMD -n knative-serving get deployments" "$serving_dir/deployments.txt" "Knative Serving deployments"
         safe_exec "$KUBECTL_CMD -n knative-serving get pods" "$serving_dir/pods.txt" "Knative Serving pods"
         safe_exec "$KUBECTL_CMD -n knative-serving get services" "$serving_dir/services.txt" "Knative Serving services"
+
+        local serving_deploys
+        serving_deploys=$($KUBECTL_CMD get deployments -n knative-serving -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        for d in $serving_deploys; do
+            collect_rollout_history "knative-serving" "deployment" "$d" "$serving_dir/deployments/$d"
+        done
     fi
 
     # KnativeEventing CR. Try get resource directly; user may have get CR permission without get crd permission.
@@ -337,12 +375,19 @@ function gather_knative_resources() {
     # Check knative-eventing namespace for resources
     if $KUBECTL_CMD get namespace knative-eventing >/dev/null 2>&1; then
         orchestrator_detected=true
+        echo "knative-eventing" >> "$ORCH_NAMESPACES_FILE"
         local eventing_dir="$knative_dir/knative-eventing"
         ensure_directory "$eventing_dir"
 
         safe_exec "$KUBECTL_CMD -n knative-eventing get deployments" "$eventing_dir/deployments.txt" "Knative Eventing deployments"
         safe_exec "$KUBECTL_CMD -n knative-eventing get pods" "$eventing_dir/pods.txt" "Knative Eventing pods"
         safe_exec "$KUBECTL_CMD -n knative-eventing get services" "$eventing_dir/services.txt" "Knative Eventing services"
+
+        local eventing_deploys
+        eventing_deploys=$($KUBECTL_CMD get deployments -n knative-eventing -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        for d in $eventing_deploys; do
+            collect_rollout_history "knative-eventing" "deployment" "$d" "$eventing_dir/deployments/$d"
+        done
     fi
 
     # KnativeKafka CR (optional). Try get resource directly; user may have get CR permission without get crd permission.
@@ -422,6 +467,13 @@ gather_orchestrator_crds
 gather_sonataflow_platforms
 gather_sonataflow_workflows
 gather_knative_resources
+
+# Deduplicate the detected namespaces file
+if [[ -s "$ORCH_NAMESPACES_FILE" ]]; then
+    sort -u -o "$ORCH_NAMESPACES_FILE" "$ORCH_NAMESPACES_FILE"
+    log_info "Orchestrator namespaces for namespace-inspect: $(tr '\n' ',' < "$ORCH_NAMESPACES_FILE" | sed 's/,$//')"
+fi
+
 generate_orchestrator_summary
 
 if [[ "$orchestrator_detected" == "true" ]]; then
