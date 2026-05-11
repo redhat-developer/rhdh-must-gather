@@ -85,8 +85,7 @@ jobs:
           make image-build \
             CONTAINER_TOOL=podman \
             IMAGE_NAME="$NAME" \
-            IMAGE_TAG="$TAG" \
-            BUILD_ARGS="$ARGS"
+            IMAGE_TAG="$TAG"
 
       # Save the image as a tarball for the push workflow
       - name: Save image to tarball

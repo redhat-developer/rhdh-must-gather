@@ -96,7 +96,7 @@ jobs:
             REGISTRY=${{ vars.REGISTRY }} \
             IMAGE_NAME=${{ env.IMAGE_NAME}} \
             IMAGE_TAG=${{ steps.prep.outputs.IMAGE_TAG }} \
-            BUILD_ARGS="--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}"
+            RHDH_MUST_GATHER_VERSION="${VERSION}"
           
           # Get image digest
           DIGEST=$(podman inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)

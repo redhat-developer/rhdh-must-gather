@@ -36,7 +36,7 @@ make clean
 
 ### Pre-commit Hooks
 
-This project uses [pre-commit](https://pre-commit.com/) to enforce consistency between the Makefile, `.rhdh/docker/requirements.in`, and `.rhdh/docker/requirements.txt`.
+This project uses [pre-commit](https://pre-commit.com/) to enforce consistency between the Makefile, `requirements.in`, and `requirements.txt`.
 
 #### Setup
 
@@ -55,8 +55,8 @@ pre-commit run --all-files
 
 | Hook | What it does |
 |------|-------------|
-| `check-requirements-version` | Ensures the `yq` version in `.rhdh/docker/requirements.in` matches `YQ_VERSION` in the Makefile. Auto-fixes on failure. |
-| `pip-compile` | Regenerates `.rhdh/docker/requirements.txt` from `requirements.in` with pinned hashes (for hermetic builds). Auto-fixes on failure. |
+| `check-requirements-version` | Ensures the `yq` version in `requirements.in` matches `YQ_VERSION` in the Makefile. Auto-fixes on failure. |
+| `pip-compile` | Regenerates `requirements.txt` from `requirements.in` with pinned hashes (for hermetic builds). Auto-fixes on failure. |
 
 Both hooks auto-fix files when they detect drift. If a hook modifies a file, it will fail the first time. Stage the changes and re-run:
 
@@ -90,13 +90,25 @@ make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW_VERSION>
 
 #### Building the Image
 
+All image builds use a hermetic build process via [Hermeto](https://github.com/konflux-ci/hermeto), matching the downstream Konflux pipeline. This catches dependency issues (missing build deps, binary packages, etc.) before pushing to midstream.
+
+Prerequisites: `podman`
+
 ```bash
-# Build locally
+# Hermetic build (default — prefetches deps via Hermeto, builds with --network none)
 make image-build
 
-# Build and push to registry
+# Quick non-hermetic build (local dev only — uses network, no Hermeto required)
+make image-build-non-hermetic
+
+# Build only the Hermeto dependency cache (useful for iterating on Containerfile changes)
+make hermeto-cache
+
+# Build and push to registry (hermetic)
 make image-push REGISTRY=your-registry.com IMAGE_NAME=namespace/rhdh-must-gather
 
-# Build and push with custom image name and tag
-make image-push REGISTRY=your-registry.com IMAGE_NAME=namespace/my-rhdh-must-gather IMAGE_TAG=v1.0.0
+# Cross-platform hermetic build (requires qemu-user-static)
+TARGET_PLATFORM=linux/arm64 make image-build
 ```
+
+The hermetic build uses the root `Containerfile` which is the single source of truth for both upstream and downstream (Konflux) builds. The `image-build-non-hermetic` target auto-generates a non-hermetic Containerfile on the fly by stripping Cachi2 constructs — it is not committed.

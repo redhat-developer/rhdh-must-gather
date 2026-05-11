@@ -187,10 +187,22 @@ vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_N
 ##@ Build
 
 .PHONY: image-build
-image-build: ## Build the must-gather container image
-	@echo "Building must-gather image..."
-	$(CONTAINER_TOOL) build $(BUILD_ARGS) $(if $(LABELS),$(LABELS)) --build-arg RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+image-build: ## Build the must-gather image hermetically using Hermeto
+	BUILD_ARGS="--build-arg RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION)" \
+		./hack/local-hermeto-build.sh -d . -i $(IMAGE_NAME):$(IMAGE_TAG)
+
+.PHONY: image-build-non-hermetic
+image-build-non-hermetic: ## Build the image without Hermeto (quick local dev builds, needs network)
+	@./hack/generate-non-hermetic-containerfile.sh Containerfile Containerfile.non-hermetic
+	$(CONTAINER_TOOL) build $(BUILD_ARGS) $(if $(LABELS),$(LABELS)) \
+		--build-arg RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
+		-f Containerfile.non-hermetic -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	@rm -f Containerfile.non-hermetic
 	@echo "Image built: $(IMAGE_NAME):$(IMAGE_TAG)"
+
+.PHONY: hermeto-cache
+hermeto-cache: ## Build only the Hermeto dependency cache (no image build)
+	./hack/local-hermeto-build.sh -d . --no-image
 
 .PHONY: image-push
 image-push: image-build ## Build and push the image to registry
