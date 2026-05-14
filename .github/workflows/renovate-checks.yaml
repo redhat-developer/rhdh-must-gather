@@ -23,7 +23,7 @@ jobs:
         run: |
           # Extract and validate all transformTemplates JSONata expressions
           # renovate: datasource=npm
-          npm install --no-save jsonata@2.1.1
+          npm install --no-save jsonata@2.2.0
           jq -r '.. | .transformTemplates? // empty | .[]' .github/renovate.json | while IFS= read -r expr; do
             echo "Validating: $expr"
             node -e "const jsonata = require('jsonata'); jsonata(process.argv[1])" "$expr" || exit 1
