@@ -1,6 +1,21 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "pip-compile": {
+    "enabled": true,
+    "managerFilePatterns": [".rhdh/docker/requirements*.txt"]
+  },
+  "pip_requirements": {
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "yq is tracked via the Makefile custom manager; ignore it in pip-compile",
+      "matchManagers": ["pip-compile"],
+      "matchPackageNames": ["yq"],
+      "enabled": false
+    }
+  ],
   "customDatasources": {
     "openshift-client": {
       "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",

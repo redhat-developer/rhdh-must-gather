@@ -165,6 +165,28 @@ else
     log_info "✓ Correctly missing processes directory (expected - no running pods)"
 fi
 
+# Validate rollout history collection
+if [ -d "$DEPLOY_DIR/rollout-history" ]; then
+    log_info "✓ Found rollout-history directory"
+    check_file_not_empty "$DEPLOY_DIR/rollout-history/history.txt" "rollout history"
+    check_file_contains "$DEPLOY_DIR/rollout-history/history.txt" "REVISION" "rollout history header"
+    check_file_no_error "$DEPLOY_DIR/rollout-history/history.txt" "rollout history"
+    if [ -d "$DEPLOY_DIR/rollout-history/replicasets" ]; then
+        log_info "✓ Found replicasets directory in rollout-history"
+        check_file_not_empty "$DEPLOY_DIR/rollout-history/replicasets/replicasets.yaml" "ReplicaSets YAML"
+        check_file_contains "$DEPLOY_DIR/rollout-history/replicasets/replicasets.yaml" "kind: ReplicaSet" "ReplicaSets YAML content"
+        check_file_no_error "$DEPLOY_DIR/rollout-history/replicasets/replicasets.yaml" "ReplicaSets YAML"
+        check_file_not_empty "$DEPLOY_DIR/rollout-history/replicasets/replicasets.describe.txt" "ReplicaSets description"
+        check_file_no_error "$DEPLOY_DIR/rollout-history/replicasets/replicasets.describe.txt" "ReplicaSets description"
+    else
+        log_error "✗ replicasets directory not found in rollout-history"
+        ((ERRORS++))
+    fi
+else
+    log_error "✗ rollout-history directory not found in $DEPLOY_DIR"
+    ((ERRORS++))
+fi
+
 log_info ""
 log_info "Helm validation completed with $(get_error_count) error(s)"
 

@@ -10,7 +10,7 @@ This `must-gather` helps users collect essential RHDH data from their deployment
 - **Multi-deployment**: Helm-based and Operator-managed RHDH instances
 - **RHDH-focused collection**: Only RHDH-specific logs, configurations, and resources
 
-## Quick Start
+## Quick start
 
 ### For OpenShift clusters
 
@@ -23,8 +23,6 @@ oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather
 # Or to pass specific options to the gather script
 oc adm must-gather --image=quay.io/rhdh-community/rhdh-must-gather -- /usr/bin/gather [options...]
 ```
-
-> **Note**: For more general cluster-wide information, combine this with the generic OpenShift must-gather (by omitting the `--image` option): `oc adm must-gather`
 
 ### For Kubernetes clusters
 
@@ -86,13 +84,13 @@ See [heap-dumps-collection.md](./docs/heap-dumps-collection.md) for more details
 
 See [secret-collection-and-sanitization.md](./docs/secret-collection-and-sanitization.md) for more details.
 
-## Disconnected/Airgapped Environments
+## Disconnected/Airgapped environments
 
 For running in airgapped environments (partially or fully disconnected), see [disconnected-environments.md](./docs/disconnected-environments.md) for instructions on mirroring the container image and/or Helm chart to your internal registry.
 
 ## Configuration
 
-### Environment Variables
+### Environment variables
 
 | Variable                 | Default         | Description                                            |
 |--------------------------|-----------------|--------------------------------------------------------|
@@ -105,7 +103,7 @@ For running in airgapped environments (partially or fully disconnected), see [di
 | `HEAP_DUMP_BUFFER_SIZE`  | `16777216`      | WebSocket buffer size in bytes (16MB) for inspector method |
 | `HEAP_DUMP_REMOTE_DIR`   | `/tmp`          | Directory in container for heap dumps (SIGUSR2 method) |
 
-### Command Line Options
+### Command-line options
 
 ```bash
 Usage: ./must_gather [params...]
@@ -198,7 +196,7 @@ Usage: ./must_gather [params...]
   ./must_gather --with-secrets --with-heap-dumps
 ```
 
-#### Available Exclusion Flags
+#### Available exclusion flags
 
 | Flag | Description | Use Case |
 |------|-------------|----------|
@@ -210,7 +208,7 @@ Usage: ./must_gather [params...]
 | `--without-ingress` | Skip Kubernetes ingress collection | When ingresses are not used for RHDH access |
 | `--without-namespace-inspect` | Skip deep Namespace inspect | **Not recommended** as it removes OMC compatibility. Use only for minimal/quick collections |
 
-#### Namespace Filtering
+#### Namespace filtering
 
 | Flag | Description | Use Case |
 |------|-------------|----------|
@@ -329,6 +327,11 @@ Usage: ./must_gather [params...]
 │   │           │   ├── processes/      # Process list from running pods (all replicas)
 │   │           │   │   └── pod=[pod-name]/
 │   │           │   │       └── container=[container-name].txt  # Process list per container
+│   │           │   ├── rollout-history/ # Rollout revision history
+│   │           │   │   ├── history.txt          # kubectl rollout history output
+│   │           │   │   └── replicasets/          # ReplicaSets backing deployment revisions
+│   │           │   │       ├── replicasets.yaml
+│   │           │   │       └── replicasets.describe.txt
 │   │           │   └── pods/           # Pod listing and details
 │   │           │       ├── pods.txt
 │   │           │       ├── pods.yaml
@@ -338,6 +341,11 @@ Usage: ./must_gather [params...]
 │   │               ├── db-statefulset.describe.txt
 │   │               ├── logs-db.txt     # Database logs
 │   │               ├── logs-db-previous.txt
+│   │               ├── rollout-history/ # Rollout revision history
+│   │               │   ├── history.txt              # kubectl rollout history output
+│   │               │   └── controllerrevisions/     # ControllerRevisions backing statefulset revisions
+│   │               │       ├── controllerrevisions.yaml
+│   │               │       └── controllerrevisions.describe.txt
 │   │               └── pods/           # Database pod details
 │   │                   ├── pods.txt
 │   │                   ├── pods.yaml
@@ -353,7 +361,8 @@ Usage: ./must_gather [params...]
 │               │   ├── logs/
 │               │   ├── data/
 │               │   ├── pods/
-│               │   └── processes/
+│               │   ├── processes/
+│               │   └── rollout-history/
 │               └── dependencies/         # Dependent services (e.g., PostgreSQL from subchart)
 │                   └── [dep-name]/       # Per-dependency directory
 │                       ├── statefulset.yaml    # Dependency workload YAML
@@ -482,6 +491,11 @@ Usage: ./must_gather [params...]
                 │   ├── processes/      # Process list from running pods (all replicas)
                 │   │   └── pod=[pod-name]/
                 │   │       └── container=[container-name].txt  # Process list per container
+                │   ├── rollout-history/ # Rollout revision history
+                │   │   ├── history.txt          # kubectl rollout history output
+                │   │   └── replicasets/          # or controllerrevisions/ for StatefulSets
+                │   │       ├── replicasets.yaml
+                │   │       └── replicasets.describe.txt
                 │   └── pods/           # Pod listing and details
                 │       ├── pods.txt
                 │       ├── pods.yaml
@@ -493,6 +507,11 @@ Usage: ./must_gather [params...]
                     ├── db-statefulset.describe.txt
                     ├── logs-db.txt     # Database logs
                     ├── logs-db-previous.txt
+                    ├── rollout-history/ # Rollout revision history
+                    │   ├── history.txt              # kubectl rollout history output
+                    │   └── controllerrevisions/     # ControllerRevisions backing statefulset revisions
+                    │       ├── controllerrevisions.yaml
+                    │       └── controllerrevisions.describe.txt
                     └── pods/           # Database pods
                         ├── pods.txt
                         ├── pods.yaml

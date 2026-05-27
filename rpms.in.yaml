@@ -37,6 +37,8 @@ packages:
   - python3-pip
   - rsync
   - rust-toolset
+  - sed
+  - shadow-utils
   - tar
   - util-linux
 
@@ -44,5 +46,3 @@ packages:
 reinstallPackages:
   - bash
   - grep
-  - sed
-  - shadow-utils

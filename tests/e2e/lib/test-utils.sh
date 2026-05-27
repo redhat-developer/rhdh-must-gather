@@ -174,6 +174,16 @@ check_file_contains() {
     fi
 }
 
+check_file_no_error() {
+    local file="$1"
+    local description="$2"
+    if [ -f "$file" ] && grep -qiE 'Error from server|NotFound|forbidden|unknown command|Command failed or timed out' "$file"; then
+        log_error "✗ $description contains error output: $file"
+        _dump_file_context "$file"
+        ((ERRORS++))
+    fi
+}
+
 # Returns the current error count
 get_error_count() {
     echo "$ERRORS"
