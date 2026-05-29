@@ -13,6 +13,15 @@ on:
       - 'rpms.in.yaml'
       - '.rhdh/docker/Containerfile'
       - '.github/workflows/update-rpm-lockfile.yaml'
+  pull_request:
+    branches:
+      - main
+      - release-1.**
+    paths:
+      - 'rpms.in.yaml'
+      - 'rpms.lock.yaml'
+      - '.rhdh/docker/Containerfile'
+      - '.github/workflows/update-rpm-lockfile.yaml'
 
 permissions:
   contents: read
@@ -40,6 +49,7 @@ jobs:
           fi
 
       - name: Configure Git
+        if: github.event_name != 'pull_request'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -69,14 +79,30 @@ jobs:
         id: check-lockfile-changes
         run: |
           if git diff --quiet rpms.lock.yaml; then
-            echo "No changes to rpms.lock.yaml detected, skipping PR creation"
+            echo "No changes to rpms.lock.yaml detected"
             echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "Changes detected in rpms.lock.yaml, creating PR"
+            echo "Changes detected in rpms.lock.yaml:"
+            echo ""
+            git diff rpms.lock.yaml
             echo "changes=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Warn if lockfile is out-of-date
+        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        run: |
+          echo "::warning::rpms.lock.yaml is out of date. Please regenerate it by running 'rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' and committing the result, or wait for the next periodic update."
+          git diff rpms.lock.yaml > rpms-lockfile.diff
+
+      - name: Upload lockfile diff
+        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rpms-lockfile-diff
+          path: rpms-lockfile.diff
+
       - name: Determine target branch
+        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         id: target-branch
         run: |
           TARGET_BRANCH="${{ github.ref_name }}"
@@ -84,7 +110,7 @@ jobs:
           echo "Target branch: ${TARGET_BRANCH}"
 
       - name: Check if update PR already exists
-        if: steps.check-lockfile-changes.outputs.changes == 'true'
+        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         id: existing-pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,7 +120,7 @@ jobs:
           echo "exists=$([ "$pr_count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Create or update PR branch
-        if: steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
+        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
         env:
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
@@ -104,7 +130,7 @@ jobs:
           git push -u origin "$BRANCH"
 
       - name: Create Pull Request
-        if: steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
+        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_BRANCH: ${{ steps.target-branch.outputs.name }}
@@ -121,6 +147,7 @@ jobs:
           )"
 
       - name: Summary
+        if: github.event_name != 'pull_request'
         run: |
           if [ "${{ steps.check-lockfile-changes.outputs.changes }}" == "true" ]; then
             echo "RPM lockfile updated and PR created/updated"
