@@ -4,7 +4,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:1780554257@sha256:157ac93fde9596b9e04908fa9a22746350f53452718af9562289239f68a505c6 AS websocat-builder
+FROM registry.access.redhat.com/ubi9:1781497092@sha256:1b99266db480e8aa6dfda6900697a07ec99334095b4f87d1687edfc06c965132 AS websocat-builder
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     arch=$(uname -m); \
@@ -35,7 +35,7 @@ RUN set -eu; \
 
 # Stage 2: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:1780379098@sha256:ae09ecc3d754bc1726cbda3e2599cc7839e09fe1cc547ce173cf669b645be3cc
+FROM registry.access.redhat.com/ubi9-minimal:1781496842@sha256:1bc3c5c15720506a0cf48adfdf8b623dfe704377e007d7bbae8d14876392ca6a
 
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 
