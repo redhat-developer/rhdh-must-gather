@@ -17,10 +17,15 @@
       "enabled": false
     },
     {
-      "description": "Only allow patch updates on release branches",
+      "description": "Disable all updates on release branches by default",
       "matchBaseBranches": ["/^release-.*/"],
-      "matchUpdateTypes": ["major", "minor"],
       "enabled": false
+    },
+    {
+      "description": "Re-enable only patch updates on release branches",
+      "matchBaseBranches": ["/^release-.*/"],
+      "matchUpdateTypes": ["patch"],
+      "enabled": true
     }
   ],
   "customDatasources": {
