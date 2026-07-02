@@ -23,17 +23,6 @@ jobs:
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
 
     steps:
-      - name: Add eyes reaction
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'eyes',
-            });
-
       - name: Resolve PR head and reject forks
         id: pr
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -46,7 +35,9 @@ jobs:
             });
             const headRepo = pr.head.repo?.full_name || '';
             const baseRepo = pr.base.repo.full_name;
-            if (headRepo !== baseRepo) {
+            const isFork = headRepo !== baseRepo;
+            core.setOutput('is_fork', isFork.toString());
+            if (isFork) {
               core.setFailed(
                 `/pre-commit is not supported on fork PRs (head: ${headRepo}, base: ${baseRepo})`
               );
@@ -54,6 +45,29 @@ jobs:
             }
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('head_ref', pr.head.ref);
+
+      - name: Comment on fork PR
+        if: always() && steps.pr.outputs.is_fork == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '`/pre-commit` is not supported on fork PRs. Please run `pre-commit run --all-files` locally and push the fixes.',
+            });
+
+      - name: Add eyes reaction
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
 
       - name: Checkout at pinned SHA
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
