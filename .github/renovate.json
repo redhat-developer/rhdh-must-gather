@@ -26,6 +26,13 @@
       "matchBaseBranches": ["/^release-.*/"],
       "matchUpdateTypes": ["patch"],
       "enabled": true
+    },
+    {
+      "description": "Re-enable digest updates for container images on release branches",
+      "matchBaseBranches": ["/^release-.*/"],
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": true
     }
   ],
   "customDatasources": {
