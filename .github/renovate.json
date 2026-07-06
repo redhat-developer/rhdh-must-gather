@@ -4,7 +4,7 @@
   "baseBranchPatterns": ["main", "/^release-.*/"],
   "pip-compile": {
     "enabled": true,
-    "managerFilePatterns": [".rhdh/docker/requirements*.txt"]
+    "managerFilePatterns": ["requirements*.txt"]
   },
   "pip_requirements": {
     "enabled": false
@@ -35,15 +35,6 @@
       "enabled": true
     }
   ],
-  "customDatasources": {
-    "openshift-client": {
-      "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
-      "format": "html",
-      "transformTemplates": [
-        "{\"releases\": [$filter($, function($v){$type($v)=\"string\" and $contains($v, /^4\\.\\d+\\.\\d+\\/$/)}).( {\"version\": $replace($, /\\/$/, \"\")} )]}"
-      ]
-    }
-  },
   "customManagers": [
     {
       "customType": "regex",
@@ -52,24 +43,6 @@
         "#\\s*renovate:\\s*datasource=npm\\n\\s*npm install\\s+--no-save\\s+(?<depName>[^@\\s]+)@(?<currentValue>[\\d.]+)"
       ],
       "datasourceTemplate": "npm"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^Containerfile$/"],
-      "matchStrings": [
-        "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
-      ],
-      "depNameTemplate": "helm/helm",
-      "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^Containerfile$/"],
-      "matchStrings": [
-        "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
-      ],
-      "depNameTemplate": "openshift-client",
-      "datasourceTemplate": "custom.openshift-client"
     },
     {
       "customType": "regex",

@@ -1,4 +1,4 @@
-name: Container image build
+name: Container image build (Hermetic)
 
 on:
   push:
@@ -14,12 +14,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: ${{ vars.REGISTRY_ORG }}/rhdh-must-gather
+  IMAGE_NAME: rhdh-must-gather
 
 jobs:
   image-publish:
-    name: Publish Container Image
+    name: Publish Container Image (Hermetic)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -48,17 +49,17 @@ jobs:
         id: prep
         run: |
           SHORT_SHA=$(git rev-parse --short=9 HEAD)
-          
+
           # Calculate expiration date (2 weeks from now as Unix timestamp)
           EXPIRATION_TIMESTAMP=$(date -u -d "+14 days" +"%s")
           echo "EXPIRATION_TIMESTAMP=${EXPIRATION_TIMESTAMP}" >> "$GITHUB_OUTPUT"
-          
+
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Git tag: push the tag version and derive major/minor tags
             TAG_VERSION=${GITHUB_REF#refs/tags/}
             echo "IMAGE_TAG=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
             echo "VERSION=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
-            
+
             # Parse semantic version to extract major and major.minor
             if [[ ${TAG_VERSION} =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
               MAJOR="${BASH_REMATCH[1]}"
@@ -83,48 +84,48 @@ jobs:
             echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
-      # Build and push using Makefile
-      - name: Build and push container image
-        id: build-push
+      - name: Build image (hermetic)
+        uses: ./.github/actions/docker-build
+        with:
+          imageName: ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
+          imageTags: |
+            type=raw,value=${{ steps.prep.outputs.IMAGE_TAG }}
+          imageLabels: |
+            org.opencontainers.image.version=${{ steps.prep.outputs.VERSION }}
+          buildArgs: |
+            RHDH_MUST_GATHER_VERSION=${{ steps.prep.outputs.VERSION }}
+          skipArtifactUpload: 'true'
+
+      - name: Push main tag
+        id: push-main
+        env:
+          FULL_IMAGE: ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ steps.prep.outputs.IMAGE_TAG }}
         run: |
-          # Get the VERSION from prep step
-          VERSION="${{ steps.prep.outputs.VERSION }}"
-          
-          # Build and push main tag
-          make image-push \
-            CONTAINER_TOOL=podman \
-            REGISTRY=${{ vars.REGISTRY }} \
-            IMAGE_NAME=${{ env.IMAGE_NAME}} \
-            IMAGE_TAG=${{ steps.prep.outputs.IMAGE_TAG }} \
-            BUILD_ARGS="--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}"
-          
-          # Get image digest
-          DIGEST=$(podman inspect --format='{{index .RepoDigests 0}}' ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} | cut -d'@' -f2)
+          podman push --digestfile /tmp/digest.txt "$FULL_IMAGE"
+          DIGEST="sha256:$(cat /tmp/digest.txt | sed 's/^sha256://')"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          
-          # Save main tag for signing
-          echo "${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }}" > /tmp/image-tags.txt
+
+          echo "$FULL_IMAGE" > /tmp/image-tags.txt
 
       # Push extra tags if specified
       - name: Push extra tags
         if: steps.prep.outputs.EXTRA_TAGS != ''
+        env:
+          MAIN_IMAGE: ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ steps.prep.outputs.IMAGE_TAG }}
+          REGISTRY_PREFIX: ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
         run: |
-          # Process each extra tag (space-separated)
           for TAG in ${{ steps.prep.outputs.EXTRA_TAGS }}; do
             echo "Processing tag: ${TAG}"
-            
-            # All extra tags reuse the main image to preserve digest
-            echo "Tagging and pushing: ${TAG}"
-            podman tag ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${{ steps.prep.outputs.IMAGE_TAG }} ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
-            podman push ${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}
-            
+
+            podman tag "$MAIN_IMAGE" "${REGISTRY_PREFIX}:${TAG}"
+            podman push "${REGISTRY_PREFIX}:${TAG}"
+
             # Track commit-SHA tags for expiration
             if [[ ${TAG} == latest-* ]]; then
               echo "${TAG}" >> /tmp/expiry-tags.txt
             fi
-            
-            # Add tag for signing
-            echo "${{ vars.REGISTRY }}/${{ env.IMAGE_NAME}}:${TAG}" >> /tmp/image-tags.txt
+
+            echo "${REGISTRY_PREFIX}:${TAG}" >> /tmp/image-tags.txt
           done
 
       # Set expiration on commit-SHA tags via Quay.io API
@@ -141,11 +142,7 @@ jobs:
             echo "No commit-SHA tags to set expiration on"
             exit 0
           fi
-          
-          # Extract namespace and repo name from IMAGE_NAME
-          NAMESPACE=$(echo "${{ env.IMAGE_NAME }}" | cut -d'/' -f1)
-          REPO=$(echo "${{ env.IMAGE_NAME }}" | cut -d'/' -f2)
-          
+
           # Set expiration for each commit-SHA tag
           while IFS= read -r TAG; do
             echo "Setting expiration on ${TAG} to ${{ steps.prep.outputs.EXPIRATION_TIMESTAMP }} (Unix timestamp)"
@@ -153,16 +150,16 @@ jobs:
               -H "Authorization: Bearer ${API_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "{\"expiration\": ${{ steps.prep.outputs.EXPIRATION_TIMESTAMP }}}" \
-              "https://${{ vars.REGISTRY }}/api/v1/repository/${NAMESPACE}/${REPO}/tag/${TAG}")
-            
+              "https://${{ vars.REGISTRY }}/api/v1/repository/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}/tag/${TAG}")
+
             HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
             BODY=$(echo "$RESPONSE" | sed '$d')
-            
+
             if [ "$HTTP_CODE" -ne 200 ] && [ "$HTTP_CODE" -ne 201 ]; then
               echo "Warning: Failed to set expiration on ${TAG} (HTTP $HTTP_CODE): $BODY"
               echo "This may be due to using a robot account token instead of an OAuth application token"
             else
-              echo "✓ Expiration set successfully on ${TAG}"
+              echo "Expiration set successfully on ${TAG}"
             fi
           done < /tmp/expiry-tags.txt
 
@@ -170,7 +167,7 @@ jobs:
       # https://github.com/sigstore/cosign
       - name: Sign the published images
         env:
-          DIGEST: ${{ steps.build-push.outputs.digest }}
+          DIGEST: ${{ steps.push-main.outputs.digest }}
         run: |
           # Sign all tags
           while IFS= read -r tag; do
@@ -180,16 +177,17 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Summary (Hermetic)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ steps.prep.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Registry**: ${{ vars.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Main Tag**: \`${{ steps.prep.outputs.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Built hermetically (--network none) and pushed" >> $GITHUB_STEP_SUMMARY
           if [ -n "${{ steps.prep.outputs.EXTRA_TAGS }}" ]; then
             echo "- **Extra Tags**:" >> $GITHUB_STEP_SUMMARY
             for TAG in ${{ steps.prep.outputs.EXTRA_TAGS }}; do
               echo "  - \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
             done
           fi
-          echo "- **Digest**: \`${{ steps.build-push.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Signed**: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest**: \`${{ steps.push-main.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed**: Yes" >> $GITHUB_STEP_SUMMARY

@@ -1,4 +1,4 @@
-name: PR Build
+name: PR Build (Hermetic)
 
 on:
   pull_request:
@@ -12,9 +12,9 @@ env:
 
 jobs:
   pr-build:
-    name: Build PR Container Image
+    name: Build PR Container Image (Hermetic)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     outputs:
@@ -26,9 +26,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-          persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
+          persist-credentials: false
 
-      # check changes in this commit for regex include and exclude matches
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
@@ -36,10 +35,18 @@ jobs:
           files: |
             .github/workflows/pr-build.yaml
             .github/workflows/pr-push.yaml
+            .github/actions/docker-build/**
             Makefile
             Containerfile
             .containerignore
             collection-scripts/**
+            requirements*.txt
+            requirements*.in
+            rpms.in.yaml
+            rpms.lock.yaml
+            vendor/websocat/Cargo.lock
+            vendor/websocat/Cargo.toml
+            scripts/local-hermeto-build.sh
             LICENSE
           files_ignore: |
             **/*.md
@@ -51,19 +58,15 @@ jobs:
         env:
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          # Use printf and quoted variables to prevent word splitting/execution
           printf '%s\n' "$ALL_CHANGED_FILES" | while IFS= read -r file; do
             echo "Changed: $file"
           done
 
-      # Generate image tags and build args
       - name: Prepare build variables
         if: steps.changed-files.outputs.any_changed == 'true'
         id: prep
         env:
-          # Map context to ENV to prevent injection into the 'run' script
           PR_NUM: ${{ github.event.pull_request.number }}
-          # Use PR head SHA, not the merge commit SHA that GitHub creates for pull_request events
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           SHORT_SHA="${PR_HEAD_SHA:0:9}"
@@ -71,34 +74,21 @@ jobs:
 
           echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
           echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA} ${VERSION}-pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
-          echo "BUILD_ARGS=--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build image
+      - name: Build image (hermetic)
         if: steps.changed-files.outputs.any_changed == 'true'
-        env:
-          # Map outputs to environment variables here
-          TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
-          ARGS: ${{ steps.prep.outputs.BUILD_ARGS }}
-          NAME: ${{ env.IMAGE_NAME }}
-        run: |
-          make image-build \
-            CONTAINER_TOOL=podman \
-            IMAGE_NAME="$NAME" \
-            IMAGE_TAG="$TAG" \
-            BUILD_ARGS="$ARGS"
+        uses: ./.github/actions/docker-build
+        with:
+          imageName: ${{ env.IMAGE_NAME }}
+          imageTags: |
+            type=raw,value=${{ steps.prep.outputs.IMAGE_TAG }}
+          imageLabels: |
+            org.opencontainers.image.version=${{ steps.prep.outputs.VERSION }}
+          buildArgs: |
+            RHDH_MUST_GATHER_VERSION=${{ steps.prep.outputs.VERSION }}
 
-      # Save the image as a tarball for the push workflow
-      - name: Save image to tarball
-        if: steps.changed-files.outputs.any_changed == 'true'
-        env:
-           NAME: ${{ env.IMAGE_NAME }}
-           TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
-        run: |
-          podman save "${NAME}:${TAG}" | gzip > image.tar.gz
-
-      # Create metadata file for the push workflow
-      - name: Create metadata
+      - name: Create metadata for push workflow
         if: steps.changed-files.outputs.any_changed == 'true'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -113,14 +103,18 @@ jobs:
             --arg vs "$VERSION" \
             '{pr_number: $pr, image_tag: $it, extra_tags: $et, version: $vs}' > metadata.json
 
-      - name: Upload image artifact
+          # Upload metadata alongside the image artifact
+          ARTIFACT_DIR=$(find ./podman-artifacts -maxdepth 0 -type d 2>/dev/null || true)
+          if [[ -d "./podman-artifacts" ]]; then
+            cp metadata.json ./podman-artifacts/metadata.json
+          fi
+
+      - name: Upload metadata artifact
         if: steps.changed-files.outputs.any_changed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: pr-image
-          path: |
-            image.tar.gz
-            metadata.json
+          name: pr-metadata
+          path: metadata.json
           retention-days: 1
 
       - name: Summary
@@ -131,17 +125,16 @@ jobs:
           IMAGE_TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
           EXTRA_TAGS: ${{ steps.prep.outputs.EXTRA_TAGS }}
         run: |
-          # Format tags as comma-separated backtick-wrapped list
           ALL_TAGS="\`${IMAGE_TAG}\`"
           for tag in ${EXTRA_TAGS}; do
             ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
           done
 
-          echo "### Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Summary (Hermetic)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${PR_NUM}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ✅ Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Built hermetically (--network none) and saved as artifact" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
@@ -165,14 +158,14 @@ jobs:
       - name: Download image artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: pr-image
+          name: podman-image-${{ github.event.pull_request.number }}
 
       - name: Load image into podman
         env:
           TAG: ${{ needs.pr-build.outputs.image-tag }}
           NAME: ${{ env.IMAGE_NAME }}
         run: |
-          gunzip -c image.tar.gz | podman load
+          podman load -i image.tar
           podman tag "${NAME}:${TAG}" "localhost/${NAME}:${TAG}"
           podman images
 

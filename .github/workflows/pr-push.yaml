@@ -2,7 +2,7 @@ name: PR Push
 
 on:
   workflow_run:
-    workflows: ["PR Build"]
+    workflows: ["PR Build (Hermetic)"]
     types:
       - completed
 
@@ -83,23 +83,36 @@ jobs:
       - name: Check if build artifact exists
         id: check-artifact
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUM: ${{ steps.pr-number.outputs.number }}
         with:
           script: |
             const runId = context.payload.workflow_run.id;
+            const prNum = process.env.PR_NUM;
             const { data: { artifacts } } = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: runId,
             });
-            const found = artifacts.some(a => a.name === 'pr-image');
-            console.log(`Artifact 'pr-image' for run ${runId}: ${found ? 'found' : 'not found'}`);
+            const imageName = `podman-image-${prNum}`;
+            const found = artifacts.some(a => a.name === imageName);
+            console.log(`Artifact '${imageName}' for run ${runId}: ${found ? 'found' : 'not found'}`);
             core.setOutput('exists', found);
+            core.setOutput('image_artifact_name', imageName);
 
-      - name: Download artifact from build workflow
+      - name: Download image artifact from build workflow
         if: steps.check-artifact.outputs.exists == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: pr-image
+          name: ${{ steps.check-artifact.outputs.image_artifact_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download metadata artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: pr-metadata
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
@@ -135,7 +148,7 @@ jobs:
 
           # 2. Validate TAGS (Allow alphanumeric, dot, dash, underscore)
           IMAGE_TAG=$(jq -r '.image_tag' metadata.json | grep -E '^[a-zA-Z0-9._-]+$')
-          
+
           if [[ -z "$IMAGE_TAG" ]]; then
              echo "::error::Malicious or invalid IMAGE_TAG detected"
              exit 1
@@ -164,13 +177,13 @@ jobs:
           echo "SAFE_IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
           echo "SAFE_EXTRA_TAGS=$EXTRA_TAGS" >> "$GITHUB_ENV"
           echo "SAFE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          
+
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
       - name: Load image from tarball
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         run: |
-          gunzip -c image.tar.gz | podman load
+          podman load -i image.tar
 
       - name: Log into registry ${{ vars.REGISTRY }}
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
@@ -186,7 +199,7 @@ jobs:
           # Reconstruct the Local Image name using trusted variables
           # This prevents the "local_image" field in JSON from injecting commands
           LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
-          
+
           podman tag $LOCAL_IMAGE \
             ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
           podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
@@ -195,7 +208,7 @@ jobs:
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
         run: |
           LOCAL_IMAGE="${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
-          
+
           for tag in ${{ env.SAFE_EXTRA_TAGS }}; do
             echo "Pushing extra tag: ${tag}"
             podman tag $LOCAL_IMAGE \
@@ -211,22 +224,22 @@ jobs:
           set_tag_expiration() {
             local tag="$1"
             local url="https://${{ vars.REGISTRY }}/api/v1/repository/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}/tag/${tag}"
-            
+
             echo "Setting expiration for tag: ${tag}"
             echo "Expiration timestamp: ${EXPIRATION_TIMESTAMP} ($(date -d @${EXPIRATION_TIMESTAMP} -u))"
-            
+
             response=$(curl -s -w "\n%{http_code}" -X PUT \
               -H "Authorization: Bearer ${API_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "{\"expiration\": ${EXPIRATION_TIMESTAMP}}" \
               "${url}")
-            
+
             http_code=$(echo "$response" | tail -n1)
             body=$(echo "$response" | sed '$d')
-            
+
             echo "HTTP Status: ${http_code}"
             echo "Response: ${body}"
-            
+
             if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
               echo "::warning::Failed to set expiration for tag ${tag} (HTTP ${http_code})"
               return 1
@@ -260,11 +273,11 @@ jobs:
             const registry = process.env.REGISTRY;
             const registryOrg = process.env.REGISTRY_ORG;
             const imageName = process.env.IMAGE_NAME;
-            
+
             const baseUrl = `${registry}/${registryOrg}/${imageName}`;
             const allTags = [mainTag, ...extraTags];
             const tagList = allTags.map(tag => `<li><code>${baseUrl}:${tag}</code></li>`).join('\n');
-            
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
@@ -276,12 +289,12 @@ jobs:
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         run: |
           ALL_TAGS="\`${{ env.SAFE_IMAGE_TAG }}\`"
-          
+
           # FIXED: Use env var to avoid syntax error if empty
           for tag in $SAFE_EXTRA_TAGS; do
             ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
           done
-          
+
           echo "### Push Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ env.SAFE_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
@@ -292,5 +305,5 @@ jobs:
         if: steps.check-artifact.outputs.exists != 'true'
         run: |
           echo "### Push Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No \`pr-image\` artifact was produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
+          echo "No image artifact was produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
           echo "This is expected when the PR changes don't affect the container image (e.g., docs-only changes)." >> $GITHUB_STEP_SUMMARY

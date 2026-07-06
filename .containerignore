@@ -23,6 +23,10 @@ test/
 tests/
 *_test.sh
 
+# Hermeto build artifacts
+hermeto-cache/
+Containerfile.hermeto
+
 # Vendored source: exclude non-essential files to reduce build context
 vendor/*/docs/
 vendor/*/.github/

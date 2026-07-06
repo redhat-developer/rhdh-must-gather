@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MAKEFILE="Makefile"
-REQ_IN=".rhdh/docker/requirements.in"
+REQ_IN="requirements.in"
 
 makefile_version=$(grep '^YQ_VERSION' "$MAKEFILE" | sed 's/.*:= *//')
 req_in_version=$(grep '^yq==' "$REQ_IN" | sed 's/yq==//')

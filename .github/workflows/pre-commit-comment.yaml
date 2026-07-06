@@ -98,8 +98,8 @@ jobs:
                \`\`\`
 
             **What the hooks check:**
-            - \`check-requirements-version\` — ensures \`.rhdh/docker/requirements.in\` matches the \`YQ_VERSION\` in the Makefile (auto-fixes on failure)
-            - \`pip-compile\` — regenerates \`.rhdh/docker/requirements.txt\` from \`requirements.in\` with pinned hashes (auto-fixes on failure)
+            - \`check-requirements-version\` — ensures \`requirements.in\` matches the \`YQ_VERSION\` in the Makefile (auto-fixes on failure)
+            - \`pip-compile\` — regenerates \`requirements.txt\` from \`requirements.in\` with pinned hashes (auto-fixes on failure)
             `.trim().replace(/^ {12}/gm, '');
 
             await github.rest.issues.createComment({

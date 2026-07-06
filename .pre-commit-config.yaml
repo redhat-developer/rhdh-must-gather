@@ -6,31 +6,31 @@ repos:
         entry: hack/check-requirements-version.sh
         language: script
         pass_filenames: false
-        files: (^Makefile$|^\.rhdh/docker/requirements\.in$)
+        files: (^Makefile$|^requirements\.in$)
 
   - repo: https://github.com/jazzband/pip-tools
     rev: v7.5.3
     hooks:
       - id: pip-compile
-        name: pip-compile (.rhdh/docker)
+        name: pip-compile (requirements)
         language_version: "3.14"
         args:
           - --allow-unsafe
           - --generate-hashes
-          - --output-file=.rhdh/docker/requirements.txt
-          - .rhdh/docker/requirements.in
-        files: ^\.rhdh/docker/requirements\.(in|txt)$
+          - --output-file=requirements.txt
+          - requirements.in
+        files: ^requirements\.(in|txt)$
 
 
   - repo: local
     hooks:
       - id: uv-pip-compile-build-deps
-        name: uv pip compile build deps (.rhdh/docker)
+        name: uv pip compile build deps
         entry: uv pip compile --python-version=3.9 --python-platform=linux
           --generate-hashes
-          --output-file=.rhdh/docker/requirements-build.txt
-          .rhdh/docker/requirements-build.in
+          --output-file=requirements-build.txt
+          requirements-build.in
         language: python
         additional_dependencies: [uv]
-        files: ^\.rhdh/docker/requirements-build\.(in|txt)$
+        files: ^requirements-build\.(in|txt)$
         pass_filenames: false

@@ -1,0 +1,126 @@
+name: Update RPM Lockfile
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run at 3AM UTC every Monday
+    - cron: '0 3 * * 1'
+  push:
+    branches:
+      - main
+      - release-1.**
+    paths:
+      - 'rpms.in.yaml'
+      - 'Containerfile'
+permissions:
+  contents: write
+env:
+  CONTAINERFILE_PATH: Containerfile
+jobs:
+  update-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Check if Containerfile exists
+        run: |
+          if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
+            echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
+            exit 1
+          fi
+      - name: Configure Git
+        run: |
+          git config --global user.name "rhdh-bot"
+          git config --global user.email "rhdh-bot@redhat.com"
+
+      - name: Install rpm-lockfile-prototype
+        run: |
+          if [[ ! -x "${HOME}/.local/bin/rpm-lockfile-prototype" ]]; then
+            echo "Installing rpm-lockfile-prototype ..."
+
+            sudo apt-get update
+            sudo apt-get install -y python3 python3-pip python3-dev build-essential
+            sudo apt-get install -y podman skopeo rpm
+            sudo apt-get install -y dnf python3-dnf
+
+            mkdir -p "${HOME}/.local/bin/"
+            # Pin to a specific commit for reproducibility
+            python3 -m pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/b440696cf5e364503010d9cb41634f42bc760cf6.zip
+
+            # Update PATH
+            export PATH=${PATH%":${HOME}/.local/bin"}:${HOME}/.local/bin
+            echo "${HOME}/.local/bin" >> $GITHUB_PATH
+          else
+            echo "rpm-lockfile-prototype already installed"
+          fi
+      - name: Run rpm-lockfile-prototype
+        run: |
+          echo "Running '${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' in $(pwd)"
+
+          ${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml
+
+      - name: Check for lockfile changes
+        id: check-lockfile-changes
+        run: |
+          if git diff --quiet rpms.lock.yaml; then
+            echo "No changes to rpms.lock.yaml detected, skipping PR creation"
+            echo "changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected in rpms.lock.yaml, creating PR"
+            echo "changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        id: create-pull-request
+        if: steps.check-lockfile-changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ secrets.RHDH_BOT_TOKEN }}
+          commit-message: "chore: update rpms.lock.yaml [skip-build]"
+          title: "chore: update RPM lockfile in branch (${{ github.ref_name }}) [skip-build]"
+          body: |
+            ## Description
+
+            This PR updates the `rpms.lock.yaml` file with the latest package versions based on current `rpms.in.yaml` configuration using `${{ env.CONTAINERFILE_PATH }}` as the base container context
+
+            This PR was automatically created by the [Update RPM Lockfile GitHub Action](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          branch: chore/automated-update-rpm-lockfile/${{ github.ref_name }}
+          delete-branch: true
+          draft: false
+          sign-commits: true
+          labels: |
+            lgtm
+            approved
+          add-paths: |
+            rpms.lock.yaml
+
+      - name: Add /lgtm and /approved comment
+        if: steps.create-pull-request.outputs.pull-request-number
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ steps.create-pull-request.outputs.pull-request-number }}
+        with:
+          github-token: ${{ secrets.RHDH_BOT_TOKEN }}
+          script: |
+            const body = "/lgtm\n/approved";
+            const prNumber = process.env.PR_NUMBER;
+            github.rest.issues.createComment({
+              issue_number: parseInt(prNumber),
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            })
+
+      - name: Summary
+        env:
+          HAS_CHANGES: ${{ steps.check-lockfile-changes.outputs.changes }}
+          PR_URL: ${{ steps.create-pull-request.outputs.pull-request-url }}
+        run: |
+          if [ "$HAS_CHANGES" == "true" ]; then
+            echo "RPM lockfile updated and created PR: $PR_URL"
+          else
+            echo "No changes detected in RPM lockfile"
+          fi
