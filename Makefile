@@ -186,10 +186,16 @@ vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_N
 
 ##@ Build
 
+.PHONY: hermeto-cache
+hermeto-cache: ## Build the hermeto dependency cache only (no image)
+	@echo "Building hermeto cache..."
+	./scripts/local-hermeto-build.sh -d . --no-image
+	@echo "Hermeto cache built"
+
 .PHONY: image-build
-image-build: ## Build the must-gather container image
-	@echo "Building must-gather image..."
-	$(CONTAINER_TOOL) build $(BUILD_ARGS) $(if $(LABELS),$(LABELS)) --build-arg RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+image-build: ## Build the must-gather container image (hermetic, --network none)
+	@echo "Building must-gather image hermetically..."
+	./scripts/local-hermeto-build.sh -d . -i $(IMAGE_NAME):$(IMAGE_TAG)
 	@echo "Image built: $(IMAGE_NAME):$(IMAGE_TAG)"
 
 .PHONY: image-push
@@ -239,6 +245,8 @@ clean: clean-out ## Remove built images and test output
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
 	-rm -rf "$(TOOLS_DIR)"
 	-rm -rf "$(TEST_RESULTS_DIR)"
+	-rm -rf ./hermeto-cache
+	-rm -f Containerfile.hermeto
 	@echo "Cleanup complete"
 
 ##@ General
