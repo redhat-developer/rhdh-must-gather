@@ -146,7 +146,7 @@ jobs:
           # Validate EXTRA_TAGS: only pr-<N>-<alphanumeric> is permitted
           EXTRA_TAGS_RAW=$(jq -r '.extra_tags // ""' metadata.json)
           EXTRA_TAGS=""
-          EXTRA_TAG_PATTERN="^pr-${EXPECTED_PR}-[a-z0-9]+$"
+          EXTRA_TAG_PATTERN="^pr-${EXPECTED_PR}-[a-z0-9]{1,40}$"
           for tag in $EXTRA_TAGS_RAW; do
             if echo "$tag" | grep -qE "$EXTRA_TAG_PATTERN"; then
               EXTRA_TAGS="${EXTRA_TAGS:+$EXTRA_TAGS }$tag"
