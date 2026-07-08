@@ -70,7 +70,7 @@ jobs:
           VERSION="0.0.0-${SHORT_SHA}"
 
           echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
-          echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA} ${VERSION}-pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "BUILD_ARGS=--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
