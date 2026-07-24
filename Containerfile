@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1782841664@sha256:8bf0e8f20737e9c8a68c8a498299e9504ab397b1b1f2837acb2fef12ec698f0e AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.8-1784720169@sha256:2a6bd6971e6026177b2439655282660519198870e9063c4a03a208de88be2e9e AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -14,7 +14,7 @@ RUN cargo build --release \
 
 # Stage 2: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1782797275@sha256:463cae32c6f6f5594b11a5c22de275016bd8545ce58a6373388e8b24f13fc15c
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1784705586@sha256:2e8edce823a48e51858f1fad3ff4cbf6875ce8a3f86b9eecf298bc2050c8652a
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
@@ -68,7 +68,7 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
 # Required for collecting Helm-based RHDH deployments
 # Installing directly from GitHub releases instead of using the install script
 # to avoid dependency on openssl for checksum verification
-RUN curl -fsSL "https://get.helm.sh/helm-v4.2.2-linux-amd64.tar.gz" -o helm.tar.gz \
+RUN curl -fsSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" -o helm.tar.gz \
     && tar xzf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin/helm \
     && rm -rf helm.tar.gz linux-amd64 \
