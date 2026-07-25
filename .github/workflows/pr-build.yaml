@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
@@ -70,7 +70,7 @@ jobs:
           VERSION="0.0.0-${SHORT_SHA}"
 
           echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
-          echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA} ${VERSION}-pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "BUILD_ARGS=--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -157,7 +157,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false

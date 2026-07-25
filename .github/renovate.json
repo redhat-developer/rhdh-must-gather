@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "baseBranchPatterns": ["main", "/^release-.*/"],
   "pip-compile": {
     "enabled": true,
     "managerFilePatterns": [".rhdh/docker/requirements*.txt"]
@@ -14,6 +15,24 @@
       "matchManagers": ["pip-compile"],
       "matchPackageNames": ["yq"],
       "enabled": false
+    },
+    {
+      "description": "Disable all updates on release branches by default",
+      "matchBaseBranches": ["/^release-.*/"],
+      "enabled": false
+    },
+    {
+      "description": "Re-enable only patch updates on release branches",
+      "matchBaseBranches": ["/^release-.*/"],
+      "matchUpdateTypes": ["patch"],
+      "enabled": true
+    },
+    {
+      "description": "Re-enable digest updates for container images on release branches",
+      "matchBaseBranches": ["/^release-.*/"],
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["digest"],
+      "enabled": true
     }
   ],
   "customDatasources": {
@@ -28,7 +47,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^\\.github/workflows/.*\\.ya?ml$"],
+      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=npm\\n\\s*npm install\\s+--no-save\\s+(?<depName>[^@\\s]+)@(?<currentValue>[\\d.]+)"
       ],
@@ -36,7 +55,7 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^Containerfile$"],
+      "managerFilePatterns": ["/^Containerfile$/"],
       "matchStrings": [
         "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
       ],
@@ -45,7 +64,7 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^Containerfile$"],
+      "managerFilePatterns": ["/^Containerfile$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
       ],
@@ -54,7 +73,7 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^Makefile$"],
+      "managerFilePatterns": ["/^Makefile$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=pypi\\s+depName=(?<depName>\\S+)\\nYQ_VERSION := (?<currentValue>[\\d.]+)"
       ],
