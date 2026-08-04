@@ -8,18 +8,18 @@ repos:
         pass_filenames: false
         files: (^Makefile$|^\.rhdh/docker/requirements\.in$)
 
-  - repo: https://github.com/jazzband/pip-tools
-    rev: v7.5.3
+  - repo: local
     hooks:
-      - id: pip-compile
-        name: pip-compile (.rhdh/docker)
-        language_version: "3.14"
-        args:
-          - --allow-unsafe
-          - --generate-hashes
-          - --output-file=.rhdh/docker/requirements.txt
-          - .rhdh/docker/requirements.in
+      - id: uv-pip-compile
+        name: uv pip compile (.rhdh/docker)
+        entry: uv pip compile --python-version=3.9 --python-platform=linux
+          --allow-unsafe --generate-hashes
+          --output-file=.rhdh/docker/requirements.txt
+          .rhdh/docker/requirements.in
+        language: python
+        additional_dependencies: [uv]
         files: ^\.rhdh/docker/requirements\.(in|txt)$
+        pass_filenames: false
 
 
   - repo: local
