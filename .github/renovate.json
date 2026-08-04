@@ -57,15 +57,6 @@
       "customType": "regex",
       "managerFilePatterns": ["/^Containerfile$/"],
       "matchStrings": [
-        "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
-      ],
-      "depNameTemplate": "helm/helm",
-      "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^Containerfile$/"],
-      "matchStrings": [
         "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
       ],
       "depNameTemplate": "openshift-client",
