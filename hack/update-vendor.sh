@@ -79,6 +79,10 @@ prune_helm() {
         ! -name 'go.sum' \
         ! -name 'LICENSE*' \
         -delete
+
+    # Remove test files and nested testdata (go build ignores them)
+    find "$dir" -name '*_test.go' -delete
+    find "$dir" -type d -name testdata -exec rm -rf {} +
 }
 
 prune_websocat() {
