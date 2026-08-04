@@ -55,6 +55,7 @@ dump_debug_info() {
     make deploy-k8s \
         FULL_IMAGE_NAME="$debug_image" \
         OUTPUT_FILE=./e2e-cluster.mustgather \
+        HELM_SET="" \
         || log_warn "Failed to collect must-gather for debugging"
 
     log_warn "=== DEBUG INFO END : ./e2e-cluster.mustgather.tar.gz ==="
