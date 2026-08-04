@@ -8,7 +8,7 @@ on:
   push:
     branches:
       - main
-      - release-1.**
+      - 'release-[0-9]+.[0-9]+'
     paths:
       - 'rpms.in.yaml'
       - '.rhdh/docker/Containerfile'
@@ -16,7 +16,7 @@ on:
   pull_request:
     branches:
       - main
-      - release-1.**
+      - 'release-[0-9]+.[0-9]+'
     paths:
       - 'rpms.in.yaml'
       - 'rpms.lock.yaml'
