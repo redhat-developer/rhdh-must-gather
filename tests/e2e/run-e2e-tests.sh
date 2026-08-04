@@ -50,6 +50,13 @@ dump_debug_info() {
     log_warn "=== DEBUG INFO START ==="
     log_warn "Script exiting with error, collecting must-gather for debugging..."
 
+    # Clean up cluster-scoped resources (ClusterRole/ClusterRoleBinding) left by
+    # the previous must-gather Helm chart. Without this, helm upgrade --install
+    # fails because these resources are annotated with the old release namespace.
+    local release_label="app.kubernetes.io/instance=rhdh-must-gather"
+    kubectl delete clusterrolebinding -l "$release_label" 2>/dev/null || true
+    kubectl delete clusterrole -l "$release_label" 2>/dev/null || true
+
     # Run must-gather to collect cluster state for debugging
     local debug_image="quay.io/rhdh-community/rhdh-must-gather:latest"
     make deploy-k8s \
