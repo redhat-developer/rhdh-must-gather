@@ -385,6 +385,32 @@ _collect_pod_data() {
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- node --version 2>/dev/null" "$pod_data_dir/node-version.txt" "Node version from $pod"
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- ls -lhrta dynamic-plugins-root 2>/dev/null" "$pod_data_dir/dynamic-plugins-root.fs.txt" "dynamic-plugins-root from $pod"
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- cat /opt/app-root/src/dynamic-plugins-root/app-config.dynamic-plugins.yaml 2>/dev/null" "$pod_data_dir/app-config.dynamic-plugins.yaml" "app-config.dynamic-plugins.yaml from $pod"
+  
+  log_info "Collecting: package.json files from dynamic-plugins-root in $pod"
+  local plugins_out_dir="$pod_data_dir/dynamic-plugins-root"
+  ensure_directory "$plugins_out_dir"
+
+  local package_json_path
+  package_json_path=$(
+    $KUBECTL_CMD -n "$ns" exec "$pod" -- \
+      find /opt/app-root/src/dynamic-plugins-root -type f -name package.json \
+      || true
+  )
+
+  if [[ -z "$package_json_path" ]]; then
+    log_debug "No package.json files found under dynamic-plugins-root in $pod"
+  else
+    while IFS= read -r remote_path; do
+      [[ -z "$remote_path" ]] && continue
+
+      local rel_path="${remote_path#/opt/app-root/src/dynamic-plugins-root/}"
+      local local_path="$plugins_out_dir/$rel_path"
+      mkdir -p "$(dirname "$local_path")"
+      if ! $KUBECTL_CMD -n "$ns" exec "$pod" -- cat "$remote_path" > "$local_path"; then
+        log_warn "Failed to collect $remote_path from $pod"
+      fi
+    done <<< "$package_json_path"
+  fi
 }
 
 # Collect all running processes from containers in a pod using /proc filesystem

@@ -316,7 +316,9 @@ Usage: ./must_gather [params...]
 │   │           │   │           ├── build-metadata.json         # RHDH version, source repos
 │   │           │   │           ├── node-version.txt            # "v22.16.0"
 │   │           │   │           ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
-│   │           │   │           └── app-config.dynamic-plugins.yaml # Generated app config
+│   │           │   │           ├── app-config.dynamic-plugins.yaml # Generated app config
+│   │           │   │           └── dynamic-plugins-root/       # package.json per plugin (metadata only)
+│   │           │   │               └── <plugin>/package.json
 │   │           │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
 │   │           │   │   └── pod=[pod-name]/
 │   │           │   │       ├── pod-spec.yaml           # Pod specification
@@ -480,7 +482,9 @@ Usage: ./must_gather [params...]
                 │   │           ├── build-metadata.json         # RHDH version, source repos
                 │   │           ├── node-version.txt            # "v22.16.0"
                 │   │           ├── dynamic-plugins-root.fs.txt # Directory listing with plugin packages
-                │   │           └── app-config.dynamic-plugins.yaml # Generated app config
+                │   │           ├── app-config.dynamic-plugins.yaml # Generated app config
+                │   │           └── dynamic-plugins-root/       # package.json per plugin (metadata only)
+                │   │               └── <plugin>/package.json
                 │   ├── heap-dumps/     # Memory heap dumps (if --with-heap-dumps used)
                 │   │   └── pod=[pod-name]/
                 │   │       ├── pod-spec.yaml           # Pod specification
