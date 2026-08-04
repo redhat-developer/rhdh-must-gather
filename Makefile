@@ -1,7 +1,7 @@
 # RHDH Must-Gather Tool Makefile
 
 # Variables
-VERSION ?= 1.11.0
+VERSION ?= 2.1.0
 GIT_SHA := $(shell git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)
 RHDH_MUST_GATHER_VERSION := $(VERSION)-$(GIT_SHA)
 SCRIPT ?=
