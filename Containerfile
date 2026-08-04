@@ -12,7 +12,21 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Final image
+# Stage 2: Build helm from vendored source
+# helm v4.2.3 — update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# https://registry.access.redhat.com/ubi9/go-toolset
+FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1785360201@sha256:272a3dd990bba320c2e246119a0019d10d627d0104938d5db77ba5ab3ae3a51d AS helm-builder
+USER 0
+COPY Makefile /tmp/Makefile
+COPY vendor/helm /src/helm
+WORKDIR /src/helm
+RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+    CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+        -o /tmp/helm ./cmd/helm && \
+    /tmp/helm version
+
+# Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1785777232@sha256:48fa5d8cda7fc00d270d8747c3eaa54ae196f0820d8540074a9c8c61d5e3056f
 
@@ -68,15 +82,8 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Install Helm (Kubernetes package manager)
-# Required for collecting Helm-based RHDH deployments
-# Installing directly from GitHub releases instead of using the install script
-# to avoid dependency on openssl for checksum verification
-RUN curl -fsSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" -o helm.tar.gz \
-    && tar xzf helm.tar.gz \
-    && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf helm.tar.gz linux-amd64 \
-    && helm version
+# Copy helm binary built from source (vendor/helm)
+COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

@@ -35,6 +35,8 @@ YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+HELM_VERSION := 4.2.3
+
 WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
@@ -173,6 +175,7 @@ VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
 vendor: ## Sync all vendored Git subtrees to their declared versions
+	./hack/update-vendor.sh helm "v$(HELM_VERSION)"
 	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
 
 .PHONY: vendor-update

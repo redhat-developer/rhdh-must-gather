@@ -32,9 +32,10 @@ VERSION="$2"
 PREFIX="vendor/${NAME}"
 
 case "$NAME" in
+    helm)     REPO="https://github.com/helm/helm.git" ;;
     websocat) REPO="https://github.com/vi/websocat.git" ;;
     *)
-        echo "Error: unknown vendor '${NAME}'. Supported: websocat"
+        echo "Error: unknown vendor '${NAME}'. Supported: helm, websocat"
         exit 1
         ;;
 esac
@@ -63,6 +64,23 @@ rm -rf "${PREFIX}/.git"
 
 echo "Pruning non-essential files from ${PREFIX}..."
 
+prune_helm() {
+    local dir="$1"
+
+    # Remove non-essential top-level directories
+    local remove_dirs=(.github scripts testdata)
+    for d in "${remove_dirs[@]}"; do
+        rm -rf "${dir:?}/${d}"
+    done
+
+    # Remove non-essential top-level files (keep go.mod, go.sum, LICENSE*)
+    find "$dir" -maxdepth 1 -type f \
+        ! -name 'go.mod' \
+        ! -name 'go.sum' \
+        ! -name 'LICENSE*' \
+        -delete
+}
+
 prune_websocat() {
     local dir="$1"
 
@@ -81,14 +99,16 @@ prune_websocat() {
 }
 
 case "$NAME" in
+    helm)     prune_helm "$PREFIX" ;;
     websocat) prune_websocat "$PREFIX" ;;
 esac
 
 # Remove any empty directories left behind
 find "$PREFIX" -type d -empty -delete
 
-# Update the version comment in the Containerfile
+# Update the version comment in both Containerfiles
 sed -i.bak "s|# ${NAME} v[^ ]* —|# ${NAME} ${VERSION} —|" Containerfile && rm -f Containerfile.bak
+sed -i.bak "s|# ${NAME} v[^ ]* —|# ${NAME} ${VERSION} —|" .rhdh/docker/Containerfile && rm -f .rhdh/docker/Containerfile.bak
 
 # Update the version variable in the Makefile (e.g., WEBSOCAT_VERSION := 1.14.0)
 MAKE_VAR="$(echo "${NAME}" | tr '[:lower:]' '[:upper:]')_VERSION"
