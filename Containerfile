@@ -50,8 +50,12 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     rsync \
     && microdnf clean all
 COPY Makefile /tmp/Makefile
+# argcomplete 3.7+ uses PEP 604 union types (str | bytes) in class-level
+# annotations, which Python 3.9 evaluates at class definition time and fails.
+# The downstream (hermetic) Containerfile is not affected because it pins
+# argcomplete via hash-locked requirements.txt generated with --python-version=3.9.
 RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
-    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" "argcomplete<3.7" \
     && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
