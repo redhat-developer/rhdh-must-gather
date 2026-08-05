@@ -386,29 +386,43 @@ _collect_pod_data() {
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- ls -lhrta dynamic-plugins-root 2>/dev/null" "$pod_data_dir/dynamic-plugins-root.fs.txt" "dynamic-plugins-root from $pod"
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- cat /opt/app-root/src/dynamic-plugins-root/app-config.dynamic-plugins.yaml 2>/dev/null" "$pod_data_dir/app-config.dynamic-plugins.yaml" "app-config.dynamic-plugins.yaml from $pod"
   
-  log_info "Collecting: package.json files from dynamic-plugins-root in $pod"
+  log_info "\tCollecting: package.json files from dynamic-plugins-root in $pod"
   local plugins_out_dir="$pod_data_dir/dynamic-plugins-root"
   ensure_directory "$plugins_out_dir"
 
+  local package_json_list="$plugins_out_dir/.package-json-paths.txt"
+  safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- find /opt/app-root/src/dynamic-plugins-root -maxdepth 2 -type f -name package.json" \
+    "$package_json_list" \
+    "package.json paths from dynamic-plugins-root in $pod"
+
   local package_json_path
-  package_json_path=$(
-    $KUBECTL_CMD -n "$ns" exec "$pod" -- \
-      find /opt/app-root/src/dynamic-plugins-root -type f -name package.json \
-      || true
-  )
+  package_json_path=$(cat "$package_json_list")
 
   if [[ -z "$package_json_path" ]]; then
     log_debug "No package.json files found under dynamic-plugins-root in $pod"
   else
     while IFS= read -r remote_path; do
       [[ -z "$remote_path" ]] && continue
+      [[ "$remote_path" != /opt/app-root/src/dynamic-plugins-root/* ]] && continue
 
       local rel_path="${remote_path#/opt/app-root/src/dynamic-plugins-root/}"
       local local_path="$plugins_out_dir/$rel_path"
+      local tmp_path="${local_path}.tmp"
       mkdir -p "$(dirname "$local_path")"
-      if ! $KUBECTL_CMD -n "$ns" exec "$pod" -- cat "$remote_path" > "$local_path"; then
-        log_warn "Failed to collect $remote_path from $pod"
-      fi
+      safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat '$remote_path'" \
+        "$tmp_path" \
+        "package.json $rel_path from $pod"
+     if [[ -s "$tmp_path" ]]; then
+       read -r first_line < "$tmp_path" || true
+       if [[ "$first_line" == "{"* ]]; then
+         mv "$tmp_path" "$local_path"
+       else
+         log_warn "Rejecting package.json for $rel_path (first_line=${first_line})"
+         rm -f "$tmp_path" "${local_path}.rejected" || true 
+       fi
+     else
+       log_warn "Empty temp for $rel_path"
+     fi
     done <<< "$package_json_path"
   fi
 }

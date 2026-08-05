@@ -237,6 +237,29 @@ for spec in "${CR_SPECS[@]}"; do
         else
             log_info "○ No processes directory (pods may not be running)"
         fi
+    
+    if [ -d "$workload_dir/data" ]; then
+        pkg_json_count=$(find "$workload_dir/data" -path '*/dynamic-plugins-root/*' -name package.json | wc -l | tr -d ' ')
+        if [ "$pkg_json_count" -ge 1 ]; then
+            log_info "Found $pkg_json_count package.json file(s) in dynamic-plugins-root"
+            top_level=$(find "$workload_dir/data" -path '*/dynamic-plugins-root/*' -name package.json ! -path '*/node_modules/*' | wc -l | tr -d ' ')
+            if [ "$top_level" -ge 1 ]; then 
+                log_info "Found $top_level top-level plugin package.json file(s)"
+            else
+                log_error "No top-level plugin package.json files found under dynamic-plugins-root"
+                ((ERRORS++))
+            fi
+        else
+            log_error "No package.json files found under dynamic-plugins-root in $workload_dir/data"
+            ((ERRORS++))
+        fi
+    else 
+        log_error "Data directory not found in $workload_dir"
+        ((ERRORS++))
+    fi 
+
+
+    
 
         # Validate rollout history collection
         if [ -d "$workload_dir/rollout-history" ]; then
