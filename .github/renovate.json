@@ -55,6 +55,14 @@
     },
     {
       "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s*python3 -m pip install.*?/refs/tags/(?<currentValue>v[\\d.]+)\\.zip"
+      ],
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
       "managerFilePatterns": ["/^Containerfile$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
