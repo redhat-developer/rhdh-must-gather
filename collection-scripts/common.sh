@@ -412,7 +412,7 @@ _collect_pod_data() {
       safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat $remote_path_q" \
         "$tmp_path" \
         "package.json $rel_path from $pod"
-     if [[ -s "$tmp_path" ]] && jq -e . "$tmp_path" >/dev/null; then
+     if [[ -s "$tmp_path" ]] && jq -e . "$tmp_path" >/dev/null 2>&1; then
          mv "$tmp_path" "$local_path"
      else
          log_warn "Rejecting package.json for $rel_path (empty or invalid JSON)"
