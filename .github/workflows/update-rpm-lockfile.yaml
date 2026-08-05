@@ -120,15 +120,15 @@ jobs:
           pr_count=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
           echo "exists=$([ "$pr_count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update PR branch
-        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
+      - name: Push updated lockfile to PR branch
+        if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         env:
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
+          git checkout -B "$BRANCH"
           git add rpms.lock.yaml
           git commit -m "chore: update rpms.lock.yaml [skip-build]"
-          git checkout -b "$BRANCH"
-          git push -u origin "$BRANCH"
+          git push -u origin "$BRANCH" --force-with-lease
 
       - name: Create Pull Request
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
