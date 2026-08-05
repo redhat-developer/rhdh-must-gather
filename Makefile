@@ -36,6 +36,9 @@ YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
 HELM_VERSION := 4.2.3
+HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)
+HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
+HELM_BIN := $(TOOLS_DIR)/helm
 
 WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
@@ -57,7 +60,7 @@ local-output:
 	@mkdir -p ./out
 
 .PHONY: local-setup
-local-setup: $(YQ_BIN) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
+local-setup: $(YQ_BIN) $(HELM_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, helm, websocat)
 
 .PHONY: run-local
 run-local: local-output local-setup ## Test the script locally (requires jq, kubectl, oc and cluster access)
@@ -155,6 +158,21 @@ $(YQ_BIN): $(TOOLS_DIR)
 	else \
 		echo "yq already installed: $(YQ_BIN)"; \
 	fi
+
+.PHONY: $(HELM_BIN_DL)
+$(HELM_BIN_DL): $(TOOLS_DIR)
+	@mkdir -p "$(HELM_ARCHIVE_DIR)"
+	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
+		echo "Downloading helm v$(HELM_VERSION) for $(OS)-$(ARCH)..."; \
+		curl -sSL "https://get.helm.sh/helm-v$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" \
+			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "$(OS)-$(ARCH)/helm"; \
+		chmod +x "$(HELM_BIN_DL)"; \
+		echo "helm installed successfully: $$($(HELM_BIN_DL) version --short)"; \
+	else \
+		echo "helm $(HELM_VERSION) already installed: $(HELM_BIN_DL)"; \
+	fi
+	@ln -sf "$(shell echo $(HELM_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(HELM_BIN)"
+	@"$(HELM_BIN)" version --short
 
 .PHONY: $(WEBSOCAT_BIN_DL)
 $(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
