@@ -137,6 +137,7 @@ jobs:
           TARGET_BRANCH: ${{ steps.target-branch.outputs.name }}
         run: |
           gh pr create \
+            --base "${TARGET_BRANCH}" \
             --title "chore: update RPM lockfile in branch (${TARGET_BRANCH}) [skip-build]" \
             --body "$(cat <<EOF
           ## Description
