@@ -408,22 +408,19 @@ _collect_pod_data() {
       local rel_path="${remote_path#/opt/app-root/src/dynamic-plugins-root/}"
       local local_path="$plugins_out_dir/$rel_path"
       local tmp_path="${local_path}.tmp"
+      local remote_path_q
+      remote_path_q=$(printf '%q' "$remote_path")
       mkdir -p "$(dirname "$local_path")"
-      safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat '$remote_path'" \
+      safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat $remote_path_q" \
         "$tmp_path" \
         "package.json $rel_path from $pod"
-     if [[ -s "$tmp_path" ]]; then
-       read -r first_line < "$tmp_path" || true
-       if [[ "$first_line" == "{"* ]]; then
+     if [[ -s "$tmp_path" ]] && jq_out=$(jq -e . "$tmp_path"); then
          mv "$tmp_path" "$local_path"
-       else
-         log_warn "Rejecting package.json for $rel_path (first_line=${first_line})"
-         rm -f "$tmp_path" "${local_path}.rejected" || true 
-       fi
      else
-       log_warn "Empty temp for $rel_path"
+         log_warn "Rejecting package.json for $rel_path (empty or invalid JSON)"
+         rm -f "$tmp_path"
      fi
-    done <<< "$package_json_path"
+     done <<< "$package_json_path"
   fi
 }
 
