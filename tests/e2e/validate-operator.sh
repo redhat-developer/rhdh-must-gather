@@ -242,7 +242,7 @@ for spec in "${CR_SPECS[@]}"; do
         pkg_json_count=$(find "$workload_dir/data" -path '*/dynamic-plugins-root/*' -name package.json | wc -l | tr -d ' ' || true)
         if [ "${pkg_json_count:-0}" -ge 1 ]; then
             log_info "Found $pkg_json_count package.json file(s) in dynamic-plugins-root"
-            top_level=$(find "$workload_dir/data" -path '*/dynamic-plugins-root/*' -name package.json ! -path '*/node_modules/*' | wc -l | tr -d ' ' || true)
+            top_level=$(find "$workload_dir/data" \( -name node_modules -type d \) -prune -o -path '*/dynamic-plugins-root/*' -name package.json -print | wc -l | tr -d ' ' || true) 
             if [ "${top_level:-0}" -ge 1 ]; then 
                 log_info "Found $top_level top-level plugin package.json file(s)"
             else

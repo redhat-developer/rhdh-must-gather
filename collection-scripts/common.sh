@@ -395,13 +395,11 @@ _collect_pod_data() {
     "$package_json_list" \
     "package.json paths from dynamic-plugins-root in $pod"
 
-  local package_json_path
-  package_json_path=$(cat "$package_json_list")
 
-  if [[ -z "$package_json_path" ]]; then
+  if [[ ! -s "$package_json_list" ]]; then
     log_debug "No package.json files found under dynamic-plugins-root in $pod"
   else
-    while IFS= read -r remote_path; do
+    while IFS= read -r remote_path || [[ -n "$remote_path" ]]; do 
       [[ -z "$remote_path" ]] && continue
       [[ "$remote_path" != /opt/app-root/src/dynamic-plugins-root/* ]] && continue
 
@@ -414,13 +412,13 @@ _collect_pod_data() {
       safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat $remote_path_q" \
         "$tmp_path" \
         "package.json $rel_path from $pod"
-     if [[ -s "$tmp_path" ]] && jq_out=$(jq -e . "$tmp_path"); then
+     if [[ -s "$tmp_path" ]] && jq -e . "$tmp_path" >/dev/null; then
          mv "$tmp_path" "$local_path"
      else
          log_warn "Rejecting package.json for $rel_path (empty or invalid JSON)"
          rm -f "$tmp_path"
      fi
-     done <<< "$package_json_path"
+     done < "$package_json_list"
   fi
 }
 
