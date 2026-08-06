@@ -258,9 +258,6 @@ for spec in "${CR_SPECS[@]}"; do
         ((ERRORS++))
     fi 
 
-
-    
-
         # Validate rollout history collection
         if [ -d "$workload_dir/rollout-history" ]; then
             log_info "✓ Found rollout-history directory"
