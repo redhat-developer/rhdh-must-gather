@@ -35,6 +35,7 @@ YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+# latest at https://github.com/helm/helm/releases
 HELM_VERSION := 4.2.3
 HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)
 HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
