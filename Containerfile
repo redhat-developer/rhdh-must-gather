@@ -15,7 +15,7 @@ RUN cargo build --release \
 # Stage 2: Build helm from vendored source
 # update helm version via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi9/go-toolset
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1785360201@sha256:272a3dd990bba320c2e246119a0019d10d627d0104938d5db77ba5ab3ae3a51d AS helm-builder
+FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786023237@sha256:5d26ff5606bd6590930e7cfc202b510e3fe2c7a7a1720860f444ab49c45128cb AS helm-builder
 COPY Makefile /tmp/Makefile
 COPY vendor/helm /opt/app-root/src/helm
 WORKDIR /opt/app-root/src/helm
