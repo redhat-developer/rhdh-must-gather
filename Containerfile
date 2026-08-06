@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1784720169@sha256:2a6bd6971e6026177b2439655282660519198870e9063c4a03a208de88be2e9e AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.8-1785906690@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -14,7 +14,7 @@ RUN cargo build --release \
 
 # Stage 2: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1784705586@sha256:2e8edce823a48e51858f1fad3ff4cbf6875ce8a3f86b9eecf298bc2050c8652a
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1785906621@sha256:dd334afa72444fa46238fcf9e6bd399245adf746378735348cf84b9dfdca38f1
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
@@ -50,8 +50,12 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     rsync \
     && microdnf clean all
 COPY Makefile /tmp/Makefile
+# argcomplete 3.7+ uses PEP 604 union types (str | bytes) in class-level
+# annotations, which Python 3.9 evaluates at class definition time and fails.
+# The downstream (hermetic) Containerfile is not affected because it pins
+# argcomplete via hash-locked requirements.txt generated with --python-version=3.9.
 RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
-    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" "argcomplete<3.7" \
     && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
