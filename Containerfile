@@ -13,7 +13,7 @@ RUN cargo build --release \
     /tmp/websocat --version
 
 # Stage 2: Build helm from vendored source
-# helm v4.2.3 — update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# update helm version via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi9/go-toolset
 FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1785360201@sha256:272a3dd990bba320c2e246119a0019d10d627d0104938d5db77ba5ab3ae3a51d AS helm-builder
 COPY Makefile /tmp/Makefile
