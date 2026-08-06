@@ -19,6 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: helm
+            repo: helm/helm
           - name: websocat
             repo: vi/websocat
 
@@ -60,7 +62,7 @@ jobs:
 
           # Stage and commit changes (the script leaves them unstaged)
           if ! git diff --quiet || ! git diff --cached --quiet; then
-            git add "vendor/$VENDOR_NAME" Containerfile Makefile
+            git add "vendor/$VENDOR_NAME" Containerfile .rhdh/docker/Containerfile Makefile
             git commit -m "chore(vendor): update $VENDOR_NAME to $VENDOR_VERSION"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else

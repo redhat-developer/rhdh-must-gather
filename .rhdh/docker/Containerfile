@@ -1,4 +1,4 @@
-# Konflux hermetic: prefetch rpm (repo root), pip (repo root), cargo (`vendor/websocat`); network off during RUN.
+# Konflux hermetic: prefetch rpm (repo root), pip (repo root), gomod (`vendor/helm`), cargo (`vendor/websocat`); network off during RUN.
 #
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
@@ -33,7 +33,22 @@ RUN set -eu; \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Final image
+# Stage 2: Build helm from vendored source
+# helm v4.2.3 — update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# https://registry.access.redhat.com/ubi9/go-toolset
+FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1785360201@sha256:272a3dd990bba320c2e246119a0019d10d627d0104938d5db77ba5ab3ae3a51d AS helm-builder
+COPY Makefile /tmp/Makefile
+COPY vendor/helm /opt/app-root/src/helm
+WORKDIR /opt/app-root/src/helm
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//'); \
+    CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+        -o /tmp/helm ./cmd/helm && \
+    /tmp/helm version
+
+# Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1785906621@sha256:dd334afa72444fa46238fcf9e6bd399245adf746378735348cf84b9dfdca38f1
 
@@ -69,7 +84,6 @@ RUN set -eu; \
       util-linux \
       rsync \
       openshift-clients \
-      helm \
       && microdnf clean all
 COPY requirements-build.txt /tmp/requirements-build.txt
 COPY requirements.txt /tmp/requirements.txt
@@ -80,6 +94,9 @@ RUN set -eu; \
     pip3 install --no-cache-dir --no-build-isolation --require-hashes \
       -r /tmp/requirements.txt && \
     rm -f /tmp/requirements-build.txt /tmp/requirements.txt
+
+# Copy helm binary built from source (vendor/helm)
+COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

@@ -35,6 +35,12 @@ YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+# latest at https://github.com/helm/helm/releases
+HELM_VERSION := 4.2.3
+HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)
+HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
+HELM_BIN := $(TOOLS_DIR)/helm
+
 WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
@@ -55,7 +61,7 @@ local-output:
 	@mkdir -p ./out
 
 .PHONY: local-setup
-local-setup: $(YQ_BIN) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
+local-setup: $(YQ_BIN) $(HELM_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, helm, websocat)
 
 .PHONY: run-local
 run-local: local-output local-setup ## Test the script locally (requires jq, kubectl, oc and cluster access)
@@ -121,16 +127,18 @@ LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
 HEAP_DUMP_METHOD ?= ## Heap dump method: 'inspector' (default) or 'sigusr2'
 .PHONY: test-e2e
-test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
+test-e2e: local-setup ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
-	@./tests/e2e/run-e2e-tests.sh --local \
+	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
+		./tests/e2e/run-e2e-tests.sh --local \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
-	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
+	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
+		./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
 		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
@@ -154,6 +162,21 @@ $(YQ_BIN): $(TOOLS_DIR)
 		echo "yq already installed: $(YQ_BIN)"; \
 	fi
 
+.PHONY: $(HELM_BIN_DL)
+$(HELM_BIN_DL): $(TOOLS_DIR)
+	@mkdir -p "$(HELM_ARCHIVE_DIR)"
+	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
+		echo "Downloading helm v$(HELM_VERSION) for $(OS)-$(ARCH)..."; \
+		curl -sSL "https://get.helm.sh/helm-v$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" \
+			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "$(OS)-$(ARCH)/helm"; \
+		chmod +x "$(HELM_BIN_DL)"; \
+		echo "helm installed successfully: $$($(HELM_BIN_DL) version --short)"; \
+	else \
+		echo "helm $(HELM_VERSION) already installed: $(HELM_BIN_DL)"; \
+	fi
+	@ln -sf "$(shell echo $(HELM_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(HELM_BIN)"
+	@"$(HELM_BIN)" version --short
+
 .PHONY: $(WEBSOCAT_BIN_DL)
 $(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
 	@mkdir -p "$(WEBSOCAT_ARCHIVE_DIR)"
@@ -173,6 +196,7 @@ VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
 vendor: ## Sync all vendored Git subtrees to their declared versions
+	./hack/update-vendor.sh helm "v$(HELM_VERSION)"
 	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
 
 .PHONY: vendor-update
