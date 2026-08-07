@@ -395,7 +395,7 @@ _collect_pod_data() {
   rm -f "$plugins_tar" "$plugins_tar_err"
   set +e
   timeout "$CMD_TIMEOUT" \
-    $KUBECTL_CMD -n "$ns" exec -c backstage-backend "$pod" -- \
+    "$KUBECTL_CMD" -n "$ns" exec -c backstage-backend "$pod" -- \
     sh -c 'cd /opt/app-root/src/dynamic-plugins-root 2>/dev/null || exit 0 
            find . -maxdepth 2 -type f -name package.json -print0 2>/dev/null \
            | tar --null -T - -cf - 2>/dev/null' \
