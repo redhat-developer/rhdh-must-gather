@@ -390,35 +390,38 @@ _collect_pod_data() {
   local plugins_out_dir="$pod_data_dir/dynamic-plugins-root"
   ensure_directory "$plugins_out_dir"
 
-  local package_json_list="$plugins_out_dir/.package-json-paths.txt"
-  safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- find /opt/app-root/src/dynamic-plugins-root -maxdepth 2 -type f -name package.json" \
-    "$package_json_list" \
-    "package.json paths from dynamic-plugins-root in $pod"
-
-
-  if [[ ! -s "$package_json_list" ]]; then
+  local plugins_tar="${plugins_out_dir}.package-json.tar"
+  local plugins_tar_err="${plugins_tar}.err"
+  rm -f "$plugins_tar" "$plugins_tar_err"
+  set +e
+  timeout "$CMD_TIMEOUT" \
+    $KUBECTL_CMD -n "$ns" exec -c backstage-backend "$pod" -- \
+    sh -c 'cd /opt/app-root/src/dynamic-plugins-root 2>/dev/null || exit 0 
+           find . -maxdepth 2 -type f -name package.json -print0 2>/dev/null \
+           | tar --null -T - -cf - 2>/dev/null' \
+    >"$plugins_tar" 2>"$plugins_tar_err" 
+  local tar_rc=$?
+  set -e
+  if [[ $tar_rc -ne 0 ]]; then
+    log_warn "Failed to stream plugin package.json archive from $pod (rc=$tar_rc)"
+    rm -f "$plugins_tar" "$plugins_tar_err"
+  elif [[ ! -s "$plugins_tar" ]]; then
     log_debug "No package.json files found under dynamic-plugins-root in $pod"
+    rm -f "$plugins_tar" "$plugins_tar_err"
   else
-    while IFS= read -r remote_path || [[ -n "$remote_path" ]]; do 
-      [[ -z "$remote_path" ]] && continue
-      [[ "$remote_path" != /opt/app-root/src/dynamic-plugins-root/* ]] && continue
-
-      local rel_path="${remote_path#/opt/app-root/src/dynamic-plugins-root/}"
-      local local_path="$plugins_out_dir/$rel_path"
-      local tmp_path="${local_path}.tmp"
-      local remote_path_q
-      remote_path_q=$(printf '%q' "$remote_path")
-      mkdir -p "$(dirname "$local_path")"
-      safe_exec "$KUBECTL_CMD -n '$ns' exec -c backstage-backend '$pod' -- cat $remote_path_q" \
-        "$tmp_path" \
-        "package.json $rel_path from $pod"
-     if [[ -s "$tmp_path" ]] && jq -e . "$tmp_path" >/dev/null 2>&1; then
-         mv "$tmp_path" "$local_path"
-     else
-         log_warn "Rejecting package.json for $rel_path (empty or invalid JSON)"
-         rm -f "$tmp_path"
-     fi
-     done < "$package_json_list"
+    if ! tar -xf "$plugins_tar" -C "$plugins_out_dir" 2>/dev/null; then
+      log_warn "Failed to extract plugin package.json archive from $pod"
+    else
+      local package_json_file
+      while IFS= read -r -d '' package_json_file || [[ -n "$package_json_file" ]]; do
+        [[ -z "$package_json_file" ]] && continue
+        if ! jq -e . "$package_json_file" >/dev/null 2>&1; then
+          log_warn "Rejecting package.json for ${package_json_file#"$plugins_out_dir"/} (empty or invalid JSON)"
+          rm -f "$package_json_file"
+        fi
+      done < <(find "$plugins_out_dir" -type f -name package.json -print0 2>/dev/null)
+    fi
+    rm -f "$plugins_tar" "$plugins_tar_err"
   fi
 }
 
