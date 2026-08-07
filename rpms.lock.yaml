@@ -32,13 +32,13 @@ arches:
     name: glibc-devel
     evr: 2.34-275.el9_8
     sourcerpm: glibc-2.34-275.el9_8.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-687.34.1.el9_8.aarch64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-687.36.1.el9_8.aarch64.rpm
     repoid: ubi-9-for-aarch64-appstream-rpms
-    size: 2862625
-    checksum: sha256:8a50db63167d4b6549d9d5c45579ef6c874c8a3c3e93e021ee7d55bd627a34f9
+    size: 2864573
+    checksum: sha256:aa680c8c0622822ce53d2ffdc3341d3083d897f6c1f8102e8a0729b6376f0d3e
     name: kernel-headers
-    evr: 5.14.0-687.34.1.el9_8
-    sourcerpm: kernel-5.14.0-687.34.1.el9_8.src.rpm
+    evr: 5.14.0-687.36.1.el9_8
+    sourcerpm: kernel-5.14.0-687.36.1.el9_8.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/l/libasan-11.5.0-14.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-appstream-rpms
     size: 409047
@@ -452,13 +452,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.21-el9-beta/openshift-clients-4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9.aarch64.rpm
+  - url: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.21-el9-beta/openshift-clients-4.21.0-202608051112.p2.g0aac049.assembly.stream.el9.aarch64.rpm
     repoid: rhocp-4.21-for-rhel-9-aarch64-rpms
-    size: 28218400
-    checksum: sha256:217c257e0916475bc31705fb203537c51d5e335ad18a68b4816fb8bfab65fecf
+    size: 28224953
+    checksum: sha256:5a70472cb1f2d705cff746a23cf279db8871908e20fe6a28c114e981c095b86f
     name: openshift-clients
-    evr: 4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9
-    sourcerpm: openshift-clients-4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9.src.rpm
+    evr: 4.21.0-202608051112.p2.g0aac049.assembly.stream.el9
+    sourcerpm: openshift-clients-4.21.0-202608051112.p2.g0aac049.assembly.stream.el9.src.rpm
   source:
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-aarch64-appstream-source-rpms
@@ -720,13 +720,13 @@ arches:
     name: glibc-headers
     evr: 2.34-275.el9_8
     sourcerpm: glibc-2.34-275.el9_8.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/k/kernel-headers-5.14.0-687.34.1.el9_8.x86_64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/k/kernel-headers-5.14.0-687.36.1.el9_8.x86_64.rpm
     repoid: ubi-9-for-x86_64-appstream-rpms
-    size: 2901917
-    checksum: sha256:504e15343d3288cab0146755376113e17220e5837250aa9ab186fb2a56f812ed
+    size: 2903853
+    checksum: sha256:aa8f8d4579635787d6dda7323d472de1f2f630f97d694ebf5e0208791b76555c
     name: kernel-headers
-    evr: 5.14.0-687.34.1.el9_8
-    sourcerpm: kernel-5.14.0-687.34.1.el9_8.src.rpm
+    evr: 5.14.0-687.36.1.el9_8
+    sourcerpm: kernel-5.14.0-687.36.1.el9_8.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/l/libmpc-1.2.1-4.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-appstream-rpms
     size: 66075
@@ -1126,13 +1126,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rpms/4.21-el9-beta/openshift-clients-4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9.x86_64.rpm
+  - url: https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rpms/4.21-el9-beta/openshift-clients-4.21.0-202608051112.p2.g0aac049.assembly.stream.el9.x86_64.rpm
     repoid: rhocp-4.21-for-rhel-9-x86_64-rpms
-    size: 31226512
-    checksum: sha256:dcef0296d1797348a126dff0ea5b7fe4ed09e6636925f3e01919eb88ba93b736
+    size: 31226071
+    checksum: sha256:748d0a4a4113c03d27653832c2f6f1230ce1f7bd0852aed4032e8bbce142d787
     name: openshift-clients
-    evr: 4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9
-    sourcerpm: openshift-clients-4.21.0-202605201414.p2.gfdf8dab.assembly.stream.el9.src.rpm
+    evr: 4.21.0-202608051112.p2.g0aac049.assembly.stream.el9
+    sourcerpm: openshift-clients-4.21.0-202608051112.p2.g0aac049.assembly.stream.el9.src.rpm
   source:
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-x86_64-appstream-source-rpms
