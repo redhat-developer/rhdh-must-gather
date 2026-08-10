@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1785906690@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71 AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.8-1786339177@sha256:9d99826a5299a54fa92e9b47d74e6cd72efb04cb57eb8fe748ed93e08ebb6184 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
