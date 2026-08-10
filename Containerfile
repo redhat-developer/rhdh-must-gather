@@ -27,7 +27,7 @@ RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
 
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1786323074@sha256:57c8151c51445a07e503dab9dc9211dc3cdeac9d45ed81a10954b7d770659b3b
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
