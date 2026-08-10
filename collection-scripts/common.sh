@@ -411,6 +411,8 @@ _collect_pod_data() {
   else
     if ! tar -xf "$plugins_tar" -C "$plugins_out_dir" 2>/dev/null; then
       log_warn "Failed to extract plugin package.json archive from $pod"
+      rm -rf "$plugins_out_dir"
+      ensure_directory "$plugins_out_dir"
     else
       local package_json_file
       while IFS= read -r -d '' package_json_file || [[ -n "$package_json_file" ]]; do
