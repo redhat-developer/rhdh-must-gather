@@ -404,15 +404,12 @@ _collect_pod_data() {
   set -e
   if [[ $tar_rc -ne 0 ]]; then
     log_warn "Failed to stream plugin package.json archive from $pod (rc=$tar_rc)"
-    rm -f "$plugins_tar" "$plugins_tar_err"
   elif [[ ! -s "$plugins_tar" ]]; then
     log_debug "No package.json files found under dynamic-plugins-root in $pod"
     rm -f "$plugins_tar" "$plugins_tar_err"
   else
     if ! tar -xf "$plugins_tar" -C "$plugins_out_dir" 2>/dev/null; then
       log_warn "Failed to extract plugin package.json archive from $pod"
-      rm -rf "$plugins_out_dir"
-      ensure_directory "$plugins_out_dir"
     else
       local package_json_file
       while IFS= read -r -d '' package_json_file || [[ -n "$package_json_file" ]]; do
