@@ -4,11 +4,11 @@
 #
 # Curl mode (upstream Containerfile helm-builder):
 #   HELM_VERSION=4.2.3 CONTAINER_BUILD=true TARGETPLATFORM=linux/arm64 \
-#     hack/install-helm-cgw-binary.sh
+#     hack/install-helm-binary.sh
 #
 # Prefetch mode (Konflux hermetic helm-builder):
 #   CONTAINER_BUILD=true TARGETPLATFORM=linux/arm64 \
-#     hack/install-helm-cgw-binary.sh --prefetch
+#     hack/install-helm-binary.sh --prefetch
 #
 # Local Makefile uses OS/ARCH from the host (darwin or linux) without CONTAINER_BUILD.
 

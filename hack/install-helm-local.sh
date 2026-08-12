@@ -26,7 +26,7 @@ case "${4:-$(uname -m)}" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CGW_SCRIPT="${ROOT}/hack/helm-cgw-available.sh"
+CGW_SCRIPT="${ROOT}/hack/check-helm-binary-available.sh"
 VENDOR_SCRIPT="${ROOT}/hack/update-vendor.sh"
 HELM_SRC="${ROOT}/vendor/helm"
 

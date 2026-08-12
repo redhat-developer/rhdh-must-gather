@@ -192,7 +192,7 @@ VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
 vendor: ## Sync vendored sources; refresh Helm CGW lockfile or vendor helm source
-	@if ./hack/helm-cgw-available.sh "$(HELM_VERSION)"; then \
+	@if ./hack/check-helm-binary-available.sh "$(HELM_VERSION)"; then \
 		./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"; \
 	else \
 		echo "CGW mirror has no helm v$(HELM_VERSION) binaries; vendoring helm source instead..."; \

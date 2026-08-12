@@ -12,19 +12,33 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Install helm from Red Hat CGW mirror
-# helm v4.2.3 — replace this stage with go-toolset + vendor/helm build if CGW lacks a newer release
+# Stage 2a: Install helm from Red Hat CGW mirror (default)
+# Comment this out and uncomment Stage 2b below when no binary available.
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
 ARG TARGETPLATFORM
 COPY Makefile /tmp/Makefile
-COPY hack/install-helm-cgw-binary.sh /tmp/install-helm-cgw-binary.sh
+COPY hack/install-helm-binary.sh /tmp/install-helm-binary.sh
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
     && microdnf clean all \
     && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
     && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
-       bash /tmp/install-helm-cgw-binary.sh \
-    && rm -f /tmp/Makefile /tmp/install-helm-cgw-binary.sh
+       bash /tmp/install-helm-binary.sh \
+    && rm -f /tmp/Makefile /tmp/install-helm-binary.sh
+
+# Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
+# Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
+# update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# https://registry.access.redhat.com/ubi9/go-toolset
+# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786351949@sha256:0b471eb04868f3d9d90bf3c668f9c6c7a22cef07474ac9fec067909dfd7dec7c AS helm-builder
+# COPY Makefile /tmp/Makefile
+# COPY vendor/helm /opt/app-root/src/helm
+# WORKDIR /opt/app-root/src/helm
+# RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+#     CGO_ENABLED=0 go build -mod=vendor -trimpath \
+#         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+#         -o /tmp/helm ./cmd/helm && \
+#     /tmp/helm version
 
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal

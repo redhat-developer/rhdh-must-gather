@@ -26,7 +26,7 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
-if ! ./hack/helm-cgw-available.sh "${VERSION_NUM}"; then
+if ! ./hack/check-helm-binary-available.sh "${VERSION_NUM}"; then
     echo "Error: CGW mirror has no helm v${VERSION_NUM} linux-amd64/arm64 binaries." >&2
     echo "Use vendored source instead:" >&2
     echo "  make vendor-update VENDOR_NAME=helm VENDOR_VERSION=${VERSION}" >&2

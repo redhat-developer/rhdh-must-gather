@@ -3,12 +3,12 @@
 # Return 0 when Helm CGW mirror artifacts exist for the requested scope.
 #
 # Usage:
-#   hack/helm-cgw-available.sh <version>              # linux amd64 + arm64 (Konflux lockfile)
-#   hack/helm-cgw-available.sh <version> <os> <arch>    # single platform tarball (local Makefile)
+#   hack/check-helm-binary-available.sh <version>              # linux amd64 + arm64 (Konflux lockfile)
+#   hack/check-helm-binary-available.sh <version> <os> <arch>    # single platform tarball (local Makefile)
 #
 # Examples:
-#   hack/helm-cgw-available.sh 4.2.3
-#   hack/helm-cgw-available.sh 4.2.3 darwin arm64
+#   hack/check-helm-binary-available.sh 4.2.3
+#   hack/check-helm-binary-available.sh 4.2.3 darwin arm64
 
 set -euo pipefail
 

@@ -9,7 +9,8 @@
 #   hack/update-vendor.sh websocat v1.14.1
 #   hack/update-vendor.sh helm v4.2.3
 #
-# Helm is normally installed from CGW binaries (see hack/update-helm-lockfile.sh).
+# Helm is ideally installed from CGW binaries (see hack/update-helm-lockfile.sh), but when a newer
+# version exists for which binaries don't exist, switch to using vendored sources.
 # Vendor helm source when the CGW mirror does not publish the requested version.
 #
 # The script will:
