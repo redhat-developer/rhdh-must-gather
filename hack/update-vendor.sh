@@ -85,6 +85,21 @@ prune_helm() {
     find "$dir" -type d -name testdata -exec rm -rf {} +
 }
 
+finalize_helm() {
+    local dir="$1"
+
+    if ! command -v go &>/dev/null; then
+        echo "Error: go is required to vendor Helm module dependencies"
+        exit 1
+    fi
+
+    # Drop test-only requires and vendor external modules for hermetic (cachi2) builds.
+    (cd "$dir" && go mod tidy && go mod vendor)
+
+    # Verify the pruned tree still builds offline with vendored deps.
+    (cd "$dir" && CGO_ENABLED=0 go build -mod=vendor -trimpath -o /dev/null ./cmd/helm)
+}
+
 prune_websocat() {
     local dir="$1"
 
@@ -103,7 +118,10 @@ prune_websocat() {
 }
 
 case "$NAME" in
-    helm)     prune_helm "$PREFIX" ;;
+    helm)
+        prune_helm "$PREFIX"
+        finalize_helm "$PREFIX"
+        ;;
     websocat) prune_websocat "$PREFIX" ;;
 esac
 

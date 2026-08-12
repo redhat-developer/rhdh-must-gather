@@ -20,7 +20,7 @@ COPY Makefile /tmp/Makefile
 COPY vendor/helm /opt/app-root/src/helm
 WORKDIR /opt/app-root/src/helm
 RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
-    CGO_ENABLED=0 go build -trimpath \
+    CGO_ENABLED=0 go build -mod=vendor -trimpath \
         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
         -o /tmp/helm ./cmd/helm && \
     /tmp/helm version
