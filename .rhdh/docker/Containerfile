@@ -33,12 +33,40 @@ RUN set -eu; \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Final image
+# Stage 2: Install helm from prefetched CGW binaries (artifacts.lock.yaml / generic fetcher)
+# helm v4.2.3 — replace this stage with go-toolset + vendor/helm build if CGW lacks a newer release
+# https://registry.access.redhat.com/ubi9-minimal
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
+ARG TARGETPLATFORM
+COPY hack/install-helm-cgw-binary.sh /tmp/install-helm-cgw-binary.sh
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    arch=$(uname -m); \
+    rm -rf /etc/yum.repos.d/*; \
+    if [ -d "/cachi2/output/deps/rpm/${arch}/repos.d" ]; then \
+      cp -a "/cachi2/output/deps/rpm/${arch}/repos.d/." /etc/yum.repos.d/; \
+    else \
+      for repod in /cachi2/output/deps/rpm/"${arch}"/*/repos.d; do \
+        [ -d "${repod}" ] || continue; \
+        suffix=$(basename "$(dirname "$repod")"); \
+        for rf in "${repod}"/*.repo; do \
+          [ -f "${rf}" ] || continue; \
+          install -m0644 "${rf}" "/etc/yum.repos.d/${suffix}-$(basename "${rf}")"; \
+        done; \
+      done; \
+    fi; \
+    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
+    microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+      && microdnf clean all; \
+    CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" \
+      bash /tmp/install-helm-cgw-binary.sh --prefetch; \
+    rm -f /tmp/install-helm-cgw-binary.sh
+
+# Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221
 
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
-ARG TARGETARCH
 
 RUN set -eu; \
     . /cachi2/cachi2.env; \
@@ -81,20 +109,8 @@ RUN set -eu; \
       -r /tmp/requirements.txt && \
     rm -f /tmp/requirements-build.txt /tmp/requirements.txt
 
-# Install helm from prefetched CGW binaries (artifacts.lock.yaml / generic fetcher)
-COPY Makefile /tmp/Makefile
-RUN set -eu; \
-    . /cachi2/cachi2.env; \
-    case "${TARGETARCH}" in \
-      amd64) HELM_ARCH=amd64 ;; \
-      arm64) HELM_ARCH=arm64 ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    tar xzf "/cachi2/output/deps/generic/helm-linux-${HELM_ARCH}.tar.gz" \
-      -C /usr/local/bin --strip-components=1 "linux-${HELM_ARCH}/helm" && \
-    chmod +x /usr/local/bin/helm && \
-    rm /tmp/Makefile && \
-    helm version
+# Copy helm binary from prefetched CGW mirror (helm-builder stage)
+COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

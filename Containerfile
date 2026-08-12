@@ -12,13 +12,26 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Final image
+# Stage 2: Install helm from Red Hat CGW mirror
+# helm v4.2.3 — replace this stage with go-toolset + vendor/helm build if CGW lacks a newer release
+# https://registry.access.redhat.com/ubi9-minimal
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
+ARG TARGETPLATFORM
+COPY Makefile /tmp/Makefile
+COPY hack/install-helm-cgw-binary.sh /tmp/install-helm-cgw-binary.sh
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+    && microdnf clean all \
+    && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
+       bash /tmp/install-helm-cgw-binary.sh \
+    && rm -f /tmp/Makefile /tmp/install-helm-cgw-binary.sh
+
+# Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
-ARG TARGETARCH
 
 # Must-gather image for Red Hat Developer Hub (RHDH)
 LABEL name="rhdh-must-gather" \
@@ -69,20 +82,8 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Install helm from Red Hat CGW mirror (version from Makefile HELM_VERSION)
-# https://mirror.openshift.com/pub/cgw/helm/
-COPY Makefile /tmp/Makefile
-RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
-    case "${TARGETARCH}" in \
-      amd64) HELM_ARCH=amd64 ;; \
-      arm64) HELM_ARCH=arm64 ;; \
-      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac && \
-    curl -fsSL "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/helm-linux-${HELM_ARCH}.tar.gz" \
-      | tar xz -C /usr/local/bin --strip-components=1 "linux-${HELM_ARCH}/helm" && \
-    chmod +x /usr/local/bin/helm && \
-    rm /tmp/Makefile && \
-    helm version
+# Copy helm binary from CGW mirror (helm-builder stage)
+COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

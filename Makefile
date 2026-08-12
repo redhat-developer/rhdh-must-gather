@@ -37,7 +37,7 @@ YQ_BIN := $(YQ_VENV)/bin/yq
 
 # latest at https://github.com/helm/helm/releases
 HELM_VERSION := 4.2.3
-HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)
+HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)-$(OS)-$(ARCH)
 HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
 HELM_BIN := $(TOOLS_DIR)/helm
 
@@ -166,9 +166,9 @@ $(YQ_BIN): $(TOOLS_DIR)
 $(HELM_BIN_DL): $(TOOLS_DIR)
 	@mkdir -p "$(HELM_ARCHIVE_DIR)"
 	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
-		echo "Downloading helm v$(HELM_VERSION) for linux-$(ARCH) from CGW mirror..."; \
-		curl -sSL "https://mirror.openshift.com/pub/cgw/helm/$(HELM_VERSION)/helm-linux-$(ARCH).tar.gz" \
-			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "linux-$(ARCH)/helm"; \
+		echo "Downloading helm v$(HELM_VERSION) for $(OS)-$(ARCH) from CGW mirror..."; \
+		curl -sSL "https://mirror.openshift.com/pub/cgw/helm/$(HELM_VERSION)/helm-$(OS)-$(ARCH).tar.gz" \
+			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "$(OS)-$(ARCH)/helm"; \
 		chmod +x "$(HELM_BIN_DL)"; \
 		echo "helm installed successfully: $$($(HELM_BIN_DL) version --short)"; \
 	else \
