@@ -47,15 +47,19 @@ jobs:
             **/*.adoc
             examples/**
 
-      - name: List all changed files (for troubleshooting)
+      - name: Summarize changed files (for troubleshooting)
         if: steps.changed-files.outputs.any_changed == 'true'
         env:
-          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          CHANGED_COUNT: ${{ steps.changed-files.outputs.all_changed_files_count }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Use printf and quoted variables to prevent word splitting/execution
-          printf '%s\n' "$ALL_CHANGED_FILES" | while IFS= read -r file; do
-            echo "Changed: $file"
-          done
+          echo "Changed files matching build paths: ${CHANGED_COUNT}"
+          # Avoid passing the full file list via env (ARG_MAX); show a small sample only.
+          git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" | head -20
+          if [ "${CHANGED_COUNT}" -gt 20 ]; then
+            echo "... and $(( CHANGED_COUNT - 20 )) more"
+          fi
 
       # Generate image tags and build args
       - name: Prepare build variables
