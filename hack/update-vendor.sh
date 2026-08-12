@@ -8,6 +8,8 @@
 # Examples:
 #   hack/update-vendor.sh websocat v1.14.1
 #
+# Helm is installed from CGW binaries (see hack/update-helm-lockfile.sh), not vendored here.
+#
 # The script will:
 #   1. Clone the upstream tag into a temp directory and copy to vendor/<name>
 #   2. Remove non-essential files (docs, CI, tests, examples)
@@ -32,10 +34,10 @@ VERSION="$2"
 PREFIX="vendor/${NAME}"
 
 case "$NAME" in
-    helm)     REPO="https://github.com/helm/helm.git" ;;
     websocat) REPO="https://github.com/vi/websocat.git" ;;
     *)
-        echo "Error: unknown vendor '${NAME}'. Supported: helm, websocat"
+        echo "Error: unknown vendor '${NAME}'. Supported: websocat"
+        echo "For Helm, use: hack/update-helm-lockfile.sh <version>"
         exit 1
         ;;
 esac
@@ -64,27 +66,6 @@ rm -rf "${PREFIX}/.git"
 
 echo "Pruning non-essential files from ${PREFIX}..."
 
-prune_helm() {
-    local dir="$1"
-
-    # Remove non-essential top-level directories
-    local remove_dirs=(.github scripts testdata)
-    for d in "${remove_dirs[@]}"; do
-        rm -rf "${dir:?}/${d}"
-    done
-
-    # Remove non-essential top-level files (keep go.mod, go.sum, LICENSE*)
-    find "$dir" -maxdepth 1 -type f \
-        ! -name 'go.mod' \
-        ! -name 'go.sum' \
-        ! -name 'LICENSE*' \
-        -delete
-
-    # Remove test files and nested testdata (go build ignores them)
-    find "$dir" -name '*_test.go' -delete
-    find "$dir" -type d -name testdata -exec rm -rf {} +
-}
-
 prune_websocat() {
     local dir="$1"
 
@@ -103,7 +84,6 @@ prune_websocat() {
 }
 
 case "$NAME" in
-    helm)     prune_helm "$PREFIX" ;;
     websocat) prune_websocat "$PREFIX" ;;
 esac
 

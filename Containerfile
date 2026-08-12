@@ -12,25 +12,13 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Build helm from vendored source
-# update helm version via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
-# https://registry.access.redhat.com/ubi9/go-toolset
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786351949@sha256:0b471eb04868f3d9d90bf3c668f9c6c7a22cef07474ac9fec067909dfd7dec7c AS helm-builder
-COPY Makefile /tmp/Makefile
-COPY vendor/helm /opt/app-root/src/helm
-WORKDIR /opt/app-root/src/helm
-RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
-    CGO_ENABLED=0 go build -trimpath \
-        -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
-        -o /tmp/helm ./cmd/helm && \
-    /tmp/helm version
-
-# Stage 3: Final image
+# Stage 2: Final image
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
+ARG TARGETARCH
 
 # Must-gather image for Red Hat Developer Hub (RHDH)
 LABEL name="rhdh-must-gather" \
@@ -81,8 +69,20 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Copy helm binary built from source (vendor/helm)
-COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
+# Install helm from Red Hat CGW mirror (version from Makefile HELM_VERSION)
+# https://mirror.openshift.com/pub/cgw/helm/
+COPY Makefile /tmp/Makefile
+RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+    case "${TARGETARCH}" in \
+      amd64) HELM_ARCH=amd64 ;; \
+      arm64) HELM_ARCH=arm64 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/helm-linux-${HELM_ARCH}.tar.gz" \
+      | tar xz -C /usr/local/bin --strip-components=1 "linux-${HELM_ARCH}/helm" && \
+    chmod +x /usr/local/bin/helm && \
+    rm /tmp/Makefile && \
+    helm version
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

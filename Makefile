@@ -166,9 +166,9 @@ $(YQ_BIN): $(TOOLS_DIR)
 $(HELM_BIN_DL): $(TOOLS_DIR)
 	@mkdir -p "$(HELM_ARCHIVE_DIR)"
 	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
-		echo "Downloading helm v$(HELM_VERSION) for $(OS)-$(ARCH)..."; \
-		curl -sSL "https://get.helm.sh/helm-v$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" \
-			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "$(OS)-$(ARCH)/helm"; \
+		echo "Downloading helm v$(HELM_VERSION) for linux-$(ARCH) from CGW mirror..."; \
+		curl -sSL "https://mirror.openshift.com/pub/cgw/helm/$(HELM_VERSION)/helm-linux-$(ARCH).tar.gz" \
+			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "linux-$(ARCH)/helm"; \
 		chmod +x "$(HELM_BIN_DL)"; \
 		echo "helm installed successfully: $$($(HELM_BIN_DL) version --short)"; \
 	else \
@@ -195,9 +195,13 @@ VENDOR_NAME ?= ## Vendor name for vendor-update (e.g., websocat)
 VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
-vendor: ## Sync all vendored Git subtrees to their declared versions
-	./hack/update-vendor.sh helm "v$(HELM_VERSION)"
+vendor: ## Sync vendored sources and refresh Helm CGW lockfile
+	./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"
 	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
+
+.PHONY: helm-lockfile-update
+helm-lockfile-update: ## Refresh artifacts.lock.yaml for Helm CGW binaries (HELM_VERSION from Makefile)
+	./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"
 
 .PHONY: vendor-update
 vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_NAME, VENDOR_VERSION required)
