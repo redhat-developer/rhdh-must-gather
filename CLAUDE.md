@@ -98,6 +98,7 @@ make vendor
 To update a specific dependency to a new version (also bumps the version in the Makefile and Containerfile):
 ```bash
 make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1
+make helm-lockfile-update   # refresh artifacts.lock.yaml when HELM_VERSION changes
 ```
 A weekly GitHub Actions workflow (`vendor-update.yaml`) checks for new releases and auto-creates PRs.
 
