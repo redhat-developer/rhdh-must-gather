@@ -20,7 +20,7 @@ HELM_VERSION="${1#v}"
 OUTPUT_PATH="$2"
 BUILD_OS="${3:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 case "${4:-$(uname -m)}" in
-    x86_64) BUILD_ARCH=amd64 ;;
+    x86_64|amd64) BUILD_ARCH=amd64 ;;
     aarch64|arm64) BUILD_ARCH=arm64 ;;
     *) echo "unsupported arch: ${4:-$(uname -m)}" >&2; exit 1 ;;
 esac

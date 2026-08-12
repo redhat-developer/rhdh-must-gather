@@ -35,6 +35,10 @@ YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+# Host platform (must be defined before HELM_ARCHIVE_DIR / WEBSOCAT_ARCH)
+OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+
 # latest at https://github.com/helm/helm/releases
 # if version set below is available as a binary in CGW, update the helm-lockfile via: make helm-lockfile-update
 # if version set below is not available as a binary in CGW, vendor the helm source via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
@@ -48,8 +52,6 @@ WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
 WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
 
-OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 # websocat uses different naming: x86_64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin
 # Note: Apple Silicon returns 'arm64' but websocat uses 'aarch64'
 WEBSOCAT_ARCH := $(shell uname -m | sed 's/arm64/aarch64/')-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
