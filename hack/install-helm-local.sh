@@ -33,12 +33,14 @@ HELM_SRC="${ROOT}/vendor/helm"
 mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
 if "${CGW_SCRIPT}" "${HELM_VERSION}" "${BUILD_OS}" "${BUILD_ARCH}"; then
+    MEMBER="helm-${BUILD_OS}-${BUILD_ARCH}"
     echo "Downloading helm v${HELM_VERSION} for ${BUILD_OS}-${BUILD_ARCH} from CGW mirror..."
     curl -fsSL \
         "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/helm-${BUILD_OS}-${BUILD_ARCH}.tar.gz" \
-        | tar xz -C "$(dirname "${OUTPUT_PATH}")" --strip-components=1 \
-            "${BUILD_OS}-${BUILD_ARCH}/helm"
-    mv "$(dirname "${OUTPUT_PATH}")/helm" "${OUTPUT_PATH}"
+        -o "/tmp/${MEMBER}.tar.gz"
+    tar xzf "/tmp/${MEMBER}.tar.gz" -C "$(dirname "${OUTPUT_PATH}")" "${MEMBER}"
+    rm -f "/tmp/${MEMBER}.tar.gz"
+    mv "$(dirname "${OUTPUT_PATH}")/${MEMBER}" "${OUTPUT_PATH}"
 else
     echo "CGW mirror has no helm-${BUILD_OS}-${BUILD_ARCH} for v${HELM_VERSION}; building from vendor/helm..."
     if [[ ! -f "${HELM_SRC}/go.mod" ]]; then

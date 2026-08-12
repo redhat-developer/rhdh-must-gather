@@ -48,19 +48,27 @@ case "${BUILD_ARCH}" in
 esac
 
 TARBALL="helm-${BUILD_OS}-${BUILD_ARCH}.tar.gz"
-EXTRACT_PATH="${BUILD_OS}-${BUILD_ARCH}/helm"
+MEMBER="helm-${BUILD_OS}-${BUILD_ARCH}"
+
+extract_helm() {
+    local archive="$1"
+    tar xzf "${archive}" -C /tmp "${MEMBER}"
+    mv "/tmp/${MEMBER}" /tmp/helm
+}
 
 if ${PREFETCH}; then
     # shellcheck disable=SC1091
     . /cachi2/cachi2.env
-    tar xzf "/cachi2/output/deps/generic/${TARBALL}" -C /tmp --strip-components=1 "${EXTRACT_PATH}"
+    extract_helm "/cachi2/output/deps/generic/${TARBALL}"
 else
     if [[ -z "${HELM_VERSION:-}" ]]; then
         echo "HELM_VERSION is required for curl mode" >&2
         exit 1
     fi
     curl -fsSL "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/${TARBALL}" \
-        | tar xz -C /tmp --strip-components=1 "${EXTRACT_PATH}"
+        -o "/tmp/${TARBALL}"
+    extract_helm "/tmp/${TARBALL}"
+    rm -f "/tmp/${TARBALL}"
 fi
 
 chmod +x /tmp/helm
