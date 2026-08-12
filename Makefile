@@ -36,6 +36,8 @@ YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
 # latest at https://github.com/helm/helm/releases
+# if version set below is available as a binary in CGW, update the helm-lockfile via: make helm-lockfile-update
+# if version set below is not available as a binary in CGW, vendor the helm source via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 HELM_VERSION := 4.2.3
 HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)-$(OS)-$(ARCH)
 HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
