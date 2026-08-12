@@ -86,7 +86,7 @@ fi
 This project is built downstream via Konflux with hermetic builds (no network access during `docker build`). All build-time dependencies must be available locally in the repo or installable from vendored sources.
 
 ### What's vendored and why
-- **helm** — prebuilt Linux binaries from the [Red Hat CGW mirror](https://mirror.openshift.com/pub/cgw/helm/) (`artifacts.lock.yaml` + Hermeto generic fetcher for Konflux; curl in upstream Containerfile). Not vendored as source.
+- **helm** — prebuilt Linux binaries from the [Red Hat CGW mirror](https://mirror.openshift.com/pub/cgw/helm/) (`artifacts.lock.yaml` + Hermeto generic fetcher for Konflux; curl in upstream Containerfile). Not vendored as source when CGW publishes the version; `make local-setup` and `make vendor` fall back to `vendor/helm` when the mirror tarball is missing.
 - **websocat** — vendored as a Git subtree under `vendor/websocat/` and built from Rust source in a multi-stage Containerfile. Not available as an RPM, and pre-built binary downloads are incompatible with hermetic build requirements.
 - **yq** ([kislyuk/yq](https://github.com/kislyuk/yq)) — installed via `pip` in the Containerfile. It is a thin Python wrapper around jq for YAML processing, so vendoring is not needed — pip can install from a pre-fetched package index in hermetic mode.
 
