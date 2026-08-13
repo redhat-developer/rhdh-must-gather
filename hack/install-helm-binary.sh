@@ -20,8 +20,9 @@ if [[ "${1:-}" == "--prefetch" ]]; then
 fi
 
 if [[ -n "${TARGETPLATFORM:-}" ]]; then
+    # Use field 2 so linux/arm64/v8 (BuildKit) yields arm64, not v8.
     BUILD_OS="${TARGETPLATFORM%%/*}"
-    BUILD_ARCH="${TARGETPLATFORM##*/}"
+    BUILD_ARCH="$(cut -d/ -f2 <<< "${TARGETPLATFORM}")"
 else
     BUILD_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     case "$(uname -m)" in
@@ -30,10 +31,6 @@ else
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
     esac
 fi
-
-case "${BUILD_ARCH}" in
-    aarch64) BUILD_ARCH=arm64 ;;
-esac
 
 if [[ "${CONTAINER_BUILD:-}" == "true" ]]; then
     case "${BUILD_OS}" in
@@ -56,6 +53,9 @@ extract_helm() {
     mv "/tmp/${MEMBER}" /tmp/helm
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERIFY_SCRIPT="${VERIFY_SCRIPT:-${SCRIPT_DIR}/verify-helm-tarball.sh}"
+
 if ${PREFETCH}; then
     # shellcheck disable=SC1091
     . /cachi2/cachi2.env
@@ -67,6 +67,18 @@ else
     fi
     curl -fsSL "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/${TARBALL}" \
         -o "/tmp/${TARBALL}"
+    if [[ -z "${LOCKFILE:-}" ]]; then
+        if [[ -f "${SCRIPT_DIR}/artifacts.lock.yaml" ]]; then
+            LOCKFILE="${SCRIPT_DIR}/artifacts.lock.yaml"
+        else
+            LOCKFILE="${SCRIPT_DIR}/../artifacts.lock.yaml"
+        fi
+    fi
+    if [[ ! -f "${VERIFY_SCRIPT}" ]]; then
+        echo "Error: verify script not found: ${VERIFY_SCRIPT}" >&2
+        exit 1
+    fi
+    bash "${VERIFY_SCRIPT}" "/tmp/${TARBALL}" "${TARBALL}" "${LOCKFILE}" "${HELM_VERSION}"
     extract_helm "/tmp/${TARBALL}"
     rm -f "/tmp/${TARBALL}"
 fi

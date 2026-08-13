@@ -391,6 +391,7 @@ EOF
 }
 
 # Wait until misconfigured Helm pods finish init and backstage-backend hits CreateContainerConfigError.
+# Tolerates transient kubectl failures under the caller's set -euo pipefail.
 wait_for_helm_misconfigured_backstage_pods() {
     local namespace="$1"
     local release="$2"
@@ -400,31 +401,45 @@ wait_for_helm_misconfigured_backstage_pods() {
     local deadline=$((SECONDS + timeout))
 
     while [ "$SECONDS" -lt "$deadline" ]; do
-        local count
-        count=$(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)
+        local pods count
+        pods=$(kubectl -n "$namespace" get pods -l "$selector" \
+            -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+        count=$(printf '%s' "$pods" | wc -w)
         if [ "$count" -ge "$expected_count" ]; then
             break
         fi
         sleep 2
     done
 
-    local pod_count
-    pod_count=$(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)
+    local pod_count pods_final
+    pods_final=$(kubectl -n "$namespace" get pods -l "$selector" \
+        -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    pod_count=$(printf '%s' "$pods_final" | wc -w)
     if [ "$pod_count" -lt "$expected_count" ]; then
         log_error "Could not find ${expected_count} Helm-deployed RHDH pods in namespace ${namespace}."
         return 1
     fi
 
-    log_info "Found Helm pods: $(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}')"
+    log_info "Found Helm pods: ${pods_final}"
 
     while [ "$SECONDS" -lt "$deadline" ]; do
         local all_ready=true
-        local pod
+        local pod pod_names
+        pod_names=$(kubectl -n "$namespace" get pods -l "$selector" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+
         while IFS= read -r pod; do
             [ -z "$pod" ] && continue
 
+            local pod_json
+            pod_json=$(kubectl -n "$namespace" get pod "$pod" -o json 2>/dev/null || true)
+            if [ -z "$pod_json" ]; then
+                all_ready=false
+                continue
+            fi
+
             local unfinished_inits
-            unfinished_inits=$(kubectl -n "$namespace" get pod "$pod" -o json 2>/dev/null | \
+            unfinished_inits=$(printf '%s' "$pod_json" | \
                 jq '[.status.initContainerStatuses[]? | select(.state.terminated == null)] | length')
 
             if [ "${unfinished_inits:-0}" -gt 0 ]; then
@@ -433,7 +448,7 @@ wait_for_helm_misconfigured_backstage_pods() {
             fi
 
             local init_pull_errors
-            init_pull_errors=$(kubectl -n "$namespace" get pod "$pod" -o json 2>/dev/null | \
+            init_pull_errors=$(printf '%s' "$pod_json" | \
                 jq -r '[.status.initContainerStatuses[]?.state.waiting.reason // empty] | map(select(. == "ErrImagePull" or . == "ImagePullBackOff" or . == "CrashLoopBackOff")) | length')
             if [ "${init_pull_errors:-0}" -gt 0 ]; then
                 log_error "Init container failed on pod ${pod} (image pull or crash)."
@@ -442,11 +457,12 @@ wait_for_helm_misconfigured_backstage_pods() {
             fi
 
             local reason
-            reason=$(kubectl -n "$namespace" get pod "$pod" -o jsonpath='{range .status.containerStatuses[?(@.name=="backstage-backend")]}{.state.waiting.reason}{end}' 2>/dev/null)
+            reason=$(printf '%s' "$pod_json" | \
+                jq -r '.status.containerStatuses[]? | select(.name=="backstage-backend") | .state.waiting.reason // empty')
             if [ "$reason" != "CreateContainerConfigError" ]; then
                 all_ready=false
             fi
-        done < <(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+        done <<< "$pod_names"
 
         if [ "$all_ready" = true ]; then
             return 0

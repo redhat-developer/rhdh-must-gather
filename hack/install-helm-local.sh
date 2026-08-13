@@ -31,15 +31,21 @@ VENDOR_SCRIPT="${ROOT}/hack/update-vendor.sh"
 HELM_SRC="${ROOT}/vendor/helm"
 
 mkdir -p "$(dirname "${OUTPUT_PATH}")"
+# Absolute path so vendor go-build subshell does not write under vendor/helm/.
+OUTPUT_PATH="$(cd "$(dirname "${OUTPUT_PATH}")" && pwd)/$(basename "${OUTPUT_PATH}")"
 
 if "${CGW_SCRIPT}" "${HELM_VERSION}" "${BUILD_OS}" "${BUILD_ARCH}"; then
     MEMBER="helm-${BUILD_OS}-${BUILD_ARCH}"
+    TARBALL="${MEMBER}.tar.gz"
+    ARCHIVE="/tmp/${TARBALL}"
     echo "Downloading helm v${HELM_VERSION} for ${BUILD_OS}-${BUILD_ARCH} from CGW mirror..."
     curl -fsSL \
-        "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/helm-${BUILD_OS}-${BUILD_ARCH}.tar.gz" \
-        -o "/tmp/${MEMBER}.tar.gz"
-    tar xzf "/tmp/${MEMBER}.tar.gz" -C "$(dirname "${OUTPUT_PATH}")" "${MEMBER}"
-    rm -f "/tmp/${MEMBER}.tar.gz"
+        "https://mirror.openshift.com/pub/cgw/helm/${HELM_VERSION}/${TARBALL}" \
+        -o "${ARCHIVE}"
+    bash "${ROOT}/hack/verify-helm-tarball.sh" \
+        "${ARCHIVE}" "${TARBALL}" "${ROOT}/artifacts.lock.yaml" "${HELM_VERSION}"
+    tar xzf "${ARCHIVE}" -C "$(dirname "${OUTPUT_PATH}")" "${MEMBER}"
+    rm -f "${ARCHIVE}"
     mv "$(dirname "${OUTPUT_PATH}")/${MEMBER}" "${OUTPUT_PATH}"
 else
     echo "CGW mirror has no helm-${BUILD_OS}-${BUILD_ARCH} for v${HELM_VERSION}; building from vendor/helm..."

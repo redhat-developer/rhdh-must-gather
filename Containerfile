@@ -17,14 +17,15 @@ RUN cargo build --release \
 # https://registry.access.redhat.com/ubi9-minimal
 FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
 ARG TARGETPLATFORM
-COPY Makefile /tmp/Makefile
-COPY hack/install-helm-binary.sh /tmp/install-helm-binary.sh
-RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+COPY Makefile artifacts.lock.yaml /tmp/
+COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash coreutils \
     && microdnf clean all \
     && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
     && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
+       LOCKFILE=/tmp/artifacts.lock.yaml VERIFY_SCRIPT=/tmp/verify-helm-tarball.sh \
        bash /tmp/install-helm-binary.sh \
-    && rm -f /tmp/Makefile /tmp/install-helm-binary.sh
+    && rm -f /tmp/Makefile /tmp/artifacts.lock.yaml /tmp/install-helm-binary.sh /tmp/verify-helm-tarball.sh
 
 # Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
