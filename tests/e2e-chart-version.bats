@@ -38,3 +38,11 @@ teardown() {
     [ "$status" -eq 0 ]
     [ "$output" = "2.0" ]
 }
+
+@test "helm_template_yaml strips Helm 4 OCI pull status lines" {
+    run bash -c "source '${PROJECT_ROOT}/tests/e2e/lib/test-utils.sh' && \
+        printf '%s\n' 'Pulled: quay.io/rhdh/chart:2.0-59-CI' 'Digest: sha256:abc' '---' 'apiVersion: v1' | \
+        sed '/^Pulled:/d; /^Digest:/d'"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'---\napiVersion: v1' ]
+}

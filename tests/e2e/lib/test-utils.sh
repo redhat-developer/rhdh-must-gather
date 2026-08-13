@@ -250,6 +250,12 @@ chart_major_from_version() {
     echo "${1%%-*}"
 }
 
+# Render a Helm chart to stdout, omitting Helm 4 OCI pull status lines.
+# Helm 4 prints "Pulled:" / "Digest:" to stdout for oci:// charts; kubectl apply rejects those as manifests.
+helm_template_yaml() {
+    helm template "$@" | sed '/^Pulled:/d; /^Digest:/d'
+}
+
 # Append SIGUSR2 heap-dump env vars to a Helm values file (must preserve chart defaults).
 append_heap_dump_sigusr2_values() {
     local outfile="$1"

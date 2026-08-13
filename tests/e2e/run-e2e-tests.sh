@@ -312,7 +312,7 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
 
     # Render the Helm chart and apply directly (no Helm release tracking)
     log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
-    helm template "$STANDALONE_RELEASE" "$HELM_CHART_OCI_REF" \
+    helm_template_yaml "$STANDALONE_RELEASE" "$HELM_CHART_OCI_REF" \
         --namespace "$NS_STANDALONE" \
         --values "$STANDALONE_VALUES_FILE" \
         "${HELM_VERSION_ARGS[@]}" | kubectl apply -n "$NS_STANDALONE" -f -
