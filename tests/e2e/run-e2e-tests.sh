@@ -238,10 +238,10 @@ if [ "$SKIP_HELM" = false ] || [ "$SKIP_HELM_STANDALONE" = false ]; then
         RESOLVED_CHART_VERSION="$HELM_CHART_VERSION"
     else
         CHART_MAJOR=$(chart_major_version_for_target_branch "$TARGET_BRANCH") || exit 1
-        log_info "Looking for Helm chart version matching ${CHART_MAJOR}-*-CI on quay.io/rhdh/chart..."
+        log_info "Looking for Helm chart version matching ${CHART_MAJOR}-*-CI on ${HELM_CHART_OCI_REF}..."
         RESOLVED_CHART_VERSION=$(latest_ci_chart_version_for_major "$CHART_MAJOR")
         if [ -z "$RESOLVED_CHART_VERSION" ]; then
-            log_error "No CI chart version found for ${CHART_MAJOR} on quay.io/rhdh/chart"
+            log_error "No CI chart version found for ${CHART_MAJOR} on ${HELM_CHART_OCI_REF}"
             exit 1
         fi
         log_info "Using Helm chart version: $RESOLVED_CHART_VERSION"

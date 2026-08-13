@@ -195,10 +195,12 @@ reset_errors() {
 }
 
 # OCI Helm chart published by RHDH midstream (Konflux CI tags: X.Y-N-CI).
+# Also used by run-e2e-tests.sh after sourcing this file.
 HELM_CHART_OCI_REF="oci://quay.io/rhdh/chart"
+HELM_CHART_SKOPEO_REF="${HELM_CHART_OCI_REF/oci:/docker:}"
 
 # Resolve chart major.minor (X.Y) from must-gather E2E target branch.
-# main: highest X.Y present on quay.io/rhdh/chart (matches rhdh CI helm::get_chart_major_version).
+# main: highest X.Y present on the chart registry (matches rhdh CI helm::get_chart_major_version).
 # release-x.y: x.y from the branch name.
 chart_major_version_for_target_branch() {
     local branch="$1"
@@ -208,7 +210,7 @@ chart_major_version_for_target_branch() {
                 log_error "skopeo is required to resolve Helm chart version for main"
                 return 1
             fi
-            skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
+            skopeo list-tags "$HELM_CHART_SKOPEO_REF" 2>/dev/null | \
                 jq -r '.Tags[]' | \
                 grep -oE '^[0-9]+\.[0-9]+' | \
                 sort -t. -k1,1n -k2,2n -u | \
@@ -231,14 +233,14 @@ select_latest_ci_chart_version_from_tags() {
     grep -E "^${major}-[0-9]+-CI$" | sort -V | tail -1
 }
 
-# Latest Konflux CI chart tag for major.minor X.Y from quay.io/rhdh/chart.
+# Latest Konflux CI chart tag for major.minor X.Y from the chart registry.
 latest_ci_chart_version_for_major() {
     local major="$1"
     if ! command -v skopeo &>/dev/null; then
         log_error "skopeo is required to resolve Helm chart version"
         return 1
     fi
-    skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
+    skopeo list-tags "$HELM_CHART_SKOPEO_REF" 2>/dev/null | \
         jq -r '.Tags[]' | \
         select_latest_ci_chart_version_from_tags "$major"
 }
