@@ -58,11 +58,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          make vendor-update VENDOR_NAME="$VENDOR_NAME" VENDOR_VERSION="$VENDOR_VERSION"
+          if [ "$VENDOR_NAME" = "helm" ]; then
+            ./hack/update-helm-lockfile.sh "$VENDOR_VERSION"
+          else
+            make vendor-update VENDOR_NAME="$VENDOR_NAME" VENDOR_VERSION="$VENDOR_VERSION"
+          fi
 
           # Stage and commit changes (the script leaves them unstaged)
           if ! git diff --quiet || ! git diff --cached --quiet; then
-            git add "vendor/$VENDOR_NAME" Containerfile .rhdh/docker/Containerfile Makefile
+            if [ "$VENDOR_NAME" = "helm" ]; then
+              git add artifacts.lock.yaml Makefile
+            else
+              git add "vendor/$VENDOR_NAME" Containerfile .rhdh/docker/Containerfile Makefile
+            fi
             git commit -m "chore(vendor): update $VENDOR_NAME to $VENDOR_VERSION"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else

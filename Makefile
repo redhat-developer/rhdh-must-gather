@@ -35,9 +35,15 @@ YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+# Host platform (must be defined before HELM_ARCHIVE_DIR / WEBSOCAT_ARCH)
+OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+
 # latest at https://github.com/helm/helm/releases
+# if version set below is available as a binary in CGW, update the helm-lockfile via: make helm-lockfile-update
+# if version set below is not available as a binary in CGW, vendor the helm source via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 HELM_VERSION := 4.2.3
-HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)
+HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)-$(OS)-$(ARCH)
 HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
 HELM_BIN := $(TOOLS_DIR)/helm
 
@@ -46,8 +52,6 @@ WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
 WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
 
-OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 # websocat uses different naming: x86_64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin
 # Note: Apple Silicon returns 'arm64' but websocat uses 'aarch64'
 WEBSOCAT_ARCH := $(shell uname -m | sed 's/arm64/aarch64/')-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
@@ -166,11 +170,7 @@ $(YQ_BIN): $(TOOLS_DIR)
 $(HELM_BIN_DL): $(TOOLS_DIR)
 	@mkdir -p "$(HELM_ARCHIVE_DIR)"
 	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
-		echo "Downloading helm v$(HELM_VERSION) for $(OS)-$(ARCH)..."; \
-		curl -sSL "https://get.helm.sh/helm-v$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" \
-			| tar xz -C "$(HELM_ARCHIVE_DIR)" --strip-components=1 "$(OS)-$(ARCH)/helm"; \
-		chmod +x "$(HELM_BIN_DL)"; \
-		echo "helm installed successfully: $$($(HELM_BIN_DL) version --short)"; \
+		./hack/install-helm-local.sh "$(HELM_VERSION)" "$(HELM_BIN_DL)" "$(OS)" "$(ARCH)"; \
 	else \
 		echo "helm $(HELM_VERSION) already installed: $(HELM_BIN_DL)"; \
 	fi
@@ -195,15 +195,25 @@ VENDOR_NAME ?= ## Vendor name for vendor-update (e.g., websocat)
 VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
-vendor: ## Sync all vendored Git subtrees to their declared versions
-	./hack/update-vendor.sh helm "v$(HELM_VERSION)"
+vendor: ## Sync vendored sources; refresh Helm CGW lockfile or vendor helm source
+	@if ./hack/check-helm-binary-available.sh "$(HELM_VERSION)"; then \
+		./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"; \
+	else \
+		echo "CGW mirror has no helm v$(HELM_VERSION) binaries; vendoring helm source instead..."; \
+		./hack/update-vendor.sh helm "v$(HELM_VERSION)"; \
+	fi
 	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
+
+.PHONY: helm-lockfile-update
+helm-lockfile-update: ## Refresh artifacts.lock.yaml for Helm CGW binaries (HELM_VERSION from Makefile)
+	./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"
 
 .PHONY: vendor-update
 vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_NAME, VENDOR_VERSION required)
 	@if [ -z "$(VENDOR_NAME)" ] || [ -z "$(VENDOR_VERSION)" ]; then \
 		echo "Error: VENDOR_NAME and VENDOR_VERSION are required."; \
 		echo "Usage: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1"; \
+		echo "       make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v4.2.3"; \
 		exit 1; \
 	fi
 	./hack/update-vendor.sh "$(VENDOR_NAME)" "$(VENDOR_VERSION)"

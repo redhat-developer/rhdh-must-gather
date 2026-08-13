@@ -12,18 +12,34 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Build helm from vendored source
-# update helm version via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# Stage 2a: Install helm from Red Hat CGW mirror (default)
+# Comment this out and uncomment Stage 2b below when no binary available.
+# https://registry.access.redhat.com/ubi9-minimal
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
+ARG TARGETPLATFORM
+COPY Makefile artifacts.lock.yaml /tmp/
+COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+    && microdnf clean all \
+    && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
+       LOCKFILE=/tmp/artifacts.lock.yaml VERIFY_SCRIPT=/tmp/verify-helm-tarball.sh \
+       bash /tmp/install-helm-binary.sh \
+    && rm -f /tmp/Makefile /tmp/artifacts.lock.yaml /tmp/install-helm-binary.sh /tmp/verify-helm-tarball.sh
+
+# Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
+# Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
+# update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi9/go-toolset
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786351949@sha256:0b471eb04868f3d9d90bf3c668f9c6c7a22cef07474ac9fec067909dfd7dec7c AS helm-builder
-COPY Makefile /tmp/Makefile
-COPY vendor/helm /opt/app-root/src/helm
-WORKDIR /opt/app-root/src/helm
-RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
-    CGO_ENABLED=0 go build -trimpath \
-        -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
-        -o /tmp/helm ./cmd/helm && \
-    /tmp/helm version
+# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786351949@sha256:0b471eb04868f3d9d90bf3c668f9c6c7a22cef07474ac9fec067909dfd7dec7c AS helm-builder
+# COPY Makefile /tmp/Makefile
+# COPY vendor/helm /opt/app-root/src/helm
+# WORKDIR /opt/app-root/src/helm
+# RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+#     CGO_ENABLED=0 go build -mod=vendor -trimpath \
+#         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+#         -o /tmp/helm ./cmd/helm && \
+#     /tmp/helm version
 
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
@@ -81,7 +97,7 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Copy helm binary built from source (vendor/helm)
+# Copy helm binary from CGW mirror (helm-builder stage)
 COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
