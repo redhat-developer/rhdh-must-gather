@@ -19,7 +19,7 @@ FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d21
 ARG TARGETPLATFORM
 COPY Makefile artifacts.lock.yaml /tmp/
 COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
-RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash coreutils \
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
     && microdnf clean all \
     && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
     && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
