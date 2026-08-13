@@ -32,3 +32,9 @@ teardown() {
     [ "$status" -eq 0 ]
     [ "$output" = "2.0" ]
 }
+
+@test "chart_major_from_version extracts major from CI tag" {
+    run chart_major_from_version "2.0-59-CI"
+    [ "$status" -eq 0 ]
+    [ "$output" = "2.0" ]
+}

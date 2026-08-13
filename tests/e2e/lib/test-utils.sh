@@ -244,3 +244,210 @@ latest_ci_chart_version_for_major() {
         jq -r '.Tags[]' | \
         select_latest_ci_chart_version_from_tags "$major"
 }
+
+# Extract chart major.minor (X.Y) from a Konflux CI tag (e.g. 2.0-59-CI -> 2.0).
+chart_major_from_version() {
+    echo "${1%%-*}"
+}
+
+# Append SIGUSR2 heap-dump env vars to a Helm values file (must preserve chart defaults).
+append_heap_dump_sigusr2_values() {
+    local outfile="$1"
+    cat >> "$outfile" <<'EOF'
+upstream:
+  backstage:
+    extraEnvVars:
+      - name: BACKEND_SECRET
+        valueFrom:
+          secretKeyRef:
+            key: backend-secret
+            name: '{{ include "rhdh.backend-secret-name" $ }}'
+      - name: POSTGRESQL_ADMIN_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            key: postgres-password
+            name: '{{- include "rhdh.postgresql.secretName" . }}'
+      - name: NODE_OPTIONS
+        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
+}
+
+# Kind-friendly PostgreSQL image (registry.redhat.io requires authenticated pull).
+write_standalone_postgresql_values() {
+    local outfile="$1"
+    cat >> "$outfile" <<'EOF'
+upstream:
+  postgresql:
+    enabled: true
+    image:
+      registry: quay.io
+      repository: fedora/postgresql-15
+      tag: latest
+    primary:
+      podSecurityContext:
+        enabled: false
+      containerSecurityContext:
+        enabled: false
+EOF
+}
+
+# Write Helm values for E2E deployments keyed by chart major (1.x vs 2.x), not git branch name.
+# mode: misconfigured (native helm, expects CreateContainerConfigError) | standalone (running pod)
+write_helm_e2e_values() {
+    local chart_major="$1"
+    local outfile="$2"
+    local mode="$3"
+
+    case "$chart_major" in
+        1.*)
+            case "$mode" in
+                misconfigured)
+                    cat > "$outfile" <<EOF
+route:
+  enabled: false
+upstream:
+  backstage:
+    replicas: 2
+  postgresql:
+    # Purposely disable the local database to simulate a misconfigured application (missing external database info)
+    enabled: false
+global:
+  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
+  catalogIndex:
+    image:
+      tag: "1.10-51"
+  lightspeed:
+    enabled: false
+  dynamic:
+    includes: []
+EOF
+                    ;;
+                standalone)
+                    cat > "$outfile" <<EOF
+route:
+  enabled: false
+global:
+  catalogIndex:
+    image:
+      tag: "1.10-51"
+  dynamic:
+    includes:
+      - dynamic-plugins.default.yaml
+EOF
+                    write_standalone_postgresql_values "$outfile"
+                    ;;
+                *)
+                    log_error "Unknown Helm E2E values mode: $mode"
+                    return 1
+                    ;;
+            esac
+            ;;
+        2.*)
+            case "$mode" in
+                misconfigured)
+                    cat > "$outfile" <<EOF
+route:
+  enabled: false
+upstream:
+  backstage:
+    replicas: 2
+  postgresql:
+    enabled: false
+global:
+  lightspeed:
+    enabled: false
+  dynamic:
+    includes: []
+EOF
+                    ;;
+                standalone)
+                    cat > "$outfile" <<EOF
+route:
+  enabled: false
+global:
+  dynamic:
+    includes:
+      - dynamic-plugins.default.yaml
+EOF
+                    write_standalone_postgresql_values "$outfile"
+                    ;;
+                *)
+                    log_error "Unknown Helm E2E values mode: $mode"
+                    return 1
+                    ;;
+            esac
+            ;;
+        *)
+            log_error "Unsupported chart major for E2E values: $chart_major"
+            return 1
+            ;;
+    esac
+}
+
+# Wait until misconfigured Helm pods finish init and backstage-backend hits CreateContainerConfigError.
+wait_for_helm_misconfigured_backstage_pods() {
+    local namespace="$1"
+    local release="$2"
+    local expected_count="${3:-2}"
+    local timeout="${4:-600}"
+    local selector="app.kubernetes.io/instance=${release},app.kubernetes.io/component=backstage"
+    local deadline=$((SECONDS + timeout))
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local count
+        count=$(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)
+        if [ "$count" -ge "$expected_count" ]; then
+            break
+        fi
+        sleep 2
+    done
+
+    local pod_count
+    pod_count=$(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)
+    if [ "$pod_count" -lt "$expected_count" ]; then
+        log_error "Could not find ${expected_count} Helm-deployed RHDH pods in namespace ${namespace}."
+        return 1
+    fi
+
+    log_info "Found Helm pods: $(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}')"
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local all_ready=true
+        local pod
+        while IFS= read -r pod; do
+            [ -z "$pod" ] && continue
+
+            local unfinished_inits
+            unfinished_inits=$(kubectl -n "$namespace" get pod "$pod" -o json 2>/dev/null | \
+                jq '[.status.initContainerStatuses[]? | select(.state.terminated == null)] | length')
+
+            if [ "${unfinished_inits:-0}" -gt 0 ]; then
+                all_ready=false
+                continue
+            fi
+
+            local init_pull_errors
+            init_pull_errors=$(kubectl -n "$namespace" get pod "$pod" -o json 2>/dev/null | \
+                jq -r '[.status.initContainerStatuses[]?.state.waiting.reason // empty] | map(select(. == "ErrImagePull" or . == "ImagePullBackOff" or . == "CrashLoopBackOff")) | length')
+            if [ "${init_pull_errors:-0}" -gt 0 ]; then
+                log_error "Init container failed on pod ${pod} (image pull or crash)."
+                kubectl describe pod "$pod" -n "$namespace" >&2 || true
+                return 1
+            fi
+
+            local reason
+            reason=$(kubectl -n "$namespace" get pod "$pod" -o jsonpath='{range .status.containerStatuses[?(@.name=="backstage-backend")]}{.state.waiting.reason}{end}' 2>/dev/null)
+            if [ "$reason" != "CreateContainerConfigError" ]; then
+                all_ready=false
+            fi
+        done < <(kubectl -n "$namespace" get pods -l "$selector" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+
+        if [ "$all_ready" = true ]; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    log_error "Helm-deployed pods did not reach CreateContainerConfigError on backstage-backend within expected time."
+    return 1
+}
