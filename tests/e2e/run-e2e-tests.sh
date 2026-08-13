@@ -231,6 +231,24 @@ log_info "=========================================="
 log_info "Setting up RHDH instances for testing"
 log_info "=========================================="
 
+HELM_VERSION_ARGS=()
+if [ "$SKIP_HELM" = false ] || [ "$SKIP_HELM_STANDALONE" = false ]; then
+    if [ -n "$HELM_CHART_VERSION" ]; then
+        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
+        RESOLVED_CHART_VERSION="$HELM_CHART_VERSION"
+    else
+        CHART_MAJOR=$(chart_major_version_for_target_branch "$TARGET_BRANCH") || exit 1
+        log_info "Looking for Helm chart version matching ${CHART_MAJOR}-*-CI on quay.io/rhdh/chart..."
+        RESOLVED_CHART_VERSION=$(latest_ci_chart_version_for_major "$CHART_MAJOR")
+        if [ -z "$RESOLVED_CHART_VERSION" ]; then
+            log_error "No CI chart version found for ${CHART_MAJOR} on quay.io/rhdh/chart"
+            exit 1
+        fi
+        log_info "Using Helm chart version: $RESOLVED_CHART_VERSION"
+    fi
+    HELM_VERSION_ARGS=(--version "$RESOLVED_CHART_VERSION")
+fi
+
 # --- Helm Release Setup ---
 NS_HELM=""
 HELM_RELEASE=""
@@ -307,34 +325,8 @@ EOF
     fi
 
     HELM_RELEASE="my-helm"
-    HELM_VERSION_ARGS=()
-    # Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
-    if [ -n "$HELM_CHART_VERSION" ]; then
-        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
-        HELM_VERSION_ARGS=(--version "$HELM_CHART_VERSION")
-        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
-    elif [ "$TARGET_BRANCH" != "main" ]; then
-        # Extract version from branch name (e.g., release-1.9 -> 1.9)
-        BRANCH_VERSION="${TARGET_BRANCH#release-}"
-        log_info "Looking for Helm chart version matching ${BRANCH_VERSION}-*-CI..."
-        CHART_VERSION=$(skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
-            jq -r '.Tags[]' | \
-            grep "^${BRANCH_VERSION}-.*-CI$" | \
-            sort -V | \
-            tail -1)
-        if [ -n "$CHART_VERSION" ]; then
-            log_info "Using Helm chart version: $CHART_VERSION"
-            HELM_VERSION_ARGS=(--version "$CHART_VERSION")
-        else
-            log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
-        fi
-        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
-    else
-        # Latest upstream chart
-        helm -n "$NS_HELM" install "$HELM_RELEASE" backstage \
-            --repo "https://redhat-developer.github.io/rhdh-chart" \
-            --values "$TEMP_VALUES_FILE"
-    fi
+    helm -n "$NS_HELM" install "$HELM_RELEASE" "$HELM_CHART_OCI_REF" \
+        --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
 
     # Wait for the Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)
     log_info "Waiting for 2 Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)..."
@@ -410,17 +402,10 @@ EOF
 
     # Render the Helm chart and apply directly (no Helm release tracking)
     log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
-    if [ "$TARGET_BRANCH" != "main" ]; then
-        helm template "$STANDALONE_RELEASE" oci://quay.io/rhdh/chart \
-            --namespace "$NS_STANDALONE" \
-            --values "$STANDALONE_VALUES_FILE" \
-            ${HELM_VERSION_ARGS:+"${HELM_VERSION_ARGS[@]}"} | kubectl apply -n "$NS_STANDALONE" -f -
-    else
-        helm template "$STANDALONE_RELEASE" backstage \
-            --repo "https://redhat-developer.github.io/rhdh-chart" \
-            --namespace "$NS_STANDALONE" \
-            --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
-    fi
+    helm template "$STANDALONE_RELEASE" "$HELM_CHART_OCI_REF" \
+        --namespace "$NS_STANDALONE" \
+        --values "$STANDALONE_VALUES_FILE" \
+        "${HELM_VERSION_ARGS[@]}" | kubectl apply -n "$NS_STANDALONE" -f -
 
     # Wait for the standalone-deployed RHDH pod to be running (not necessarily Ready)
     log_info "Waiting for standalone-deployed RHDH pod to be running..."
