@@ -1,0 +1,206 @@
+# Copyright Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Docker Build (Hermetic)
+description: Build a container image hermetically using Hermeto (Konflux CI)
+inputs:
+  imageName:
+    description: The full image name including registry (e.g., quay.io/rhdh-community/rhdh-must-gather)
+    required: true
+  imageTags:
+    description: The tags to apply to the image
+    required: true
+  imageLabels:
+    description: The labels for the Docker image
+    required: false
+  platform:
+    description: "Target given CPU platform architecture (default: linux/amd64)"
+    required: false
+    default: linux/amd64
+  containerfilePath:
+    description: Path to the Containerfile to use
+    required: false
+    default: 'Containerfile'
+  buildArgs:
+    description: Build arguments to pass to buildah (newline-separated KEY=VALUE pairs)
+    required: false
+    default: ''
+  skipArtifactUpload:
+    description: Skip uploading the built image as a GitHub artifact
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: false
+        swap-storage: false
+
+    - name: Extract metadata (tags, labels, annotations) for Docker
+      id: meta
+      uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+      with:
+        images: ${{ inputs.imageName }}
+        tags: |
+          ${{ inputs.imageTags }}
+        labels: |
+          ${{ inputs.imageLabels }}
+
+    - name: Set up hermetic build variables
+      shell: bash
+      run: |
+        echo "HERMETO_IMAGE=quay.io/konflux-ci/hermeto@sha256:de5398035bee2965a275313654f51c80e213ae460b6ec5a23e32c81efd00e67b" >> $GITHUB_ENV
+        echo "LOCAL_CACHE_DIR=./hermeto-cache/rhdh-must-gather" >> $GITHUB_ENV
+
+    - name: Download helm binary
+      shell: bash
+      run: |
+        set -ex
+        PLATFORM="${{ inputs.platform }}"
+        ARCH="${PLATFORM#*/}"
+        mkdir -p bin
+        echo "Downloading helm for ${ARCH}..."
+        curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-${ARCH}" -o bin/helm
+        chmod +x bin/helm
+        bin/helm version --short
+
+    - name: Cache dependencies with hermeto
+      shell: bash
+      run: |
+        set -ex
+
+        echo "::group::Creating local cache directory"
+        mkdir -p ${{ env.LOCAL_CACHE_DIR }} || echo "Failed to create local cache directory"
+        echo "::endgroup::"
+
+        echo "::group::Fetching dependencies with hermeto"
+        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+          --log-level DEBUG \
+          fetch-deps --dev-package-managers \
+          --source . \
+          --output /cachi2/output \
+          '[{"type": "rpm", "path": "."}, {"type": "pip", "path": ".", "allow_binary": "false"}, {"type": "cargo", "path": "vendor/websocat"}]'
+        echo "::endgroup::"
+
+        if [ -d ${{ env.LOCAL_CACHE_DIR }}/output ]; then
+          echo "::group::Generating environment file"
+          podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+                      --log-level DEBUG \
+                      generate-env --format env \
+                      --output /cachi2/cachi2.env /cachi2/output
+          echo "::endgroup::"
+        else
+          echo "No output directory found, skipping generate-env"
+          exit 1
+        fi
+
+        if [ -d ${{ env.LOCAL_CACHE_DIR }}/output ]; then
+          echo "::group::Injecting files"
+          podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+            --log-level DEBUG \
+            inject-files /cachi2/output
+          echo "::endgroup::"
+        else
+          echo "No output directory found, skipping inject-files"
+          exit 1
+        fi
+
+        echo LOCAL_CACHE_DIR_REALPATH=$(realpath "${{ env.LOCAL_CACHE_DIR }}") >> $GITHUB_ENV
+
+    - name: "Fix Cache Ownership for Non-Root Buildah"
+      shell: bash
+      run: |
+        set -ex
+        echo "::group::Fixing cache ownership"
+
+        echo "=== Before ownership fix ==="
+        ls -l ${{ env.LOCAL_CACHE_DIR_REALPATH }}
+
+        echo "=== Attempting to fix ownership to runner user ==="
+        sudo chown -R runner ${{ env.LOCAL_CACHE_DIR_REALPATH }}
+
+        echo "=== After ownership fix ==="
+        ls -l ${{ env.LOCAL_CACHE_DIR_REALPATH }}
+
+        echo "::endgroup::"
+
+    - name: Transform Containerfile for hermetic build
+      shell: bash
+      id: transform-containerfile
+      env:
+        CONTAINERFILE_PATH: ${{ inputs.containerfilePath }}
+        TRANSFORMED_CONTAINERFILE: ${{ inputs.containerfilePath }}.hermeto
+      run: |
+        set -x
+
+        echo "::group::Transforming Containerfile for hermetic build"
+
+        cp "$CONTAINERFILE_PATH" "$TRANSFORMED_CONTAINERFILE"
+
+        # Configure dnf to use the cachi2 repo
+        sed -i '/RUN *\(dnf\|microdnf\) install/i RUN rm -r /etc/yum.repos.d/* && cp /cachi2/output/deps/rpm/$(uname -m)/repos.d/hermeto.repo /etc/yum.repos.d/' "$TRANSFORMED_CONTAINERFILE"
+
+        # Inject the cachi2 env variables to every RUN command
+        sed -i 's/^\s*RUN /RUN . \/cachi2\/cachi2.env \&\& /' "$TRANSFORMED_CONTAINERFILE"
+        echo "::endgroup::"
+
+        echo "transformed_containerfile=$TRANSFORMED_CONTAINERFILE" >> $GITHUB_OUTPUT
+
+    - name: "Build Docker Image"
+      id: build
+      uses: redhat-actions/buildah-build@7a95fa7ee0f02d552a32753e7414641a04307056 # v2.13
+      with:
+        containerfiles: ${{ steps.transform-containerfile.outputs.transformed_containerfile }}
+        context: .
+        platform: ${{ inputs.platform }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: ${{ inputs.buildArgs }}
+        extra-args: |
+          --network=none
+          --volume ${{ env.LOCAL_CACHE_DIR_REALPATH }}:/cachi2:z
+
+    - name: Save image as artifact
+      if: ${{ inputs.skipArtifactUpload != 'true' }}
+      shell: bash
+      env:
+        TAGS_LIST: ${{ steps.meta.outputs.tags }}
+      run: |
+        echo "::group::Saving image and metadata for artifact"
+        mkdir -p ./podman-artifacts
+
+        echo "Saving images with tags:"
+        echo "$TAGS_LIST"
+
+        podman save $TAGS_LIST -o ./podman-artifacts/image.tar
+
+        echo "$TAGS_LIST" > ./podman-artifacts/tags.txt
+        echo "::endgroup::"
+
+    - name: Upload image artifact
+      if: ${{ inputs.skipArtifactUpload != 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: podman-image-${{ github.event.number || github.ref_name }}
+        path: ./podman-artifacts/
+        retention-days: 1
+        if-no-files-found: error
