@@ -68,9 +68,9 @@ jobs:
               EXTRA_TAGS="${MAJOR} ${MAJOR}.${MINOR}"
             fi
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            # Main branch: push latest and latest-${commit}
-            IMAGE_TAG="latest"
-            EXTRA_TAGS="latest-${SHORT_SHA}"
+            # Main branch: push next and next-${commit}
+            IMAGE_TAG="next"
+            EXTRA_TAGS="next-${SHORT_SHA}"
             VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
           elif [[ "${{ github.ref }}" == refs/heads/release-* ]]; then
             # Release branch: extract version and push latest-x.y and latest-x.y-${commit}
@@ -132,7 +132,7 @@ jobs:
             podman push "${REF}"
 
             # Track commit-SHA tags for expiration
-            if [[ ${TAG} == latest-* ]]; then
+            if [[ ${TAG} == next-* || ${TAG} == latest-* ]]; then
               echo "${TAG}" >> /tmp/expiry-tags.txt
             fi
 
