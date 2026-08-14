@@ -73,7 +73,7 @@ jobs:
             EXTRA_TAGS="latest-${SHORT_SHA}"
             VERSION="0.0.0-$(git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)"
           elif [[ "${{ github.ref }}" == refs/heads/release-* ]]; then
-            # Release branch: extract version and push latest-1.x and latest-1.x-${commit}
+            # Release branch: extract version and push latest-x.y and latest-x.y-${commit}
             BRANCH_NAME=${GITHUB_REF#refs/heads/}
             RELEASE_VERSION=${BRANCH_NAME#release-}
             IMAGE_TAG="latest-${RELEASE_VERSION}"
