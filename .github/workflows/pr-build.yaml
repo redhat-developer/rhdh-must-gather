@@ -148,6 +148,68 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
 
+  hermetic-build:
+    name: Hermetic Build Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            .rhdh/docker/**
+            rpms.in.yaml
+            rpms.lock.yaml
+            artifacts.lock.yaml
+            vendor/**
+            collection-scripts/**
+            hack/**
+            Makefile
+            Containerfile
+            .github/actions/docker-build/**
+          files_ignore: |
+            **/*.md
+            **/*.adoc
+
+      - name: Prepare build variables
+        if: steps.changed-files.outputs.any_changed == 'true'
+        id: prep
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SHORT_SHA="${PR_HEAD_SHA:0:9}"
+          VERSION="0.0.0-${SHORT_SHA}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Run hermetic build
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: ./.github/actions/docker-build
+        with:
+          imageName: rhdh-must-gather
+          imageTags: hermetic-pr-${{ github.event.pull_request.number }}
+          buildArgs: |
+            RHDH_MUST_GATHER_VERSION=${{ steps.prep.outputs.VERSION }}
+          skipArtifactUpload: 'true'
+
+      - name: Summary
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          echo "### Hermetic Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Hermetic build validation passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Containerfile**: .rhdh/docker/Containerfile" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network**: \`--network=none\` (hermetic)" >> $GITHUB_STEP_SUMMARY
+
   e2e-tests:
     name: E2E Tests (Container Image)
     needs: pr-build

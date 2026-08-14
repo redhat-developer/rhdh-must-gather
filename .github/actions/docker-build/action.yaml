@@ -31,7 +31,7 @@ inputs:
   containerfilePath:
     description: Path to the Containerfile to use
     required: false
-    default: 'Containerfile'
+    default: '.rhdh/docker/Containerfile'
   buildArgs:
     description: Build arguments to pass to buildah (newline-separated KEY=VALUE pairs)
     required: false
@@ -68,20 +68,21 @@ runs:
     - name: Set up hermetic build variables
       shell: bash
       run: |
+        # Pin by digest for reproducibility
         echo "HERMETO_IMAGE=quay.io/konflux-ci/hermeto@sha256:de5398035bee2965a275313654f51c80e213ae460b6ec5a23e32c81efd00e67b" >> $GITHUB_ENV
         echo "LOCAL_CACHE_DIR=./hermeto-cache/rhdh-must-gather" >> $GITHUB_ENV
 
-    - name: Download helm binary
+    - name: Prepare hermetic build context
       shell: bash
       run: |
         set -ex
-        PLATFORM="${{ inputs.platform }}"
-        ARCH="${PLATFORM#*/}"
-        mkdir -p bin
-        echo "Downloading helm for ${ARCH}..."
-        curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/helm/latest/helm-linux-${ARCH}" -o bin/helm
-        chmod +x bin/helm
-        bin/helm version --short
+        # Copy requirements files to repo root — matches sync-midstream.sh.
+        # Needed for: (1) hermeto pip fetcher discovery at path "."
+        #             (2) .rhdh/docker/Containerfile COPY instructions
+        for f in .rhdh/docker/requirements*.txt; do
+          cp "$f" .
+        done
+        ls -la requirements*.txt
 
     - name: Cache dependencies with hermeto
       shell: bash
@@ -98,7 +99,7 @@ runs:
           fetch-deps --dev-package-managers \
           --source . \
           --output /cachi2/output \
-          '[{"type": "rpm", "path": "."}, {"type": "pip", "path": ".", "allow_binary": "false"}, {"type": "cargo", "path": "vendor/websocat"}]'
+          '[{"type": "rpm", "path": "."}, {"type": "pip", "path": ".", "allow_binary": "false"}, {"type": "generic", "path": "."}, {"type": "cargo", "path": "vendor/websocat"}]'
         echo "::endgroup::"
 
         if [ -d ${{ env.LOCAL_CACHE_DIR }}/output ]; then
@@ -143,33 +144,11 @@ runs:
 
         echo "::endgroup::"
 
-    - name: Transform Containerfile for hermetic build
-      shell: bash
-      id: transform-containerfile
-      env:
-        CONTAINERFILE_PATH: ${{ inputs.containerfilePath }}
-        TRANSFORMED_CONTAINERFILE: ${{ inputs.containerfilePath }}.hermeto
-      run: |
-        set -x
-
-        echo "::group::Transforming Containerfile for hermetic build"
-
-        cp "$CONTAINERFILE_PATH" "$TRANSFORMED_CONTAINERFILE"
-
-        # Configure dnf to use the cachi2 repo
-        sed -i '/RUN *\(dnf\|microdnf\) install/i RUN rm -r /etc/yum.repos.d/* && cp /cachi2/output/deps/rpm/$(uname -m)/repos.d/hermeto.repo /etc/yum.repos.d/' "$TRANSFORMED_CONTAINERFILE"
-
-        # Inject the cachi2 env variables to every RUN command
-        sed -i 's/^\s*RUN /RUN . \/cachi2\/cachi2.env \&\& /' "$TRANSFORMED_CONTAINERFILE"
-        echo "::endgroup::"
-
-        echo "transformed_containerfile=$TRANSFORMED_CONTAINERFILE" >> $GITHUB_OUTPUT
-
     - name: "Build Docker Image"
       id: build
       uses: redhat-actions/buildah-build@7a95fa7ee0f02d552a32753e7414641a04307056 # v2.13
       with:
-        containerfiles: ${{ steps.transform-containerfile.outputs.transformed_containerfile }}
+        containerfiles: ${{ inputs.containerfilePath }}
         context: .
         platform: ${{ inputs.platform }}
         tags: ${{ steps.meta.outputs.tags }}
