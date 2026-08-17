@@ -1,8 +1,8 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-# https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1786339177@sha256:9d99826a5299a54fa92e9b47d74e6cd72efb04cb57eb8fe748ed93e08ebb6184 AS websocat-builder
+# https://registry.access.redhat.com/ubi10
+FROM registry.access.redhat.com/ubi10:10.2-1786928703@sha256:a3210c44455d3de518c9ebf53f391b31f5cb5e9b7f101a130ea2d87b17b32dc0 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -14,8 +14,8 @@ RUN cargo build --release \
 
 # Stage 2a: Install helm from Red Hat CGW mirror (default)
 # Comment this out and uncomment Stage 2b below when no binary available.
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221 AS helm-builder
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0 AS helm-builder
 ARG TARGETPLATFORM
 COPY Makefile artifacts.lock.yaml /tmp/
 COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
@@ -42,21 +42,22 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 #     /tmp/helm version
 
 # Stage 3: Final image
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1786380870@sha256:7c372902c8d211db2d25c8277ba534a73b92742a334874dced829a63b0f21221
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 
 # Must-gather image for Red Hat Developer Hub (RHDH)
-LABEL name="rhdh-must-gather" \
+LABEL name="rhdh/rhdh-must-gather-rhel10" \
       vendor="Red Hat" \
       version="$RHDH_MUST_GATHER_VERSION" \
       summary="Red Hat Developer Hub (RHDH) must-gather tool" \
-      description="Collects diagnostic information from RHDH deployments on Kubernetes and OpenShift clusters"
+      description="Collects diagnostic information from RHDH deployments on Kubernetes and OpenShift clusters" \
+      cpe="cpe:/a:redhat:rhdh:2.0::el10"
 
 # Install basic tools and dependencies needed for must-gather operations
-# Note: UBI9-minimal already has curl-minimal and coreutils-single installed
+# Note: UBI10-minimal already has curl-minimal and coreutils-single installed
 # We use --setopt=install_weak_deps=0 to avoid unnecessary dependencies
 # and --nodocs to reduce image size
 # findutils: provides find, xargs
@@ -81,10 +82,9 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
 COPY Makefile /tmp/Makefile
 # argcomplete 3.7+ uses PEP 604 union types (str | bytes) in class-level
 # annotations, which Python 3.9 evaluates at class definition time and fails.
-# The downstream (hermetic) Containerfile is not affected because it pins
-# argcomplete via hash-locked requirements.txt generated with --python-version=3.9.
+# The hermetic Containerfile pins argcomplete via hash-locked requirements.txt.
 RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
-    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" "argcomplete<3.7" \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
     && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)

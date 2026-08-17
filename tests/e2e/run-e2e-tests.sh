@@ -368,13 +368,14 @@ if [ "$SKIP_OPERATOR" = false ]; then
     log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
     OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
     if [ "$EFFECTIVE_OPERATOR_BRANCH" = "main" ]; then
-        # On main, the manifest references the downstream operator image
-        # (quay.io/rhdh/rhdh-rhel9-operator), which may be outdated or unavailable.
-        # Swap it for the upstream 'next' tag so E2E tests always run against a
-        # current build of the operator.
+        # On main, the manifest references the productized operator image
+        # (quay.io/rhdh/rhdh-rhel10-operator or quay.io/rhdh/rhdh-rhel9-operator),
+        # which may be outdated or unavailable. Swap it for the upstream 'next' tag
+        # so E2E tests always run against a current build of the operator.
         UPSTREAM_OPERATOR_IMAGE="quay.io/rhdh-community/operator:next"
         curl -sSL "$OPERATOR_MANIFEST" \
-            | sed "s|quay.io/rhdh/rhdh-rhel9-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
+            | sed -e "s|quay.io/rhdh/rhdh-rhel9-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
+                  -e "s|quay.io/rhdh/rhdh-rhel10-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
             | kubectl apply -f -
     else
         kubectl apply -f "$OPERATOR_MANIFEST"
