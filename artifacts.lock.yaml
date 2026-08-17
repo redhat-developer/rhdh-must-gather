@@ -8,3 +8,9 @@ artifacts:
   - download_url: https://mirror.openshift.com/pub/cgw/helm/4.2.3/helm-linux-arm64.tar.gz
     checksum: sha256:b1d40f3ee91ed837c46281e66001fdc16cc7ca96c9a232d809a787438c08fe19
     filename: helm-linux-arm64.tar.gz
+  - download_url: https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux.tar.gz
+    checksum: sha256:057abb899ea48497437ef8bd4a732226c97dda4f6bf7fda8f7406a4f7cb12ab2
+    filename: openshift-client-linux.tar.gz
+  - download_url: https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/openshift-client-linux-arm64.tar.gz
+    checksum: sha256:4816d9db6a3767e1ff929367d0814259a5e722c43b8913d0a944017fba29c483
+    filename: openshift-client-linux-arm64.tar.gz
