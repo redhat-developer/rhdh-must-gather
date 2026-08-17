@@ -9,24 +9,20 @@ arches:
 allowerasing: true
 contentOrigin:
   repos:
-    - repoid: ubi-9-for-$basearch-appstream-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/os/
-    - repoid: ubi-9-for-$basearch-appstream-source-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/source/SRPMS
-    - repoid: ubi-9-for-$basearch-baseos-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/os/
-    - repoid: ubi-9-for-$basearch-baseos-source-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/source/SRPMS
-    # OpenShift clients RPM (oc, kubectl)
-    - repoid: rhocp-4.21-for-rhel-9-$basearch-rpms
-      baseurl: https://mirror.openshift.com/pub/openshift-v4/$basearch/dependencies/rpms/4.21-el9-beta/
+    - repoid: ubi-10-for-$basearch-appstream-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/appstream/os/
+    - repoid: ubi-10-for-$basearch-appstream-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/appstream/source/SRPMS
+    - repoid: ubi-10-for-$basearch-baseos-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/baseos/os/
+    - repoid: ubi-10-for-$basearch-baseos-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/baseos/source/SRPMS
 
 # New installs beyond base image
 packages:
   - findutils
   - gzip
   - jq
-  - openshift-clients
   - python3
   - python3-pip
   - rsync
@@ -36,7 +32,7 @@ packages:
   - tar
   - util-linux
 
-# Already on ubi9-minimal but listed in Containerfile microdnf lines; reinstall forces lockfile entries.
+# Already on ubi10-minimal but listed in Containerfile microdnf lines; reinstall forces lockfile entries.
 reinstallPackages:
   - bash
   - grep
