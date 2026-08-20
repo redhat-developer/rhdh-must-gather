@@ -1,8 +1,8 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-# https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1786985871@sha256:5426a8f45e80a07168a30ea24d84f266094b3756624a5508cc53927e6ee39e09 AS websocat-builder
+# https://registry.access.redhat.com/ubi10
+FROM registry.access.redhat.com/ubi10:10.2-1786928703@sha256:a3210c44455d3de518c9ebf53f391b31f5cb5e9b7f101a130ea2d87b17b32dc0 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -14,8 +14,8 @@ RUN cargo build --release \
 
 # Stage 2a: Install helm from Red Hat CGW mirror (default)
 # Comment this out and uncomment Stage 2b below when no binary available.
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1786987521@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41 AS helm-builder
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0 AS helm-builder
 ARG TARGETPLATFORM
 COPY Makefile artifacts.lock.yaml /tmp/
 COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
@@ -30,8 +30,8 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 # Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
 # update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
-# https://registry.access.redhat.com/ubi9/go-toolset
-# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786351949@sha256:0b471eb04868f3d9d90bf3c668f9c6c7a22cef07474ac9fec067909dfd7dec7c AS helm-builder
+# https://registry.access.redhat.com/ubi10/go-toolset
+# FROM registry.access.redhat.com/ubi10/go-toolset:1.26.5-1786496329@sha256:1db86a2b0f77c1197b011de5140236effc27b1a1724c0105d4926857a0756de5 AS helm-builder
 # COPY Makefile /tmp/Makefile
 # COPY vendor/helm /opt/app-root/src/helm
 # WORKDIR /opt/app-root/src/helm
@@ -42,8 +42,8 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 #     /tmp/helm version
 
 # Stage 3: Final image
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1786987521@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
@@ -56,7 +56,7 @@ LABEL name="rhdh-must-gather" \
       description="Collects diagnostic information from RHDH deployments on Kubernetes and OpenShift clusters"
 
 # Install basic tools and dependencies needed for must-gather operations
-# Note: UBI9-minimal already has curl-minimal and coreutils-single installed
+# Note: UBI10-minimal already has curl-minimal and coreutils-single installed
 # We use --setopt=install_weak_deps=0 to avoid unnecessary dependencies
 # and --nodocs to reduce image size
 # findutils: provides find, xargs
@@ -81,10 +81,9 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
 COPY Makefile /tmp/Makefile
 # argcomplete 3.7+ uses PEP 604 union types (str | bytes) in class-level
 # annotations, which Python 3.9 evaluates at class definition time and fails.
-# The downstream (hermetic) Containerfile is not affected because it pins
-# argcomplete via hash-locked requirements.txt generated with --python-version=3.9.
+# The hermetic Containerfile pins argcomplete via hash-locked requirements.txt.
 RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
-    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" "argcomplete<3.7" \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
     && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
