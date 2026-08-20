@@ -39,7 +39,6 @@ jobs:
             .github/actions/docker-build/**
             .rhdh/docker/**
             Makefile
-            Containerfile
             .containerignore
             collection-scripts/**
             vendor/**

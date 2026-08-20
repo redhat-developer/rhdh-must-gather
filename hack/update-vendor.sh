@@ -134,8 +134,7 @@ esac
 # Remove any empty directories left behind
 find "$PREFIX" -type d -empty -delete
 
-# Update the version comment in both Containerfiles
-sed -i.bak "s|# ${NAME} v[^ ]* —|# ${NAME} ${VERSION} —|" Containerfile && rm -f Containerfile.bak
+# Update the version comment in the Containerfile
 sed -i.bak "s|# ${NAME} v[^ ]* —|# ${NAME} ${VERSION} —|" .rhdh/docker/Containerfile && rm -f .rhdh/docker/Containerfile.bak
 
 # Update the version variable in the Makefile (e.g., WEBSOCAT_VERSION := 1.14.0)
