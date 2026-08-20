@@ -14,7 +14,7 @@ jobs:
   pr-build:
     name: Build PR Container Image
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     outputs:
@@ -36,12 +36,16 @@ jobs:
           files: |
             .github/workflows/pr-build.yaml
             .github/workflows/pr-push.yaml
+            .github/actions/docker-build/**
+            .rhdh/docker/**
             Makefile
-            Containerfile
             .containerignore
             collection-scripts/**
             vendor/**
+            hack/**
             artifacts.lock.yaml
+            rpms.in.yaml
+            rpms.lock.yaml
             LICENSE
           files_ignore: |
             **/*.md
@@ -73,22 +77,17 @@ jobs:
 
           echo "IMAGE_TAG=pr-${PR_NUM}" >> "$GITHUB_OUTPUT"
           echo "EXTRA_TAGS=pr-${PR_NUM}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "BUILD_ARGS=--build-arg RHDH_MUST_GATHER_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build image
+      - name: Build image (hermetic)
         if: steps.changed-files.outputs.any_changed == 'true'
-        env:
-          # Map outputs to environment variables here
-          TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
-          ARGS: ${{ steps.prep.outputs.BUILD_ARGS }}
-          NAME: ${{ env.IMAGE_NAME }}
-        run: |
-          make image-build \
-            CONTAINER_TOOL=podman \
-            IMAGE_NAME="$NAME" \
-            IMAGE_TAG="$TAG" \
-            BUILD_ARGS="$ARGS"
+        uses: ./.github/actions/docker-build
+        with:
+          imageName: ${{ env.IMAGE_NAME }}
+          imageTags: ${{ steps.prep.outputs.IMAGE_TAG }}
+          buildArgs: |
+            RHDH_MUST_GATHER_VERSION=${{ steps.prep.outputs.VERSION }}
+          skipArtifactUpload: 'true'
 
       # Save the image as a tarball for the push workflow
       - name: Save image to tarball
@@ -143,7 +142,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${PR_NUM}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ✅ Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build**: Hermetic (\`--network=none\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
