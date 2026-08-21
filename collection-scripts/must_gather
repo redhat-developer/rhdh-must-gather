@@ -273,13 +273,15 @@ Usage: ./$(basename "$0") [params...]
 
 function run_scripts {
   # Remove excluded scripts from the requested scripts
-  for excluded in "${excluded_scripts[@]}"; do
-    for i in "${!requested_scripts[@]}"; do
-      if [[ "${requested_scripts[i]}" == "$excluded" ]]; then
-        unset 'requested_scripts[i]'
-      fi
+  if ((${#excluded_scripts[@]} > 0)); then
+    for excluded in "${excluded_scripts[@]}"; do
+      for i in "${!requested_scripts[@]}"; do
+        if [[ "${requested_scripts[i]}" == "$excluded" ]]; then
+          unset 'requested_scripts[i]'
+        fi
+      done
     done
-  done
+  fi
   # Rebuild array to remove gaps
   requested_scripts=("${requested_scripts[@]}")
 
