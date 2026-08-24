@@ -410,15 +410,6 @@ _collect_pod_data() {
   else
     if ! tar -xf "$plugins_tar" -C "$plugins_out_dir" 2>/dev/null; then
       log_warn "Failed to extract plugin package.json archive from $pod"
-    else
-      local package_json_file
-      while IFS= read -r -d '' package_json_file || [[ -n "$package_json_file" ]]; do
-        [[ -z "$package_json_file" ]] && continue
-        if ! jq -e . "$package_json_file" >/dev/null 2>&1; then
-          log_warn "Rejecting package.json for ${package_json_file#"$plugins_out_dir"/} (empty or invalid JSON)"
-          rm -f "$package_json_file"
-        fi
-      done < <(find "$plugins_out_dir" -type f -name package.json -print0 2>/dev/null)
     fi
     rm -f "$plugins_tar" "$plugins_tar_err"
   fi
