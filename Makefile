@@ -1,7 +1,7 @@
 # RHDH Must-Gather Tool Makefile
 
 # Variables
-VERSION ?= 1.11.0
+VERSION ?= 2.1.0
 GIT_SHA := $(shell git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)
 RHDH_MUST_GATHER_VERSION := $(VERSION)-$(GIT_SHA)
 SCRIPT ?=
@@ -35,13 +35,23 @@ YQ_VERSION := 3.4.3
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
+# Host platform (must be defined before HELM_ARCHIVE_DIR / WEBSOCAT_ARCH)
+OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+
+# latest at https://github.com/helm/helm/releases
+# if version set below is available as a binary in CGW, update the helm-lockfile via: make helm-lockfile-update
+# if version set below is not available as a binary in CGW, vendor the helm source via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+HELM_VERSION := 4.2.3
+HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)-$(OS)-$(ARCH)
+HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
+HELM_BIN := $(TOOLS_DIR)/helm
+
 WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
 WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
 WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
 
-OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 # websocat uses different naming: x86_64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin
 # Note: Apple Silicon returns 'arm64' but websocat uses 'aarch64'
 WEBSOCAT_ARCH := $(shell uname -m | sed 's/arm64/aarch64/')-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
@@ -55,7 +65,7 @@ local-output:
 	@mkdir -p ./out
 
 .PHONY: local-setup
-local-setup: $(YQ_BIN) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
+local-setup: $(YQ_BIN) $(HELM_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, helm, websocat)
 
 .PHONY: run-local
 run-local: local-output local-setup ## Test the script locally (requires jq, kubectl, oc and cluster access)
@@ -121,16 +131,18 @@ LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
 HEAP_DUMP_METHOD ?= ## Heap dump method: 'inspector' (default) or 'sigusr2'
 .PHONY: test-e2e
-test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
+test-e2e: local-setup ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
-	@./tests/e2e/run-e2e-tests.sh --local \
+	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
+		./tests/e2e/run-e2e-tests.sh --local \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
-	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
+	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
+		./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
 		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
@@ -154,6 +166,17 @@ $(YQ_BIN): $(TOOLS_DIR)
 		echo "yq already installed: $(YQ_BIN)"; \
 	fi
 
+.PHONY: $(HELM_BIN_DL)
+$(HELM_BIN_DL): $(TOOLS_DIR)
+	@mkdir -p "$(HELM_ARCHIVE_DIR)"
+	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
+		./hack/install-helm-local.sh "$(HELM_VERSION)" "$(HELM_BIN_DL)" "$(OS)" "$(ARCH)"; \
+	else \
+		echo "helm $(HELM_VERSION) already installed: $(HELM_BIN_DL)"; \
+	fi
+	@ln -sf "$(shell echo $(HELM_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(HELM_BIN)"
+	@"$(HELM_BIN)" version --short
+
 .PHONY: $(WEBSOCAT_BIN_DL)
 $(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
 	@mkdir -p "$(WEBSOCAT_ARCHIVE_DIR)"
@@ -172,14 +195,25 @@ VENDOR_NAME ?= ## Vendor name for vendor-update (e.g., websocat)
 VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
 
 .PHONY: vendor
-vendor: ## Sync all vendored Git subtrees to their declared versions
+vendor: ## Sync vendored sources; refresh Helm CGW lockfile or vendor helm source
+	@if ./hack/check-helm-binary-available.sh "$(HELM_VERSION)"; then \
+		./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"; \
+	else \
+		echo "CGW mirror has no helm v$(HELM_VERSION) binaries; vendoring helm source instead..."; \
+		./hack/update-vendor.sh helm "v$(HELM_VERSION)"; \
+	fi
 	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
+
+.PHONY: helm-lockfile-update
+helm-lockfile-update: ## Refresh artifacts.lock.yaml for Helm CGW binaries (HELM_VERSION from Makefile)
+	./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"
 
 .PHONY: vendor-update
 vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_NAME, VENDOR_VERSION required)
 	@if [ -z "$(VENDOR_NAME)" ] || [ -z "$(VENDOR_VERSION)" ]; then \
 		echo "Error: VENDOR_NAME and VENDOR_VERSION are required."; \
 		echo "Usage: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1"; \
+		echo "       make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v4.2.3"; \
 		exit 1; \
 	fi
 	./hack/update-vendor.sh "$(VENDOR_NAME)" "$(VENDOR_VERSION)"

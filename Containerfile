@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1784720169@sha256:2a6bd6971e6026177b2439655282660519198870e9063c4a03a208de88be2e9e AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.8-1786985871@sha256:5426a8f45e80a07168a30ea24d84f266094b3756624a5508cc53927e6ee39e09 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -12,9 +12,38 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Final image
+# Stage 2a: Install helm from Red Hat CGW mirror (default)
+# Comment this out and uncomment Stage 2b below when no binary available.
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1784705586@sha256:2e8edce823a48e51858f1fad3ff4cbf6875ce8a3f86b9eecf298bc2050c8652a
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786987521@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41 AS helm-builder
+ARG TARGETPLATFORM
+COPY Makefile artifacts.lock.yaml /tmp/
+COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+    && microdnf clean all \
+    && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
+       LOCKFILE=/tmp/artifacts.lock.yaml VERIFY_SCRIPT=/tmp/verify-helm-tarball.sh \
+       bash /tmp/install-helm-binary.sh \
+    && rm -f /tmp/Makefile /tmp/artifacts.lock.yaml /tmp/install-helm-binary.sh /tmp/verify-helm-tarball.sh
+
+# Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
+# Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
+# update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# https://registry.access.redhat.com/ubi9/go-toolset
+# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1787032021@sha256:36077bc7ad852d91162bf017460de6fef84bf3c2c887be05cd1c761885ef2ac3 AS helm-builder
+# COPY Makefile /tmp/Makefile
+# COPY vendor/helm /opt/app-root/src/helm
+# WORKDIR /opt/app-root/src/helm
+# RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+#     CGO_ENABLED=0 go build -mod=vendor -trimpath \
+#         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+#         -o /tmp/helm ./cmd/helm && \
+#     /tmp/helm version
+
+# Stage 3: Final image
+# https://registry.access.redhat.com/ubi9-minimal
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1786987521@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
@@ -50,8 +79,12 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
     rsync \
     && microdnf clean all
 COPY Makefile /tmp/Makefile
+# argcomplete 3.7+ uses PEP 604 union types (str | bytes) in class-level
+# annotations, which Python 3.9 evaluates at class definition time and fails.
+# The downstream (hermetic) Containerfile is not affected because it pins
+# argcomplete via hash-locked requirements.txt generated with --python-version=3.9.
 RUN YQ_VERSION=$(grep '^YQ_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
-    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" \
+    && pip3 install --no-cache-dir "yq==${YQ_VERSION}" "argcomplete<3.7" \
     && rm /tmp/Makefile
 
 # Install oc and kubectl (OpenShift CLI)
@@ -64,15 +97,8 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Install Helm (Kubernetes package manager)
-# Required for collecting Helm-based RHDH deployments
-# Installing directly from GitHub releases instead of using the install script
-# to avoid dependency on openssl for checksum verification
-RUN curl -fsSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" -o helm.tar.gz \
-    && tar xzf helm.tar.gz \
-    && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf helm.tar.gz linux-amd64 \
-    && helm version
+# Copy helm binary from CGW mirror (helm-builder stage)
+COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)
 COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat

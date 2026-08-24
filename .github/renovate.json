@@ -55,11 +55,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^Containerfile$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": [
-        "https://get\\.helm\\.sh/helm-(?<currentValue>v[\\d.]+)-linux-amd64\\.tar\\.gz"
+        "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s*python3 -m pip install.*?/refs/tags/(?<currentValue>v[\\d.]+)\\.zip"
       ],
-      "depNameTemplate": "helm/helm",
       "datasourceTemplate": "github-releases"
     },
     {

@@ -1,0 +1,10 @@
+---
+metadata:
+  version: "1.0"
+artifacts:
+  - download_url: https://mirror.openshift.com/pub/cgw/helm/4.2.3/helm-linux-amd64.tar.gz
+    checksum: sha256:2e6ce9696a806be8f33ff538018a29e318b9409d46adac30089c0e07f70488ac
+    filename: helm-linux-amd64.tar.gz
+  - download_url: https://mirror.openshift.com/pub/cgw/helm/4.2.3/helm-linux-arm64.tar.gz
+    checksum: sha256:b1d40f3ee91ed837c46281e66001fdc16cc7ca96c9a232d809a787438c08fe19
+    filename: helm-linux-arm64.tar.gz
