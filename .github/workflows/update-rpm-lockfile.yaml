@@ -51,8 +51,8 @@ jobs:
       - name: Configure Git
         if: github.event_name != 'pull_request'
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "rhdh-bot"
+          git config --global user.email "rhdh-bot@redhat.com"
 
       - name: Install rpm-lockfile-prototype
         run: |
@@ -114,7 +114,7 @@ jobs:
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         id: existing-pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
           pr_count=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
@@ -123,8 +123,10 @@ jobs:
       - name: Push updated lockfile to PR branch
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         env:
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git checkout -B "$BRANCH"
           git add rpms.lock.yaml
           git commit -m "chore: update rpms.lock.yaml [skip-build]"
@@ -133,7 +135,7 @@ jobs:
       - name: Create Pull Request
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           TARGET_BRANCH: ${{ steps.target-branch.outputs.name }}
         run: |
           gh pr create \
