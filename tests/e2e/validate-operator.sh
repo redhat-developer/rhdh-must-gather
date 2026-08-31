@@ -243,7 +243,8 @@ for spec in "${CR_SPECS[@]}"; do
             if [ "${pkg_json_count:-0}" -ge 1 ]; then
                 log_info "Found $pkg_json_count package.json file(s) in dynamic-plugins-root"
             else
-                log_info "No package.json files found under dynamic-plugins-root in $workload_dir/data"
+                log_error "No package.json files found under dynamic-plugins-root in $workload_dir/data"
+                ((ERRORS++))
             fi
         else
             log_error "Data directory not found in $workload_dir"

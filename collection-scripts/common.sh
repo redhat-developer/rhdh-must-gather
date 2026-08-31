@@ -406,12 +406,13 @@ _collect_pod_data() {
     log_warn "Failed to stream plugin package.json archive from $pod (rc=$tar_rc)"
   elif [[ ! -s "$plugins_tar" ]]; then
     log_debug "No package.json files found under dynamic-plugins-root in $pod"
-    rm -f "$plugins_tar" "$plugins_tar_err"
+    rm -f "$plugins_tar"
   else
-    if ! tar -xf "$plugins_tar" -C "$plugins_out_dir" 2>/dev/null; then
+    if ! tar -xf "$plugins_tar" -C "$plugins_out_dir"; then
       log_warn "Failed to extract plugin package.json archive from $pod"
-    fi
+    else
     rm -f "$plugins_tar" "$plugins_tar_err"
+    fi
   fi
 }
 
