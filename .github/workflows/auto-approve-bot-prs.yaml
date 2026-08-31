@@ -109,6 +109,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           gh label create approved \
             --repo "$GITHUB_REPOSITORY" \
@@ -123,13 +124,18 @@ jobs:
 
           gh pr edit "$PR_NUMBER" --add-label "lgtm,approved" --repo "$GITHUB_REPOSITORY"
 
-          gh pr review "$PR_NUMBER" \
-            --approve \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "**Auto-Approved**
+          # GITHUB_TOKEN is github-actions[bot]; it cannot approve its own PRs.
+          if [[ "$PR_AUTHOR" == "github-actions[bot]" ]]; then
+            echo "Skipping GitHub approve for github-actions[bot] PR (cannot self-approve)."
+          else
+            gh pr review "$PR_NUMBER" \
+              --approve \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "**Auto-Approved**
 
           This PR has been automatically approved by the auto-approve workflow.
 
           **Labels Added:** \`lgtm\`, \`approved\`"
+          fi
 
           gh pr merge "$PR_NUMBER" --squash --auto --repo "$GITHUB_REPOSITORY"
