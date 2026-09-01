@@ -48,11 +48,21 @@ jobs:
             exit 1
           fi
 
+      - name: Require RHDH_BOT_TOKEN
+        if: github.event_name != 'pull_request'
+        env:
+          RHDH_BOT_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
+        run: |
+          if [[ -z "${RHDH_BOT_TOKEN}" ]]; then
+            echo "::error::RHDH_BOT_TOKEN must be configured as a repo secret (rhdh-bot PAT). There is no GITHUB_TOKEN fallback."
+            exit 1
+          fi
+
       - name: Configure Git
         if: github.event_name != 'pull_request'
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "rhdh-bot"
+          git config --global user.email "rhdh-bot@redhat.com"
 
       - name: Install rpm-lockfile-prototype
         run: |
@@ -64,7 +74,7 @@ jobs:
             sudo apt-get install -y dnf python3-dnf
             mkdir -p "${HOME}/.local/bin/"
             # renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
-            python3 -m pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.28.1.zip
+            python3 -m pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.30.1.zip
             export PATH=${PATH%":${HOME}/.local/bin"}:${HOME}/.local/bin
             echo "${HOME}/.local/bin" >> $GITHUB_PATH
           else
@@ -114,7 +124,7 @@ jobs:
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         id: existing-pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
           pr_count=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
@@ -123,8 +133,10 @@ jobs:
       - name: Push updated lockfile to PR branch
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         env:
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git checkout -B "$BRANCH"
           git add rpms.lock.yaml
           git commit -m "chore: update rpms.lock.yaml [skip-build]"
@@ -133,7 +145,7 @@ jobs:
       - name: Create Pull Request
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           TARGET_BRANCH: ${{ steps.target-branch.outputs.name }}
         run: |
           gh pr create \

@@ -231,6 +231,26 @@ log_info "=========================================="
 log_info "Setting up RHDH instances for testing"
 log_info "=========================================="
 
+HELM_VERSION_ARGS=()
+if [ "$SKIP_HELM" = false ] || [ "$SKIP_HELM_STANDALONE" = false ]; then
+    if [ -n "$HELM_CHART_VERSION" ]; then
+        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
+        RESOLVED_CHART_VERSION="$HELM_CHART_VERSION"
+    else
+        CHART_MAJOR=$(chart_major_version_for_target_branch "$TARGET_BRANCH") || exit 1
+        log_info "Looking for Helm chart version matching ${CHART_MAJOR}-*-CI on ${HELM_CHART_OCI_REF}..."
+        RESOLVED_CHART_VERSION=$(latest_ci_chart_version_for_major "$CHART_MAJOR")
+        if [ -z "$RESOLVED_CHART_VERSION" ]; then
+            log_error "No CI chart version found for ${CHART_MAJOR} on ${HELM_CHART_OCI_REF}"
+            exit 1
+        fi
+        log_info "Using Helm chart version: $RESOLVED_CHART_VERSION"
+    fi
+    HELM_VERSION_ARGS=(--version "$RESOLVED_CHART_VERSION")
+    CHART_MAJOR=$(chart_major_from_version "$RESOLVED_CHART_VERSION")
+    log_info "Chart major version for E2E values: $CHART_MAJOR"
+fi
+
 # --- Helm Release Setup ---
 NS_HELM=""
 HELM_RELEASE=""
@@ -242,7 +262,7 @@ if [ "$SKIP_HELM" = false ]; then
     ALL_NAMESPACES+=("$NS_HELM")
 
     log_info "Deploying Helm release with 2 replicas..."
-    # Use provided values file or generate one based on TARGET_BRANCH
+    # Use provided values file or generate one based on resolved chart major version
     if [ -n "$HELM_VALUES_FILE" ]; then
         if [ ! -f "$HELM_VALUES_FILE" ]; then
             log_error "Helm values file not found: $HELM_VALUES_FILE"
@@ -252,105 +272,18 @@ if [ "$SKIP_HELM" = false ]; then
         TEMP_VALUES_FILE="$HELM_VALUES_FILE"
     else
         TEMP_VALUES_FILE="$(mktemp)"
-        # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
-        case "$TARGET_BRANCH" in
-            main|release-1.9|release-1.[1-9][0-9])
-                cat > "$TEMP_VALUES_FILE" <<EOF
-route:
-  enabled: false
-upstream:
-  backstage:
-    replicas: 2
-  postgresql:
-    # Purposely disable the local database to simulate a misconfigured application (missing external database info)
-    enabled: false
-global:
-  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
-  catalogIndex:
-    image:
-      tag: "1.10-51"
-  # Disabling lightspeed as the main RHDH container is expected to fail to start anyway
-  lightspeed:
-    enabled: false
-  dynamic:
-    # Faster startup by disabling all default dynamic plugins (and Lightspeed is disabled)
-    includes: []
-EOF
-                # Add NODE_OPTIONS for SIGUSR2 heap dump method
-                # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
-                # from the chart (BACKEND_SECRET, POSTGRESQL_ADMIN_PASSWORD) alongside NODE_OPTIONS,
-                # otherwise the defaults would be lost.
-                if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-                    cat >> "$TEMP_VALUES_FILE" <<'EOF'
-  backstage:
-    extraEnvVars:
-      - name: BACKEND_SECRET
-        valueFrom:
-          secretKeyRef:
-            key: backend-secret
-            name: '{{ include "rhdh.backend-secret-name" $ }}'
-      - name: POSTGRESQL_ADMIN_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            key: postgres-password
-            name: '{{- include "rhdh.postgresql.secretName" . }}'
-      - name: NODE_OPTIONS
-        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-EOF
-                fi
-                ;;
-            *)
-                log_error "Unsupported target branch: $TARGET_BRANCH"
-                exit 1
-                ;;
-        esac
+        write_helm_e2e_values "$CHART_MAJOR" "$TEMP_VALUES_FILE" misconfigured || exit 1
+        if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+            append_heap_dump_sigusr2_values "$TEMP_VALUES_FILE"
+        fi
     fi
 
     HELM_RELEASE="my-helm"
-    HELM_VERSION_ARGS=()
-    # Determine chart version: use override if provided, otherwise auto-detect based on TARGET_BRANCH
-    if [ -n "$HELM_CHART_VERSION" ]; then
-        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
-        HELM_VERSION_ARGS=(--version "$HELM_CHART_VERSION")
-        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
-    elif [ "$TARGET_BRANCH" != "main" ]; then
-        # Extract version from branch name (e.g., release-1.9 -> 1.9)
-        BRANCH_VERSION="${TARGET_BRANCH#release-}"
-        log_info "Looking for Helm chart version matching ${BRANCH_VERSION}-*-CI..."
-        CHART_VERSION=$(skopeo list-tags docker://quay.io/rhdh/chart 2>/dev/null | \
-            jq -r '.Tags[]' | \
-            grep "^${BRANCH_VERSION}-.*-CI$" | \
-            sort -V | \
-            tail -1)
-        if [ -n "$CHART_VERSION" ]; then
-            log_info "Using Helm chart version: $CHART_VERSION"
-            HELM_VERSION_ARGS=(--version "$CHART_VERSION")
-        else
-            log_warn "No CI chart version found for ${BRANCH_VERSION}, using latest"
-        fi
-        helm -n "$NS_HELM" install "$HELM_RELEASE" oci://quay.io/rhdh/chart --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
-    else
-        # Latest upstream chart
-        helm -n "$NS_HELM" install "$HELM_RELEASE" backstage \
-            --repo "https://redhat-developer.github.io/rhdh-chart" \
-            --values "$TEMP_VALUES_FILE"
-    fi
+    helm -n "$NS_HELM" install "$HELM_RELEASE" "$HELM_CHART_OCI_REF" \
+        --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
 
-    # Wait for the Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)
-    log_info "Waiting for 2 Helm-deployed RHDH pods to enter CreateContainerConfigError state (this is expected)..."
-    TIMEOUT=$RHDH_READY_TIMEOUT
-    until [ "$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w)" -ge 2 ]; do
-        sleep 2
-        TIMEOUT=$((TIMEOUT - 2))
-        if [ $TIMEOUT -le 0 ]; then
-            log_error "Could not find 2 Helm-deployed RHDH pods in namespace $NS_HELM."
-            exit 1
-        fi
-    done
-    HELM_PODS=$(kubectl -n "$NS_HELM" get pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -o jsonpath='{.items[*].metadata.name}')
-    log_info "Found Helm pods: $HELM_PODS"
-    if ! kubectl wait --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}=CreateContainerConfigError' pods -l "app.kubernetes.io/instance=$HELM_RELEASE" -n "$NS_HELM" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null; then
-        log_error "Helm-deployed pods did not reach CreateContainerConfigError state within expected time."
+    log_info "Waiting for 2 Helm-deployed pods: init complete, then backstage-backend -> CreateContainerConfigError (expected misconfig)..."
+    if ! wait_for_helm_misconfigured_backstage_pods "$NS_HELM" "$HELM_RELEASE" 2 "$RHDH_READY_TIMEOUT"; then
         exit 1
     fi
     log_info "Helm release '$HELM_RELEASE' with 2 replicas deployed successfully in namespace $NS_HELM"
@@ -372,55 +305,17 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
-    cat > "$STANDALONE_VALUES_FILE" <<EOF
-route:
-  enabled: false
-global:
-  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
-  catalogIndex:
-    image:
-      tag: "1.10-51"
-  dynamic:
-    includes:
-      - dynamic-plugins.default.yaml
-EOF
-    # Add NODE_OPTIONS for SIGUSR2 heap dump method
-    # NOTE: Helm does not merge arrays, so we must include the default extraEnvVars
-    # from the chart (BACKEND_SECRET, POSTGRESQL_ADMIN_PASSWORD) alongside NODE_OPTIONS,
-    # otherwise the defaults would be lost.
+    write_helm_e2e_values "$CHART_MAJOR" "$STANDALONE_VALUES_FILE" standalone || exit 1
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
-upstream:
-  backstage:
-    extraEnvVars:
-      - name: BACKEND_SECRET
-        valueFrom:
-          secretKeyRef:
-            key: backend-secret
-            name: '{{ include "rhdh.backend-secret-name" $ }}'
-      - name: POSTGRESQL_ADMIN_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            key: postgres-password
-            name: '{{- include "rhdh.postgresql.secretName" . }}'
-      - name: NODE_OPTIONS
-        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-EOF
+        append_heap_dump_sigusr2_values "$STANDALONE_VALUES_FILE"
     fi
 
     # Render the Helm chart and apply directly (no Helm release tracking)
     log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
-    if [ "$TARGET_BRANCH" != "main" ]; then
-        helm template "$STANDALONE_RELEASE" oci://quay.io/rhdh/chart \
-            --namespace "$NS_STANDALONE" \
-            --values "$STANDALONE_VALUES_FILE" \
-            ${HELM_VERSION_ARGS:+"${HELM_VERSION_ARGS[@]}"} | kubectl apply -n "$NS_STANDALONE" -f -
-    else
-        helm template "$STANDALONE_RELEASE" backstage \
-            --repo "https://redhat-developer.github.io/rhdh-chart" \
-            --namespace "$NS_STANDALONE" \
-            --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
-    fi
+    helm_template_yaml "$STANDALONE_RELEASE" "$HELM_CHART_OCI_REF" \
+        --namespace "$NS_STANDALONE" \
+        --values "$STANDALONE_VALUES_FILE" \
+        "${HELM_VERSION_ARGS[@]}" | kubectl apply -n "$NS_STANDALONE" -f -
 
     # Wait for the standalone-deployed RHDH pod to be running (not necessarily Ready)
     log_info "Waiting for standalone-deployed RHDH pod to be running..."
@@ -521,16 +416,15 @@ EOF
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
     BACKSTAGE_CR_EXTRA_ENVS='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        # - name: CATALOG_INDEX_IMAGE
+        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+        #   containers:
+        #     - install-dynamic-plugins'
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_EXTRA_ENVS="$BACKSTAGE_CR_EXTRA_ENVS"'
         - name: NODE_OPTIONS
@@ -549,16 +443,15 @@ EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
     BACKSTAGE_CR_STS_EXTRA='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        # - name: CATALOG_INDEX_IMAGE
+        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+        #   containers:
+        #     - install-dynamic-plugins'
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_STS_EXTRA="$BACKSTAGE_CR_STS_EXTRA"'
         - name: NODE_OPTIONS

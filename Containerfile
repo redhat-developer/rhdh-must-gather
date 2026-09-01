@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1785906690@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71 AS websocat-builder
+FROM registry.access.redhat.com/ubi9:9.8-1787634763@sha256:b8c53f907b7ea8934d6bb23b319ca7b5ab567e61a0806ffc80170631cabc7563 AS websocat-builder
 RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
     dnf clean all
 COPY vendor/websocat /src/websocat
@@ -12,22 +12,38 @@ RUN cargo build --release \
     cp target/release/websocat /tmp/websocat && \
     /tmp/websocat --version
 
-# Stage 2: Build helm from vendored source
-# update helm version via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# Stage 2a: Install helm from Red Hat CGW mirror (default)
+# Comment this out and uncomment Stage 2b below when no binary available.
+# https://registry.access.redhat.com/ubi9-minimal
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1787647261@sha256:580752f96d36c4132bffd30f9c34865bf4bd87f6aa161c969d117f21732e50f7 AS helm-builder
+ARG TARGETPLATFORM
+COPY Makefile artifacts.lock.yaml /tmp/
+COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
+RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
+    && microdnf clean all \
+    && HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') \
+    && CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" HELM_VERSION="${HELM_VERSION}" \
+       LOCKFILE=/tmp/artifacts.lock.yaml VERIFY_SCRIPT=/tmp/verify-helm-tarball.sh \
+       bash /tmp/install-helm-binary.sh \
+    && rm -f /tmp/Makefile /tmp/artifacts.lock.yaml /tmp/install-helm-binary.sh /tmp/verify-helm-tarball.sh
+
+# Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
+# Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
+# update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi9/go-toolset
-FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1786023237@sha256:5d26ff5606bd6590930e7cfc202b510e3fe2c7a7a1720860f444ab49c45128cb AS helm-builder
-COPY Makefile /tmp/Makefile
-COPY vendor/helm /opt/app-root/src/helm
-WORKDIR /opt/app-root/src/helm
-RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
-    CGO_ENABLED=0 go build -trimpath \
-        -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
-        -o /tmp/helm ./cmd/helm && \
-    /tmp/helm version
+# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1787774815@sha256:1a755651ffe1a438f137418d183f18ebad527ec929206c17804f93490a97869e AS helm-builder
+# COPY Makefile /tmp/Makefile
+# COPY vendor/helm /opt/app-root/src/helm
+# WORKDIR /opt/app-root/src/helm
+# RUN HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//') && \
+#     CGO_ENABLED=0 go build -mod=vendor -trimpath \
+#         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
+#         -o /tmp/helm ./cmd/helm && \
+#     /tmp/helm version
 
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1785906621@sha256:dd334afa72444fa46238fcf9e6bd399245adf746378735348cf84b9dfdca38f1
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1787647261@sha256:580752f96d36c4132bffd30f9c34865bf4bd87f6aa161c969d117f21732e50f7
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
@@ -81,7 +97,7 @@ RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.2
     && oc version --client \
     && kubectl version --client
 
-# Copy helm binary built from source (vendor/helm)
+# Copy helm binary from CGW mirror (helm-builder stage)
 COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
 
 # Copy websocat binary built from source (vendor/websocat)

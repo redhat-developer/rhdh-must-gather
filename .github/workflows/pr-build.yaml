@@ -41,6 +41,7 @@ jobs:
             .containerignore
             collection-scripts/**
             vendor/**
+            artifacts.lock.yaml
             LICENSE
           files_ignore: |
             **/*.md
