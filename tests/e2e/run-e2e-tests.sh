@@ -416,16 +416,15 @@ EOF
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
     BACKSTAGE_CR_EXTRA_ENVS='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        # - name: CATALOG_INDEX_IMAGE
+        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+        #   containers:
+        #     - install-dynamic-plugins'
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_EXTRA_ENVS="$BACKSTAGE_CR_EXTRA_ENVS"'
         - name: NODE_OPTIONS
@@ -444,16 +443,15 @@ EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
     BACKSTAGE_CR_STS_EXTRA='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        # - name: CATALOG_INDEX_IMAGE
+        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
+        #   containers:
+        #     - install-dynamic-plugins'
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         BACKSTAGE_CR_STS_EXTRA="$BACKSTAGE_CR_STS_EXTRA"'
         - name: NODE_OPTIONS

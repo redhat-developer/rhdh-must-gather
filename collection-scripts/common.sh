@@ -385,6 +385,33 @@ _collect_pod_data() {
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- node --version 2>/dev/null" "$pod_data_dir/node-version.txt" "Node version from $pod"
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- ls -lhrta dynamic-plugins-root 2>/dev/null" "$pod_data_dir/dynamic-plugins-root.fs.txt" "dynamic-plugins-root from $pod"
   safe_exec "$KUBECTL_CMD -n '$ns' exec '$pod' -- cat /opt/app-root/src/dynamic-plugins-root/app-config.dynamic-plugins.yaml 2>/dev/null" "$pod_data_dir/app-config.dynamic-plugins.yaml" "app-config.dynamic-plugins.yaml from $pod"
+  
+  log_info "\tCollecting: package.json files from dynamic-plugins-root in $pod"
+  local plugins_out_dir="$pod_data_dir/dynamic-plugins-root"
+  ensure_directory "$plugins_out_dir"
+
+  local plugins_tar="${plugins_out_dir}.package-json.tar"
+  local plugins_tar_err="${plugins_tar}.err"
+  rm -f "$plugins_tar" "$plugins_tar_err"
+  set +e
+  timeout "$CMD_TIMEOUT" \
+    "$KUBECTL_CMD" -n "$ns" exec -c backstage-backend "$pod" -- \
+    sh -c 'cd /opt/app-root/src/dynamic-plugins-root 2>/dev/null || exit 0 
+           find . -maxdepth 2 -type f -name package.json -print0 2>/dev/null \
+           | tar --null -T - -cf - 2>/dev/null' \
+    >"$plugins_tar" 2>"$plugins_tar_err" 
+  local tar_rc=$?
+  set -e
+  if [[ $tar_rc -ne 0 ]]; then
+    log_warn "Failed to stream plugin package.json archive from $pod (rc=$tar_rc)"
+  elif [[ ! -s "$plugins_tar" ]]; then
+    log_debug "No package.json files found under dynamic-plugins-root in $pod"
+    rm -f "$plugins_tar"
+  elif ! tar -xf "$plugins_tar" -C "$plugins_out_dir"; then
+    log_warn "Failed to extract plugin package.json archive from $pod"
+  else
+    rm -f "$plugins_tar" "$plugins_tar_err"
+  fi
 }
 
 # Collect all running processes from containers in a pod using /proc filesystem
