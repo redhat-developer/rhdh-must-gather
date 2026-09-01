@@ -14,7 +14,7 @@ RUN cargo build --release \
 
 # Stage 2: Final image
 # https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1787647261@sha256:580752f96d36c4132bffd30f9c34865bf4bd87f6aa161c969d117f21732e50f7
+FROM registry.access.redhat.com/ubi9-minimal:9.8-1788166357@sha256:7fbeae18dc9476399f565e68255f602a3374ea8614ba3d14843565131a13ff93
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
