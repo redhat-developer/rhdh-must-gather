@@ -81,6 +81,31 @@ if ! should_include_namespace "$ns"; then
 fi
 ```
 
+### PR Workflow Path Filtering
+Workflows triggered by `pull_request` must **not** use `on.pull_request.paths` filtering — it prevents the workflow from firing at all, which blocks required status checks. Instead, always trigger the workflow and use `tj-actions/changed-files` as a step inside each job to gate subsequent steps:
+```yaml
+on:
+  pull_request:
+    branches: [main]
+  # push triggers may still use paths filtering — only pull_request is affected
+
+jobs:
+  my-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@...
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@...
+        with:
+          files: |
+            src/**
+      - name: Run tests
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: make test
+```
+For workflows with both `push` (path-filtered) and `pull_request` triggers, gate the changed-files step and subsequent steps with `github.event_name == 'pull_request'` / `github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'`.
+
 ## Vendored Dependencies
 
 This project is built downstream via Konflux with hermetic builds (no network access during `docker build`). All build-time dependencies must be available locally in the repo or installable from vendored sources.
