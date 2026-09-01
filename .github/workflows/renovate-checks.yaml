@@ -2,8 +2,6 @@ name: PR Renovate Config Validator
 
 on:
   pull_request:
-    paths:
-      - '.github/renovate.json'
     # Renovate always uses the config from the repository default branch
     # https://docs.renovatebot.com/configuration-options/
     branches: [ 'main' ]
@@ -14,12 +12,22 @@ jobs:
     name: Renovate Config Validator
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            .github/renovate.json
+
       - name: Validate config
+        if: steps.changed-files.outputs.any_changed == 'true'
         # See https://docs.renovatebot.com/config-validation/
         run: |
           npx --yes --package renovate -- renovate-config-validator --strict .github/renovate.json
 
       - name: Validate JSONata expressions
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           # Extract and validate all transformTemplates JSONata expressions
           # renovate: datasource=npm
