@@ -78,6 +78,7 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 - **Node.js version**: Runtime Node.js version from `node --version`
 - **Container user ID**: Security context information from `id` command
 - **Dynamic plugins structure**: Directory listing of `dynamic-plugins-root` filesystem
+- **Plugin package.json files**: Collected from `dynamic-plugins-root` by default, not including the actual plugin source or plugin assets
 - **Running processes**: Complete list of all running processes in each container, including init containers (collected via `/proc` filesystem enumeration)
   - Process ID (PID) and Parent Process ID (PPID)
   - Process state (R=running, S=sleeping, D=disk sleep, Z=zombie, T=stopped)
@@ -90,6 +91,7 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
   - **Dynamic plugins**
     - **Dynamic plugins root directory** structure from filesystem (`ls -lhrta dynamic-plugins-root`)
     - **Generated app-config** from dynamic plugins installer (`app-config.dynamic-plugins.yaml`)
+    - **Plugin package.json files** under `dynamic-plugins-root` (collected by default; only `package.json`, not including plugin source or plugin assets)
     - **ConfigMaps** containing app configurations and dynamic plugin definitions
 
 #### Logs and Runtime Data
