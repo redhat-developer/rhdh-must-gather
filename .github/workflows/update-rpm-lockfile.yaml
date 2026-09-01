@@ -17,11 +17,6 @@ on:
     branches:
       - main
       - 'release-[0-9]+.[0-9]+'
-    paths:
-      - 'rpms.in.yaml'
-      - 'rpms.lock.yaml'
-      - '.rhdh/docker/Containerfile'
-      - '.github/workflows/update-rpm-lockfile.yaml'
 
 permissions:
   contents: read
@@ -41,7 +36,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            rpms.in.yaml
+            rpms.lock.yaml
+            .rhdh/docker/Containerfile
+            .github/workflows/update-rpm-lockfile.yaml
+
       - name: Check if hermetic Containerfile exists
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
             echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
@@ -65,6 +72,7 @@ jobs:
           git config --global user.email "rhdh-bot@redhat.com"
 
       - name: Install rpm-lockfile-prototype
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [[ ! -x "${HOME}/.local/bin/rpm-lockfile-prototype" ]]; then
             echo "Installing rpm-lockfile-prototype ..."
@@ -82,11 +90,13 @@ jobs:
           fi
 
       - name: Run rpm-lockfile-prototype
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           echo "Running '${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' in $(pwd)"
           ${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml
 
       - name: Check for lockfile changes
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         id: check-lockfile-changes
         run: |
           if git diff --quiet rpms.lock.yaml; then
@@ -100,13 +110,13 @@ jobs:
           fi
 
       - name: Warn if lockfile is out-of-date
-        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
         run: |
           echo "::warning::rpms.lock.yaml is out of date. Please regenerate it by running 'rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' and committing the result, or wait for the next periodic update."
           git diff rpms.lock.yaml > rpms-lockfile.diff
 
       - name: Upload lockfile diff
-        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rpms-lockfile-diff

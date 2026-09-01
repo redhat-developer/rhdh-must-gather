@@ -6,18 +6,28 @@ on:
       - '**.toml'
       - '!vendor/**'
   pull_request:
-    paths:
-      - '**.toml'
-      - '!vendor/**'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            **.toml
+          files_ignore: |
+            vendor/**
+
       - uses: tombi-toml/setup-tombi@49d9f39ceec27db37419b2cab65b5092dd75a547 # v1.5.0
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         with:
           version: 'v0.9.9'
           checksum: 'b50dbc90ec27591dbaf564b628bd3b3e4ead371a60931bc8ea5f34d7cd1d3607'
       - name: Validate TOML files
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: tombi lint
