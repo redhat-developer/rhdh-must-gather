@@ -149,7 +149,6 @@ jobs:
   e2e-tests:
     name: E2E Tests (Container Image)
     needs: pr-build
-    if: needs.pr-build.outputs.image-built == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -157,17 +156,20 @@ jobs:
 
     steps:
       - name: Checkout repository
+        if: needs.pr-build.outputs.image-built == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Download image artifact
+        if: needs.pr-build.outputs.image-built == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: pr-image
 
       - name: Load image into podman
+        if: needs.pr-build.outputs.image-built == 'true'
         env:
           TAG: ${{ needs.pr-build.outputs.image-tag }}
           NAME: ${{ env.IMAGE_NAME }}
@@ -177,17 +179,20 @@ jobs:
           podman images
 
       - name: Install dependencies
+        if: needs.pr-build.outputs.image-built == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y jq skopeo
 
       - name: Create Kind cluster
+        if: needs.pr-build.outputs.image-built == 'true'
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: rhdh-must-gather-e2e
           wait: 120s
 
       - name: Load image into Kind cluster
+        if: needs.pr-build.outputs.image-built == 'true'
         env:
           TAG: ${{ needs.pr-build.outputs.image-tag }}
           NAME: ${{ env.IMAGE_NAME }}
@@ -196,6 +201,7 @@ jobs:
             | kind load image-archive /dev/stdin --name rhdh-must-gather-e2e
 
       - name: Run E2E tests
+        if: needs.pr-build.outputs.image-built == 'true'
         env:
           TAG: ${{ needs.pr-build.outputs.image-tag }}
           NAME: ${{ env.IMAGE_NAME }}
@@ -206,7 +212,7 @@ jobs:
             HELM_SET="image.pullPolicy=Never,resources=null,dataHolder.resources=null"
 
       - name: Upload E2E must-gather output in case of failure
-        if: ${{ failure() }}
+        if: needs.pr-build.outputs.image-built == 'true' && failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-must-gather-output-pr-${{ github.event.pull_request.number }}
@@ -214,7 +220,7 @@ jobs:
           retention-days: 7
 
       - name: Upload must-gather output
-        if: ${{ success() || failure() }}
+        if: needs.pr-build.outputs.image-built == 'true' && (success() || failure())
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: must-gather-output-e2e-image
