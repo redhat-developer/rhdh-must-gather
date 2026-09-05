@@ -12,15 +12,13 @@ on:
       - main
       - 'release-[0-9]+.[0-9]+'
   pull_request:
-    paths:
-      - '**.sh'
-      - 'collection-scripts/**'
-      - '.github/workflows/scripts-checks.yaml'
-      - 'tests/e2e/**'
-      - '!vendor/**'
     branches:
       - main
       - 'release-[0-9]+.[0-9]+'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -30,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
+      contents: read
       security-events: write
 
     steps:
@@ -40,7 +39,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
 
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            **.sh
+            collection-scripts/**
+            .github/workflows/scripts-checks.yaml
+            tests/e2e/**
+          files_ignore: |
+            vendor/**
+
       - id: ShellCheck
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         name: Differential ShellCheck
         uses: redhat-plumbers-in-action/differential-shellcheck@d965e66ec0b3b2f821f75c8eff9b12442d9a7d1e # v5
         with:
@@ -48,7 +61,7 @@ jobs:
           exclude-path: |
             vendor/**
 
-      - if: always()
+      - if: always() && steps.ShellCheck.outcome != 'skipped'
         name: Upload artifact with ShellCheck defects in SARIF format
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

@@ -17,11 +17,10 @@ on:
     branches:
       - main
       - 'release-[0-9]+.[0-9]+'
-    paths:
-      - 'rpms.in.yaml'
-      - 'rpms.lock.yaml'
-      - '.rhdh/docker/Containerfile'
-      - '.github/workflows/update-rpm-lockfile.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -41,20 +40,43 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            rpms.in.yaml
+            rpms.lock.yaml
+            .rhdh/docker/Containerfile
+            .github/workflows/update-rpm-lockfile.yaml
+
       - name: Check if hermetic Containerfile exists
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
             echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
             exit 1
           fi
 
+      - name: Require RHDH_BOT_TOKEN
+        if: github.event_name != 'pull_request'
+        env:
+          RHDH_BOT_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
+        run: |
+          if [[ -z "${RHDH_BOT_TOKEN}" ]]; then
+            echo "::error::RHDH_BOT_TOKEN must be configured as a repo secret (rhdh-bot PAT). There is no GITHUB_TOKEN fallback."
+            exit 1
+          fi
+
       - name: Configure Git
         if: github.event_name != 'pull_request'
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "rhdh-bot"
+          git config --global user.email "rhdh-bot@redhat.com"
 
       - name: Install rpm-lockfile-prototype
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [[ ! -x "${HOME}/.local/bin/rpm-lockfile-prototype" ]]; then
             echo "Installing rpm-lockfile-prototype ..."
@@ -72,11 +94,13 @@ jobs:
           fi
 
       - name: Run rpm-lockfile-prototype
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           echo "Running '${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' in $(pwd)"
           ${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml
 
       - name: Check for lockfile changes
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         id: check-lockfile-changes
         run: |
           if git diff --quiet rpms.lock.yaml; then
@@ -90,13 +114,13 @@ jobs:
           fi
 
       - name: Warn if lockfile is out-of-date
-        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
         run: |
           echo "::warning::rpms.lock.yaml is out of date. Please regenerate it by running 'rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' and committing the result, or wait for the next periodic update."
           git diff rpms.lock.yaml > rpms-lockfile.diff
 
       - name: Upload lockfile diff
-        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rpms-lockfile-diff
@@ -114,7 +138,7 @@ jobs:
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         id: existing-pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
           pr_count=$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')
@@ -123,8 +147,10 @@ jobs:
       - name: Push updated lockfile to PR branch
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
         env:
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           BRANCH: chore/automated-update-rpm-lockfile/${{ steps.target-branch.outputs.name }}
         run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git checkout -B "$BRANCH"
           git add rpms.lock.yaml
           git commit -m "chore: update rpms.lock.yaml [skip-build]"
@@ -133,7 +159,7 @@ jobs:
       - name: Create Pull Request
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.existing-pr.outputs.exists == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
           TARGET_BRANCH: ${{ steps.target-branch.outputs.name }}
         run: |
           gh pr create \
