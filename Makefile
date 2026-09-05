@@ -21,6 +21,13 @@ LABELS ?=
 TOOLS_DIR ?= ./bin
 BASE_COLLECTION_PATH ?= ./out
 
+# Go configuration
+GO ?= go
+GO_MODULE := github.com/redhat-developer/rhdh-must-gather
+GO_BUILD_FLAGS ?= -trimpath -mod=mod
+GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)'
+GO_BIN := $(TOOLS_DIR)/gather
+
 # Test configuration
 BATS_VERSION := 1.13.0
 BATS_CORE_URL := https://github.com/bats-core/bats-core/archive/refs/tags/v$(BATS_VERSION).tar.gz
@@ -68,13 +75,26 @@ local-output:
 local-setup: $(YQ_BIN) $(HELM_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, helm, websocat)
 
 .PHONY: run-local
-run-local: local-output local-setup ## Test the script locally (requires jq, kubectl, oc and cluster access)
+run-local: local-output local-setup go-build ## Test the script locally (requires jq, kubectl, oc and cluster access)
 	@echo "Testing must-gather script locally..."
 	@if ! command -v kubectl >/dev/null 2>&1; then \
 		echo "Error: kubectl not found. Please install kubectl to test."; \
 		exit 1; \
 	fi
 	@echo "Running local test (requires cluster access)..."
+	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
+		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
+		LOG_LEVEL=$(LOG_LEVEL) \
+		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
+		$(GO_BIN) $(OPTS)
+
+.PHONY: run-local-bash
+run-local-bash: local-output local-setup ## Test using the original bash orchestrator (for comparison)
+	@echo "Testing must-gather script locally (bash)..."
+	@if ! command -v kubectl >/dev/null 2>&1; then \
+		echo "Error: kubectl not found. Please install kubectl to test."; \
+		exit 1; \
+	fi
 	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
 		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
@@ -217,6 +237,20 @@ vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_N
 		exit 1; \
 	fi
 	./hack/update-vendor.sh "$(VENDOR_NAME)" "$(VENDOR_VERSION)"
+
+##@ Go
+
+.PHONY: go-build
+go-build: $(TOOLS_DIR) ## Build the Go gather binary
+	$(GO) build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(GO_BIN) ./cmd/gather
+
+.PHONY: go-test
+go-test: ## Run Go unit tests
+	$(GO) test -mod=mod ./... -v -count=1
+
+.PHONY: go-lint
+go-lint: ## Run Go linter (golangci-lint)
+	golangci-lint run ./...
 
 ##@ Build
 
