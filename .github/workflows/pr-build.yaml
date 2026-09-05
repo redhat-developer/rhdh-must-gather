@@ -47,6 +47,10 @@ jobs:
             vendor/**
             artifacts.lock.yaml
             LICENSE
+            go.mod
+            go.sum
+            cmd/**
+            internal/**
           files_ignore: |
             **/*.md
             **/*.adoc

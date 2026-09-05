@@ -41,6 +41,19 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 #         -o /tmp/helm ./cmd/helm && \
 #     /tmp/helm version
 
+# Stage 2c: Build Go gather binary
+# https://registry.access.redhat.com/ubi10/go-toolset
+FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788411200 AS go-builder
+COPY go.mod go.sum /opt/app-root/src/
+WORKDIR /opt/app-root/src
+RUN go mod download
+COPY cmd/ /opt/app-root/src/cmd/
+COPY internal/ /opt/app-root/src/internal/
+ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-X 'github.com/redhat-developer/rhdh-must-gather/internal/cli.version=${RHDH_MUST_GATHER_VERSION}'" \
+    -o /tmp/gather ./cmd/gather
+
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi10-minimal
 FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0
@@ -110,11 +123,12 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs shadow-utils \
     && microdnf remove -y shadow-utils \
     && microdnf clean all
 
-# Use our gather script in place of the original one
-# Copy collection scripts
-COPY collection-scripts/* /usr/bin/
+# Copy Go gather binary (replaces the bash must_gather orchestrator)
+COPY --from=go-builder /tmp/gather /usr/bin/gather
 
-RUN mv /usr/bin/must_gather /usr/bin/gather
+# Copy collection scripts (still needed — Go binary shells out to them)
+COPY collection-scripts/* /usr/bin/
+RUN rm -f /usr/bin/must_gather
 
 # Set environment variable from build argument
 ENV RHDH_MUST_GATHER_VERSION=$RHDH_MUST_GATHER_VERSION
