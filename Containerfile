@@ -1,10 +1,8 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-# https://registry.access.redhat.com/ubi10
-FROM registry.access.redhat.com/ubi10:10.2-1786928703@sha256:a3210c44455d3de518c9ebf53f391b31f5cb5e9b7f101a130ea2d87b17b32dc0 AS websocat-builder
-RUN dnf install -y --setopt=install_weak_deps=0 --nodocs rust-toolset && \
-    dnf clean all
+# https://registry.access.redhat.com/hi/rust
+FROM registry.access.redhat.com/hi/rust:1.98.0-builder@sha256:fadaa572dcdbe2fbd96b55428a509834f670f299424ba321bedb037beab3508a AS websocat-builder
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
 RUN cargo build --release \
