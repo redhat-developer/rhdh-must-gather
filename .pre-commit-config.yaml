@@ -12,7 +12,7 @@ repos:
     hooks:
       - id: uv-pip-compile
         name: uv pip compile (.rhdh/docker)
-        entry: uv pip compile --python-version=3.9 --python-platform=linux
+        entry: uv pip compile --python-version=3.12 --python-platform=linux
           --allow-unsafe --generate-hashes
           --output-file=.rhdh/docker/requirements.txt
           .rhdh/docker/requirements.in
@@ -26,7 +26,7 @@ repos:
     hooks:
       - id: uv-pip-compile-build-deps
         name: uv pip compile build deps (.rhdh/docker)
-        entry: uv pip compile --python-version=3.9 --python-platform=linux
+        entry: uv pip compile --python-version=3.12 --python-platform=linux
           --generate-hashes
           --output-file=.rhdh/docker/requirements-build.txt
           .rhdh/docker/requirements-build.in

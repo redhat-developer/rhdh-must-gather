@@ -3,8 +3,8 @@
 # Stage 1: Build websocat from vendored source
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-# https://registry.access.redhat.com/ubi9
-FROM registry.access.redhat.com/ubi9:9.8-1788245065@sha256:25a147defd01e19674714f55d17538c8dbe55d8c305fa157ecc3f9c8977b05b6 AS websocat-builder
+# https://registry.access.redhat.com/ubi10
+FROM registry.access.redhat.com/ubi10:10.2-1786928703@sha256:a3210c44455d3de518c9ebf53f391b31f5cb5e9b7f101a130ea2d87b17b32dc0 AS websocat-builder
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     arch=$(uname -m); \
@@ -35,8 +35,8 @@ RUN set -eu; \
 
 # Stage 2a: Install helm from prefetched CGW binaries (artifacts.lock.yaml / generic fetcher)
 # Comment this out and uncomment Stage 2b below when no binary available.
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1788166357@sha256:7fbeae18dc9476399f565e68255f602a3374ea8614ba3d14843565131a13ff93 AS helm-builder
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0 AS helm-builder
 ARG TARGETPLATFORM
 COPY hack/install-helm-binary.sh /tmp/install-helm-binary.sh
 RUN set -eu; \
@@ -65,8 +65,8 @@ RUN set -eu; \
 # Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
 # update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
-# https://registry.access.redhat.com/ubi9/go-toolset
-# FROM registry.access.redhat.com/ubi9/go-toolset:9.8-1788245275@sha256:8cf89835994846ca0dffb9078e3a5638c57ec6175750f0af02fbe9c9942696d3 AS helm-builder
+# https://registry.access.redhat.com/ubi10/go-toolset
+# FROM registry.access.redhat.com/ubi10/go-toolset:1.26.5-1786496329@sha256:1db86a2b0f77c1197b011de5140236effc27b1a1724c0105d4926857a0756de5 AS helm-builder
 # COPY Makefile /tmp/Makefile
 # COPY vendor/helm /opt/app-root/src/helm
 # WORKDIR /opt/app-root/src/helm
@@ -79,10 +79,11 @@ RUN set -eu; \
 #     /tmp/helm version
 
 # Stage 3: Final image
-# https://registry.access.redhat.com/ubi9-minimal
-FROM registry.access.redhat.com/ubi9-minimal:9.8-1788166357@sha256:7fbeae18dc9476399f565e68255f602a3374ea8614ba3d14843565131a13ff93
+# https://registry.access.redhat.com/ubi10-minimal
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1786928543@sha256:a036678b09bd6e5d0efc28ea5554ae14aa6af2bc317d60f9bb0c0dd7610972d0
 
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
+ARG TARGETPLATFORM
 
 RUN set -eu; \
     . /cachi2/cachi2.env; \
@@ -113,8 +114,13 @@ RUN set -eu; \
       python3-pip \
       util-linux \
       rsync \
-      openshift-clients \
       && microdnf clean all
+COPY hack/install-openshift-client.sh /tmp/install-openshift-client.sh
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM:-linux/amd64}" \
+      bash /tmp/install-openshift-client.sh --prefetch; \
+    rm -f /tmp/install-openshift-client.sh
 COPY requirements-build.txt /tmp/requirements-build.txt
 COPY requirements.txt /tmp/requirements.txt
 RUN set -eu; \
