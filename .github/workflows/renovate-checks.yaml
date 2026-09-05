@@ -6,6 +6,10 @@ on:
     # https://docs.renovatebot.com/configuration-options/
     branches: [ 'main' ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number }}
+  cancel-in-progress: true
+
 jobs:
   renovate-config-validator:
     runs-on: ubuntu-latest

@@ -7,6 +7,10 @@ on:
       - '!vendor/**'
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -23,7 +27,7 @@ jobs:
           files_ignore: |
             vendor/**
 
-      - uses: tombi-toml/setup-tombi@49d9f39ceec27db37419b2cab65b5092dd75a547 # v1.5.0
+      - uses: tombi-toml/setup-tombi@3312a580f45ec61ab93c4b84159c9376c1d5a035 # v1.5.1
         if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         with:
           version: 'v0.9.9'
