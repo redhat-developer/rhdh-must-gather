@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   unit-tests:
-    name: Unit Tests
+    name: Unit Tests (BATS)
     runs-on: ubuntu-latest
 
     steps:
@@ -54,6 +54,46 @@ jobs:
           report_paths: '**/test-results/*.xml'
           annotate_only: ${{ github.event.pull_request.head.repo.full_name != github.repository }} # forked repo cannot write to checks so just do annotations
 
+  go-tests:
+    name: Go Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            go.mod
+            go.sum
+            cmd/**
+            internal/**
+            Makefile
+            .golangci.yml
+            .github/workflows/test.yaml
+
+      - name: Set up Go
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go tests
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: make go-test
+
+      - name: Run Go lint
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
+        with:
+          version: v2
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
@@ -75,6 +115,10 @@ jobs:
             Makefile
             .github/workflows/test.yaml
             hack/deploy-k8s.sh
+            go.mod
+            go.sum
+            cmd/**
+            internal/**
 
       - name: Install dependencies
         if: steps.changed-files.outputs.any_changed == 'true'
@@ -93,6 +137,12 @@ jobs:
           curl -sLO https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl
           chmod +x websocat.x86_64-unknown-linux-musl
           sudo mv websocat.x86_64-unknown-linux-musl /usr/local/bin/websocat
+
+      - name: Set up Go
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: go.mod
 
       - name: Create Kind cluster
         if: steps.changed-files.outputs.any_changed == 'true'
