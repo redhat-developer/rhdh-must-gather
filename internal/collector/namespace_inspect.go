@@ -151,8 +151,12 @@ func (n *NamespaceInspect) detectCRNamespaces(ctx context.Context, cfg *Config, 
 	if dynClient == nil {
 		return
 	}
+	version, err := cfg.Client.PreferredVersion("rhdh.redhat.com")
+	if err != nil {
+		return
+	}
 	gvr := schema.GroupVersionResource{
-		Group: "rhdh.redhat.com", Version: "v1alpha3", Resource: "backstages",
+		Group: "rhdh.redhat.com", Version: version, Resource: "backstages",
 	}
 	crs, err := dynClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
