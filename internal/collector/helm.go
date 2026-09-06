@@ -475,7 +475,7 @@ func filterSecretsFromYAML(input string) string {
 		}
 		first = false
 	}
-	encoder.Close()
+	_ = encoder.Close()
 	return buf.String()
 }
 
