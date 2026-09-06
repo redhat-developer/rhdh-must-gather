@@ -84,6 +84,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		Client:      kubeClient,
 		BasePath:    basePath,
 		Interrupted: &interrupted,
+		WithSecrets: opts.withSecrets,
 	}
 
 	scripts := buildScriptList(cmd, opts)
