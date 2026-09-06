@@ -178,6 +178,10 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 		_ = os.MkdirAll(rsDir, 0o755)
 		rsList, err := client.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 		if err == nil {
+			setGVK(rsList, "ReplicaSetList", "apps/v1")
+			for i := range rsList.Items {
+				setGVK(&rsList.Items[i], "ReplicaSet", "apps/v1")
+			}
 			writeResource(filepath.Join(rsDir, "replicasets.yaml"), rsList)
 			writeResource(filepath.Join(rsDir, "replicasets.describe.txt"), rsList)
 			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "deployment", rsList.Items)
@@ -188,6 +192,10 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 		_ = os.MkdirAll(crDir, 0o755)
 		crList, err := client.AppsV1().ControllerRevisions(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 		if err == nil {
+			setGVK(crList, "ControllerRevisionList", "apps/v1")
+			for i := range crList.Items {
+				setGVK(&crList.Items[i], "ControllerRevision", "apps/v1")
+			}
 			writeResource(filepath.Join(crDir, "controllerrevisions.yaml"), crList)
 			writeResource(filepath.Join(crDir, "controllerrevisions.describe.txt"), crList)
 			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "statefulset", crList.Items)
