@@ -12,6 +12,7 @@ type Config struct {
 	Client      *kube.Client
 	BasePath    string
 	Interrupted *atomic.Bool
+	WithSecrets bool
 }
 
 type Collector interface {
@@ -36,4 +37,5 @@ var Registry = map[string]Collector{
 	"route":        &Route{},
 	"ingress":      &Ingress{},
 	"cluster-info": &ClusterInfo{},
+	"operator":     &Operator{},
 }
