@@ -367,6 +367,7 @@ func (o *Operator) gatherBackstageCRs(ctx context.Context, cfg *Config, outDir s
 			_ = os.MkdirAll(crDir, 0o755)
 
 			writeResource(filepath.Join(crDir, crName+".yaml"), &cr)
+			writeResource(filepath.Join(crDir, "describe.txt"), &cr)
 			o.collectCRWorkloads(ctx, cfg, ns, crName, crDir, backstageGVR)
 		}
 	}

@@ -151,6 +151,9 @@ func CollectPodLogs(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod
 		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, false, filepath.Join(cDir, "current.txt"))
 		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, true, filepath.Join(cDir, "previous.txt"))
 	}
+
+	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, false, filepath.Join(outDir, "logs-app.current.txt"))
+	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, true, filepath.Join(outDir, "logs-app.previous.txt"))
 }
 
 func streamAndSaveLogs(ctx context.Context, client kubernetes.Interface, ns, podName, container string, previous bool, outPath string) {
