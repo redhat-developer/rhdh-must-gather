@@ -92,7 +92,11 @@ find /opt/app-root/src/dynamic-plugins-root -maxdepth 2 -name package.json -exec
 func CollectProcesses(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod, outDir string) {
 	_ = os.MkdirAll(outDir, 0o755)
 
-	for _, c := range pod.Spec.Containers {
+	allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+	allContainers = append(allContainers, pod.Spec.InitContainers...)
+	allContainers = append(allContainers, pod.Spec.Containers...)
+
+	for _, c := range allContainers {
 		script := fmt.Sprintf(`
 echo "=== Process List (from /proc filesystem) ==="
 echo "Container: %s"
