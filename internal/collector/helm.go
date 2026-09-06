@@ -316,6 +316,22 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 		h.writeStandaloneNote(filepath.Join(wlDir, "standalone-note.txt"), wl.namespace, wl.name)
 		h.writeHelmMetadata(ctx, cfg, wl.namespace, wl.name, wl.kind, filepath.Join(wlDir, "helm-metadata.txt"))
 
+		// Write top-level workload YAML and describe (bash version does this separately)
+		switch wl.kind {
+		case KindDeployment:
+			dep, err := client.AppsV1().Deployments(wl.namespace).Get(ctx, wl.name, metav1.GetOptions{})
+			if err == nil {
+				writeResource(filepath.Join(wlDir, "deployment.yaml"), dep)
+				describeResource(ctx, filepath.Join(wlDir, "deployment.describe.txt"), "deployment", wl.namespace, wl.name)
+			}
+		case KindStatefulSet:
+			sts, err := client.AppsV1().StatefulSets(wl.namespace).Get(ctx, wl.name, metav1.GetOptions{})
+			if err == nil {
+				writeResource(filepath.Join(wlDir, "statefulset.yaml"), sts)
+				describeResource(ctx, filepath.Join(wlDir, "statefulset.describe.txt"), "statefulset", wl.namespace, wl.name)
+			}
+		}
+
 		ref := WorkloadRef{Namespace: wl.namespace, Name: wl.name, Kind: wl.kind, InstanceName: wl.name}
 		subDir := "deployment"
 		if wl.kind == KindStatefulSet {
@@ -331,6 +347,21 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 
 	if count > 0 {
 		log.Info("Standalone Helm deployments were found and collected in: %s", standaloneDir)
+
+		// Append standalone markers to releases file
+		releasesFile := filepath.Join(helmDir, "all-rhdh-releases.txt")
+		f, err := os.OpenFile(releasesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintln(f, "")
+			fmt.Fprintln(f, "# Standalone Helm Deployments (detected via labels/images)")
+			fmt.Fprintln(f, "# =========================================================")
+			for _, wl := range workloads {
+				if processedWorkloads[wl.namespace+"/"+wl.name] {
+					fmt.Fprintf(f, "%s/%s (standalone)\n", wl.namespace, wl.name)
+				}
+			}
+			_ = f.Close()
+		}
 	}
 
 	return count
@@ -413,7 +444,10 @@ func (h *Helm) collectDependentLogs(ctx context.Context, cfg *Config, ns, depNam
 
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		CollectPodLogs(ctx, cfg, ns, pod, filepath.Join(depDir, "logs", "pod="+pod.Name))
+		writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, false,
+			filepath.Join(depDir, "logs-"+pod.Name+".txt"))
+		writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, true,
+			filepath.Join(depDir, "logs-"+pod.Name+"-previous.txt"))
 	}
 }
 
