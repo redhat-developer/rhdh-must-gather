@@ -9,13 +9,13 @@ import (
 )
 
 type Config struct {
-	Client           *kube.Client
-	BasePath         string
-	Interrupted      *atomic.Bool
-	WithSecrets      bool
-	WithHeapDumps    bool
-	HeapDumpInstance string
-	ScriptDir        string
+	Client        *kube.Client
+	BasePath      string
+	Interrupted   *atomic.Bool
+	WithSecrets   bool
+	WithHeapDumps bool
+	ScriptDir     string
+	Env           []string
 }
 
 type Collector interface {
