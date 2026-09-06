@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	osExec "os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
+	"github.com/redhat-developer/rhdh-must-gather/internal/exec"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
@@ -31,16 +32,9 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		logLevel = "info"
 	}
 
-	scriptDir, err := resolveScriptDir()
-	if err != nil {
-		return err
-	}
-
 	if err := os.MkdirAll(basePath, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
-
-	env := buildEnv(opts)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,15 +66,12 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
-	if err := runInit(scriptDir, env); err != nil {
-		log.Error("Failed to initialize must-gather environment")
-		return err
-	}
-
 	kubeClient, err := kube.NewClient()
 	if err != nil {
-		log.Warn("Failed to create Kubernetes client, Go collectors will fall back to bash: %v", err)
+		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
+
+	env := buildEnv(opts)
 
 	collectorCfg := &collector.Config{
 		Client:        kubeClient,
@@ -92,7 +83,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	}
 
 	scripts := buildScriptList(cmd, opts)
-	log.Info("running the following scripts: %s", strings.Join(scripts, " "))
+	log.Info("running the following collectors: %s", strings.Join(scripts, " "))
 
 	if opts.withSecrets {
 		log.Warn("Secret collection enabled - sensitive data will be included (and sanitized)")
@@ -115,99 +106,57 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		log.Info("Limiting collection to namespaces: %s", opts.namespaces)
 	}
 
-	for _, script := range scripts {
+	for _, name := range scripts {
 		if interrupted.Load() {
 			break
 		}
-		if c, ok := collector.Registry[script]; ok && kubeClient != nil {
-			log.Info("running %s (Go)", c.Name())
-			if err := c.Run(ctx, collectorCfg); err != nil {
-				log.Warn("Failed to run %s: %v, continuing with next script...", c.Name(), err)
-			}
-		} else {
-			name := "gather_" + script
-			log.Info("running %s", name)
-			exitCode := runScript(scriptDir, name, env)
-			if exitCode == 130 || exitCode == 143 {
-				return &exitError{code: exitCode}
-			}
-			if exitCode != 0 {
-				log.Warn("Failed to run %s, continuing with next script...", name)
-			}
+		c, ok := collector.Registry[name]
+		if !ok {
+			log.Warn("Unknown collector %q, skipping", name)
+			continue
+		}
+		log.Info("running %s", c.Name())
+		if err := c.Run(ctx, collectorCfg); err != nil {
+			log.Warn("Failed to run %s: %v, continuing with next collector...", c.Name(), err)
 		}
 	}
 
 	if !interrupted.Load() {
-		log.Info("running logs")
-		exitCode := runScript(scriptDir, "logs.sh", env)
-		if exitCode == 130 || exitCode == 143 {
-			return &exitError{code: exitCode}
-		}
-		if exitCode != 0 {
-			log.Warn("Failed to run logs.sh, continuing...")
-		}
+		collectPodLogs(ctx, kubeClient, basePath)
 	}
 
 	syscall.Sync()
 	return nil
 }
 
-func resolveScriptDir() (string, error) {
-	if dir := os.Getenv("RHDH_SCRIPT_DIR"); dir != "" {
-		if hasCommonSh(dir) {
-			return dir, nil
-		}
-		return "", fmt.Errorf("RHDH_SCRIPT_DIR=%s does not contain common.sh", dir)
+// collectPodLogs collects logs from the must-gather pod itself when running
+// inside a pod (replaces logs.sh).
+func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
+	nsFile := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	nsBytes, err := os.ReadFile(nsFile)
+	if err != nil {
+		return
+	}
+	ns := strings.TrimSpace(string(nsBytes))
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		return
 	}
 
-	exe, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exe)
-		if hasCommonSh(dir) {
-			return dir, nil
-		}
+	log.Info("Collecting must-gather pod logs...")
+	kubectl := "kubectl"
+	if _, err := osExec.LookPath("oc"); err == nil {
+		kubectl = "oc"
 	}
-
-	cwd, err := os.Getwd()
-	if err == nil {
-		dir := filepath.Join(cwd, "collection-scripts")
-		if hasCommonSh(dir) {
-			return dir, nil
-		}
+	tctx, tcancel := exec.TimeoutContext(ctx)
+	defer tcancel()
+	out, err := osExec.CommandContext(tctx, kubectl, "logs", "--timestamps=true",
+		"-n", ns, podName, "-c", "gather").CombinedOutput()
+	if err != nil {
+		log.Warn("Failed to collect must-gather pod logs: %v", err)
+		return
 	}
-
-	return "", fmt.Errorf("cannot find collection scripts: set RHDH_SCRIPT_DIR or run from the project root")
-}
-
-func hasCommonSh(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "common.sh"))
-	return err == nil
-}
-
-func runInit(scriptDir string, env []string) error {
-	script := fmt.Sprintf("source '%s/common.sh' && init_must_gather", scriptDir)
-	c := exec.Command("bash", "-c", script)
-	c.Env = env
-	c.Stdout = os.Stderr
-	c.Stderr = os.Stderr
-	return c.Run()
-}
-
-// runScript executes a script from scriptDir. Any extra args are passed as
-// positional arguments.
-func runScript(scriptDir, name string, env []string, args ...string) int {
-	path := filepath.Join(scriptDir, name)
-	c := exec.Command(path, args...)
-	c.Env = env
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode()
-		}
-		return 1
-	}
-	return 0
+	_ = os.WriteFile(filepath.Join(basePath, "must-gather.log"), out, 0o644)
 }
 
 func getEnvDefault(key, fallback string) string {
@@ -215,12 +164,4 @@ func getEnvDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-type exitError struct {
-	code int
-}
-
-func (e *exitError) Error() string {
-	return fmt.Sprintf("exit code %d", e.code)
 }
