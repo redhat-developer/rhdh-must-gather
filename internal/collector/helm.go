@@ -352,14 +352,15 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 		releasesFile := filepath.Join(helmDir, "all-rhdh-releases.txt")
 		f, err := os.OpenFile(releasesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err == nil {
-			fmt.Fprintln(f, "")
-			fmt.Fprintln(f, "# Standalone Helm Deployments (detected via labels/images)")
-			fmt.Fprintln(f, "# =========================================================")
+			var sb strings.Builder
+			sb.WriteString("\n# Standalone Helm Deployments (detected via labels/images)\n")
+			sb.WriteString("# =========================================================\n")
 			for _, wl := range workloads {
 				if processedWorkloads[wl.namespace+"/"+wl.name] {
-					fmt.Fprintf(f, "%s/%s (standalone)\n", wl.namespace, wl.name)
+					fmt.Fprintf(&sb, "%s/%s (standalone)\n", wl.namespace, wl.name)
 				}
 			}
+			_, _ = f.WriteString(sb.String())
 			_ = f.Close()
 		}
 	}
