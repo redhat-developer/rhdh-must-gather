@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
-	osExec "os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -12,9 +12,9 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
-	"github.com/redhat-developer/rhdh-must-gather/internal/exec"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
@@ -144,19 +144,24 @@ func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
 	}
 
 	log.Info("Collecting must-gather pod logs...")
-	kubectl := "kubectl"
-	if _, err := osExec.LookPath("oc"); err == nil {
-		kubectl = "oc"
-	}
-	tctx, tcancel := exec.TimeoutContext(ctx)
-	defer tcancel()
-	out, err := osExec.CommandContext(tctx, kubectl, "logs", "--timestamps=true",
-		"-n", ns, podName, "-c", "gather").CombinedOutput()
+	timestamps := true
+	req := client.Clientset.CoreV1().Pods(ns).GetLogs(podName, &corev1.PodLogOptions{
+		Container:  "gather",
+		Timestamps: timestamps,
+	})
+	stream, err := req.Stream(ctx)
 	if err != nil {
 		log.Warn("Failed to collect must-gather pod logs: %v", err)
 		return
 	}
-	_ = os.WriteFile(filepath.Join(basePath, "must-gather.log"), out, 0o644)
+	defer func() { _ = stream.Close() }()
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		log.Warn("Failed to read must-gather pod logs: %v", err)
+		return
+	}
+	_ = os.WriteFile(filepath.Join(basePath, "must-gather.log"), data, 0o644)
 }
 
 func getEnvDefault(key, fallback string) string {
