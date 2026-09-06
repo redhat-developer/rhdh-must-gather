@@ -200,7 +200,7 @@ func (o *Orchestrator) collectServerlessNamespace(ctx context.Context, cfg *Conf
 	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		writePodTable(filepath.Join(nsDir, "pods.txt"), pods.Items)
-		describeResource(ctx, filepath.Join(nsDir, "pods.describe.txt"), "pods", ns)
+		describeResource(ctx, cfg, filepath.Join(nsDir, "pods.describe.txt"), "pods", ns)
 	}
 
 	// Logs by selector
@@ -234,7 +234,7 @@ func (o *Orchestrator) gatherOrchestratorCRDs(ctx context.Context, cfg *Config, 
 		detected = true
 		foundCRDs = append(foundCRDs, crdName)
 		writeResource(filepath.Join(crdsDir, crdName+".yaml"), crd)
-		describeResource(ctx, filepath.Join(crdsDir, crdName+".describe.txt"), "crd", "", crdName)
+		describeResource(ctx, cfg, filepath.Join(crdsDir, crdName+".describe.txt"), "crd", "", crdName)
 	}
 
 	if len(foundCRDs) == 0 {
@@ -281,7 +281,7 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 		_ = os.MkdirAll(crDir, 0o755)
 
 		writeResource(filepath.Join(crDir, name+".yaml"), &item)
-		describeResource(ctx, filepath.Join(crDir, "describe.txt"),
+		describeResource(ctx, cfg, filepath.Join(crDir, "describe.txt"),
 			"sonataflowplatforms.sonataflow.org", ns, name)
 
 		// Related deployments
@@ -379,7 +379,7 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 		_ = os.MkdirAll(wfDir, 0o755)
 
 		writeResource(filepath.Join(wfDir, "workflow.yaml"), &item)
-		describeResource(ctx, filepath.Join(wfDir, "describe.txt"),
+		describeResource(ctx, cfg, filepath.Join(wfDir, "describe.txt"),
 			"sonataflows.sonataflow.org", ns, name)
 
 		// Pods

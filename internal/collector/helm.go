@@ -322,13 +322,13 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 			dep, err := client.AppsV1().Deployments(wl.namespace).Get(ctx, wl.name, metav1.GetOptions{})
 			if err == nil {
 				writeResource(filepath.Join(wlDir, "deployment.yaml"), dep)
-				describeResource(ctx, filepath.Join(wlDir, "deployment.describe.txt"), "deployment", wl.namespace, wl.name)
+				describeResource(ctx, cfg, filepath.Join(wlDir, "deployment.describe.txt"), "deployment", wl.namespace, wl.name)
 			}
 		case KindStatefulSet:
 			sts, err := client.AppsV1().StatefulSets(wl.namespace).Get(ctx, wl.name, metav1.GetOptions{})
 			if err == nil {
 				writeResource(filepath.Join(wlDir, "statefulset.yaml"), sts)
-				describeResource(ctx, filepath.Join(wlDir, "statefulset.describe.txt"), "statefulset", wl.namespace, wl.name)
+				describeResource(ctx, cfg, filepath.Join(wlDir, "statefulset.describe.txt"), "statefulset", wl.namespace, wl.name)
 			}
 		}
 
@@ -403,7 +403,7 @@ func (h *Helm) collectDependentServices(ctx context.Context, cfg *Config, ns, ma
 			_ = os.MkdirAll(depDir, 0o755)
 
 			writeResource(filepath.Join(depDir, "deployment.yaml"), &dep)
-			describeResource(ctx, filepath.Join(depDir, "deployment.describe.txt"), "deployment", ns, dep.Name)
+			describeResource(ctx, cfg, filepath.Join(depDir, "deployment.describe.txt"), "deployment", ns, dep.Name)
 			h.collectDependentLogs(ctx, cfg, ns, dep.Name, instanceLabel, &dep.Spec.Selector.MatchLabels, depDir)
 			processedWorkloads[ns+"/"+dep.Name] = true
 		}
@@ -420,7 +420,7 @@ func (h *Helm) collectDependentServices(ctx context.Context, cfg *Config, ns, ma
 			_ = os.MkdirAll(depDir, 0o755)
 
 			writeResource(filepath.Join(depDir, "statefulset.yaml"), &sts)
-			describeResource(ctx, filepath.Join(depDir, "statefulset.describe.txt"), "statefulset", ns, sts.Name)
+			describeResource(ctx, cfg, filepath.Join(depDir, "statefulset.describe.txt"), "statefulset", ns, sts.Name)
 			h.collectDependentLogs(ctx, cfg, ns, sts.Name, instanceLabel, &sts.Spec.Selector.MatchLabels, depDir)
 			processedWorkloads[ns+"/"+sts.Name] = true
 		}

@@ -48,7 +48,7 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 			return fmt.Errorf("getting deployment %s/%s: %w", ns, ref.Name, err)
 		}
 		writeResource(filepath.Join(outDir, "deployment.yaml"), dep)
-		describeResource(ctx, filepath.Join(outDir, "deployment.describe.txt"), "deployment", ns, ref.Name)
+		describeResource(ctx, cfg, filepath.Join(outDir, "deployment.describe.txt"), "deployment", ns, ref.Name)
 		labelSelector = labels.Set(dep.Spec.Selector.MatchLabels).String()
 		collectRolloutHistory(ctx, cfg, ns, ref.Kind, dep.Spec.Selector.MatchLabels, outDir)
 
@@ -58,7 +58,7 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 			return fmt.Errorf("getting statefulset %s/%s: %w", ns, ref.Name, err)
 		}
 		writeResource(filepath.Join(outDir, "statefulset.yaml"), sts)
-		describeResource(ctx, filepath.Join(outDir, "statefulset.describe.txt"), "statefulset", ns, ref.Name)
+		describeResource(ctx, cfg, filepath.Join(outDir, "statefulset.describe.txt"), "statefulset", ns, ref.Name)
 		labelSelector = labels.Set(sts.Spec.Selector.MatchLabels).String()
 		collectRolloutHistory(ctx, cfg, ns, ref.Kind, sts.Spec.Selector.MatchLabels, outDir)
 	}
@@ -86,7 +86,7 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 	} else {
 		podList := &corev1.PodList{Items: pods}
 		writeResource(filepath.Join(podsDir, "pods.yaml"), podList)
-		describeResource(ctx, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", labelSelector)
+		describeResource(ctx, cfg, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", labelSelector)
 		writePodTable(filepath.Join(podsDir, "pods.txt"), pods)
 	}
 
@@ -140,7 +140,7 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 		return nil
 	}
 	writeResource(filepath.Join(stsDir, "db-statefulset.yaml"), sts)
-	describeResource(ctx, filepath.Join(stsDir, "db-statefulset.describe.txt"), "statefulset", ns, name)
+	describeResource(ctx, cfg, filepath.Join(stsDir, "db-statefulset.describe.txt"), "statefulset", ns, name)
 
 	sel := labels.Set(sts.Spec.Selector.MatchLabels).String()
 	writeAggregatedStatefulSetLogs(ctx, client, ns, name, sel, stsDir)
@@ -154,7 +154,7 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 		podsDir := filepath.Join(stsDir, "pods")
 		_ = os.MkdirAll(podsDir, 0o755)
 		writeResource(filepath.Join(podsDir, "pods.yaml"), podList)
-		describeResource(ctx, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", sel)
+		describeResource(ctx, cfg, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", sel)
 		writePodTable(filepath.Join(podsDir, "pods.txt"), podList.Items)
 
 		for i := range podList.Items {
@@ -185,7 +185,7 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 				setGVK(&rsList.Items[i], "ReplicaSet", "apps/v1")
 			}
 			writeResource(filepath.Join(rsDir, "replicasets.yaml"), rsList)
-			describeResource(ctx, filepath.Join(rsDir, "replicasets.describe.txt"), "replicasets", ns, "-l", sel)
+			describeResource(ctx, cfg, filepath.Join(rsDir, "replicasets.describe.txt"), "replicasets", ns, "-l", sel)
 			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "deployment", rsList.Items)
 		}
 
@@ -199,7 +199,7 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 				setGVK(&crList.Items[i], "ControllerRevision", "apps/v1")
 			}
 			writeResource(filepath.Join(crDir, "controllerrevisions.yaml"), crList)
-			describeResource(ctx, filepath.Join(crDir, "controllerrevisions.describe.txt"), "controllerrevisions", ns, "-l", sel)
+			describeResource(ctx, cfg, filepath.Join(crDir, "controllerrevisions.describe.txt"), "controllerrevisions", ns, "-l", sel)
 			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "statefulset", crList.Items)
 		}
 	}
@@ -290,7 +290,7 @@ func CollectNamespaceData(ctx context.Context, cfg *Config, ns, outDir string, w
 		for i := range cmList.Items {
 			cm := &cmList.Items[i]
 			writeResource(filepath.Join(cmDir, cm.Name+".yaml"), cm)
-			describeResource(ctx, filepath.Join(cmDir, cm.Name+".describe.txt"), "configmap", ns, cm.Name)
+			describeResource(ctx, cfg, filepath.Join(cmDir, cm.Name+".describe.txt"), "configmap", ns, cm.Name)
 		}
 	}
 

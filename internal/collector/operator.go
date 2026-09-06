@@ -131,7 +131,7 @@ func (o *Operator) gatherCRDs(ctx context.Context, cfg *Config, outDir string) {
 			continue
 		}
 		writeResource(filepath.Join(crdsDir, name+".yaml"), crd)
-		describeResource(ctx, filepath.Join(crdsDir, name+".describe.txt"), "crd", "", name)
+		describeResource(ctx, cfg, filepath.Join(crdsDir, name+".describe.txt"), "crd", "", name)
 	}
 }
 
@@ -265,7 +265,7 @@ func (o *Operator) gatherOperatorConfig(ctx context.Context, cfg *Config, ns, ns
 			continue
 		}
 		writeResource(filepath.Join(configsDir, name+".yaml"), cm)
-		describeResource(ctx, filepath.Join(configsDir, name+".describe.txt"), "configmap", ns, name)
+		describeResource(ctx, cfg, filepath.Join(configsDir, name+".describe.txt"), "configmap", ns, name)
 	}
 }
 
@@ -295,7 +295,7 @@ func (o *Operator) gatherOperatorDeployments(ctx context.Context, cfg *Config, n
 	}
 	if len(opDeps.Items) > 0 {
 		writeResource(filepath.Join(depsDir, "app=rhdh-operator.yaml"), opDeps)
-		describeResource(ctx, filepath.Join(depsDir, "app=rhdh-operator.describe.txt"), "deployments", ns, "-l", selector)
+		describeResource(ctx, cfg, filepath.Join(depsDir, "app=rhdh-operator.describe.txt"), "deployments", ns, "-l", selector)
 	}
 
 	for i := range opDeps.Items {
@@ -374,7 +374,7 @@ func (o *Operator) gatherBackstageCRs(ctx context.Context, cfg *Config, outDir s
 			_ = os.MkdirAll(crDir, 0o755)
 
 			writeResource(filepath.Join(crDir, crName+".yaml"), &cr)
-			describeResource(ctx, filepath.Join(crDir, "describe.txt"), "backstage", ns, crName)
+			describeResource(ctx, cfg, filepath.Join(crDir, "describe.txt"), "backstage", ns, crName)
 			o.collectCRWorkloads(ctx, cfg, ns, crName, crDir, backstageGVR)
 		}
 	}
