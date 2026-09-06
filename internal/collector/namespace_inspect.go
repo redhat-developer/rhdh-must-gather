@@ -3,7 +3,6 @@ package collector
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	osExec "os/exec"
@@ -15,6 +14,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/release"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/exec"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
@@ -79,31 +80,27 @@ func (n *NamespaceInspect) resolveNamespaces(ctx context.Context, cfg *Config) [
 	return namespaces
 }
 
-func (n *NamespaceInspect) detectHelmNamespaces(ctx context.Context, cfg *Config, nsSet map[string]struct{}) {
-	if _, err := osExec.LookPath("helm"); err != nil {
+func (n *NamespaceInspect) detectHelmNamespaces(_ context.Context, cfg *Config, nsSet map[string]struct{}) {
+	actionCfg, err := newHelmActionConfig(cfg, "")
+	if err != nil {
 		return
 	}
-	tctx, cancel := exec.TimeoutContext(ctx)
-	defer cancel()
+	listAction := action.NewList(actionCfg)
+	listAction.AllNamespaces = true
 
-	out, err := osExec.CommandContext(tctx, "helm", "list", "--all-namespaces", "-o", "json").Output()
-	if err != nil || len(out) == 0 {
-		return
-	}
-
-	type helmRelease struct {
-		Namespace string `json:"namespace"`
-		Chart     string `json:"chart"`
-	}
-	var releases []helmRelease
-	if err := json.Unmarshal(out, &releases); err != nil {
+	releases, err := listAction.Run()
+	if err != nil {
 		return
 	}
 
-	for _, r := range releases {
-		lower := strings.ToLower(r.Chart)
-		if strings.Contains(lower, "backstage") || strings.Contains(lower, "rhdh") || strings.Contains(lower, "developer-hub") {
-			nsSet[r.Namespace] = struct{}{}
+	for _, rel := range releases {
+		acc, aErr := release.NewAccessor(rel)
+		if aErr != nil {
+			continue
+		}
+		chartName := strings.ToLower(chartNameFromAccessor(acc))
+		if strings.Contains(chartName, "backstage") || strings.Contains(chartName, "rhdh") || strings.Contains(chartName, "developer-hub") {
+			nsSet[acc.Namespace()] = struct{}{}
 		}
 	}
 }
