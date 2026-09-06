@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
+	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
@@ -43,12 +46,16 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		_ = runScript(scriptDir, "sanitize", env, basePath)
 	}()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var interrupted atomic.Bool
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 		interrupted.Store(true)
+		cancel()
 		log.Warn("Interrupt requested, stopping after current step...")
 	}()
 	defer signal.Stop(sigCh)
@@ -66,6 +73,17 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	if err := runInit(scriptDir, env); err != nil {
 		log.Error("Failed to initialize must-gather environment")
 		return err
+	}
+
+	kubeClient, err := kube.NewClient()
+	if err != nil {
+		log.Warn("Failed to create Kubernetes client, Go collectors will fall back to bash: %v", err)
+	}
+
+	collectorCfg := &collector.Config{
+		Client:      kubeClient,
+		BasePath:    basePath,
+		Interrupted: &interrupted,
 	}
 
 	scripts := buildScriptList(cmd, opts)
@@ -96,14 +114,21 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		if interrupted.Load() {
 			break
 		}
-		name := "gather_" + script
-		log.Info("running %s", name)
-		exitCode := runScript(scriptDir, name, env)
-		if exitCode == 130 || exitCode == 143 {
-			return &exitError{code: exitCode}
-		}
-		if exitCode != 0 {
-			log.Warn("Failed to run %s, continuing with next script...", name)
+		if c, ok := collector.Registry[script]; ok && kubeClient != nil {
+			log.Info("running %s (Go)", c.Name())
+			if err := c.Run(ctx, collectorCfg); err != nil {
+				log.Warn("Failed to run %s: %v, continuing with next script...", c.Name(), err)
+			}
+		} else {
+			name := "gather_" + script
+			log.Info("running %s", name)
+			exitCode := runScript(scriptDir, name, env)
+			if exitCode == 130 || exitCode == 143 {
+				return &exitError{code: exitCode}
+			}
+			if exitCode != 0 {
+				log.Warn("Failed to run %s, continuing with next script...", name)
+			}
 		}
 	}
 
