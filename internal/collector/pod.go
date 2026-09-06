@@ -93,14 +93,14 @@ func CollectProcesses(ctx context.Context, cfg *Config, ns string, pod *corev1.P
 	_ = os.MkdirAll(outDir, 0o755)
 
 	for _, c := range pod.Spec.Containers {
-		script := `
+		script := fmt.Sprintf(`
 echo "=== Process List (from /proc filesystem) ==="
-echo "Container: $1"
-echo "Pod: $2"
-echo "Namespace: $3"
-echo "Collected at: $(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date)"
+echo "Container: %s"
+echo "Pod: %s"
+echo "Namespace: %s"
+echo "Collected at: $(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ" 2>/dev/null || date)"
 echo ""
-printf "%-7s %-7s %-5s %-10s %-10s %-20s %s\n" "PID" "PPID" "STATE" "RSS(KB)" "VSZ(KB)" "NAME" "CMDLINE"
+printf "%%-7s %%-7s %%-5s %%-10s %%-10s %%-20s %%s\n" "PID" "PPID" "STATE" "RSS(KB)" "VSZ(KB)" "NAME" "CMDLINE"
 count=0
 for d in /proc/[0-9]*; do
   p=$(basename "$d")
@@ -118,13 +118,13 @@ for d in /proc/[0-9]*; do
   done < "$d/status"
   cmd=$(cat "$d/cmdline" 2>/dev/null | tr "\0" " " | head -c 200 || echo "")
   [ -z "$cmd" ] && [ -n "$name" ] && cmd="[$name]"
-  printf "%-7s %-7s %-5s %-10s %-10s %-20s %s\n" "$p" "$ppid" "$state" "$rss" "$vsz" "$name" "$cmd"
+  printf "%%-7s %%-7s %%-5s %%-10s %%-10s %%-20s %%s\n" "$p" "$ppid" "$state" "$rss" "$vsz" "$name" "$cmd"
   count=$((count + 1))
 done
 echo ""
 echo "Total processes: $count"
-`
-		out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod.Name, c.Name, script+" "+c.Name+" "+pod.Name+" "+ns)
+`, c.Name, pod.Name, ns)
+		out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod.Name, c.Name, script)
 		if err != nil {
 			_ = os.WriteFile(filepath.Join(outDir, "container="+c.Name+".txt"),
 				[]byte(fmt.Sprintf("Failed to collect processes: %v\n", err)), 0o644)
