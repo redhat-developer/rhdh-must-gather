@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,10 +13,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/release"
 
-	"github.com/redhat-developer/rhdh-must-gather/internal/exec"
+	"github.com/openshift/oc/pkg/cli/admin/inspect"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
@@ -29,14 +29,6 @@ func (n *NamespaceInspect) Run(ctx context.Context, cfg *Config) error {
 	log.Info("Starting Namespace inspect collection...")
 	outDir := filepath.Join(cfg.BasePath, "namespace-inspect")
 	_ = os.MkdirAll(outDir, 0o755)
-
-	if _, err := osExec.LookPath("oc"); err != nil {
-		log.Warn("'oc' command not found. Namespace inspect requires OpenShift CLI (oc).")
-		log.Warn("Skipping Namespace inspect. Install 'oc' to enable this feature.")
-		_ = os.WriteFile(filepath.Join(outDir, "skipped.txt"),
-			[]byte("oc command not available - Namespace inspect skipped\n"), 0o644)
-		return nil
-	}
 
 	namespaces := n.resolveNamespaces(ctx, cfg)
 	if len(namespaces) == 0 {
@@ -186,43 +178,28 @@ func (n *NamespaceInspect) addOrchestratorNamespaces(cfg *Config, nsSet map[stri
 	}
 }
 
-func (n *NamespaceInspect) runInspect(ctx context.Context, cfg *Config, outDir string, namespaces []string) {
-	args := []string{"adm", "inspect", "--dest-dir=" + outDir}
-	for _, ns := range namespaces {
-		args = append(args, "namespace/"+ns)
+func (n *NamespaceInspect) runInspect(_ context.Context, _ *Config, outDir string, namespaces []string) {
+	args := make([]string, len(namespaces))
+	for i, ns := range namespaces {
+		args[i] = "namespace/" + ns
 	}
 
-	if since := os.Getenv("MUST_GATHER_SINCE"); since != "" {
-		args = append(args, "--since="+since)
-		log.Debug("Adding --since=%s to inspect command", since)
+	log.Info("Inspecting all namespaces: %s", strings.Join(namespaces, " "))
+
+	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
+	opts := inspect.NewInspectOptions(streams)
+	opts.DestDir = outDir
+
+	if err := opts.Complete(args); err != nil {
+		log.Warn("Failed to initialize namespace inspect: %v", err)
+		return
 	}
-	if sinceTime := os.Getenv("MUST_GATHER_SINCE_TIME"); sinceTime != "" {
-		args = append(args, "--since-time="+sinceTime)
-		log.Debug("Adding --since-time=%s to inspect command", sinceTime)
+	if err := opts.Validate(); err != nil {
+		log.Warn("Invalid namespace inspect options: %v", err)
+		return
 	}
-
-	timeout := exec.Timeout() * time.Duration(len(namespaces))
-	log.Debug("Using timeout: %s for %d namespace(s)", timeout, len(namespaces))
-
-	inspCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	log.Info("Inspecting all namespaces in a single command: %s", strings.Join(namespaces, " "))
-
-	cmd := osExec.CommandContext(inspCtx, "oc", args...)
-	cmd.Env = cfg.Env
-
-	logFile := filepath.Join(outDir, "inspect.log")
-	out, err := cmd.CombinedOutput()
-	_ = os.WriteFile(logFile, out, 0o644)
-	if err != nil {
-		log.Warn("Namespace inspect timed out or failed (timeout: %s)", timeout)
-		f, fErr := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
-		if fErr == nil {
-			_, _ = fmt.Fprintf(f, "\nInspection failed or timed out (%s for %d namespaces)\nTimestamp: %s\n",
-				timeout, len(namespaces), time.Now().Format(time.RFC3339))
-			_ = f.Close()
-		}
+	if err := opts.Run(); err != nil {
+		log.Warn("Namespace inspect completed with errors: %v", err)
 	} else {
 		log.Info("Completed inspection of all %d namespace(s)", len(namespaces))
 	}
