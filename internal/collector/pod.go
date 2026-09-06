@@ -214,14 +214,21 @@ func parseSections(output string) map[string]string {
 
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "===") && strings.HasSuffix(line, "===") {
-			if currentKey != "" {
-				sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+			key := strings.Trim(line, "= ")
+			// Only treat as a section boundary if the key looks like a
+			// top-level marker (ID, ENV, PACKAGES, …). Nested markers
+			// like ===FILE:/path=== contain ':' or '/' and must stay as
+			// content within their parent section.
+			if !strings.ContainsAny(key, ":/") {
+				if currentKey != "" {
+					sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+				}
+				currentKey = key
+				currentLines = nil
+				continue
 			}
-			currentKey = strings.Trim(line, "= ")
-			currentLines = nil
-		} else {
-			currentLines = append(currentLines, line)
 		}
+		currentLines = append(currentLines, line)
 	}
 	if currentKey != "" {
 		sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
