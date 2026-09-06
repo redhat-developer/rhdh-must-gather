@@ -5,10 +5,17 @@ import (
 	"os"
 	"path/filepath"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
+
+// setGVK populates kind/apiVersion on typed client-go objects, which
+// leave these fields empty after Get/List calls.
+func setGVK(obj interface{ GetObjectKind() schema.ObjectKind }, kind, apiVersion string) {
+	obj.GetObjectKind().SetGroupVersionKind(schema.FromAPIVersionAndKind(apiVersion, kind))
+}
 
 func writeResource(path string, obj any) {
 	data, err := yaml.Marshal(obj)
