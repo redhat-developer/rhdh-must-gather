@@ -64,11 +64,6 @@ func (o *Operator) gatherOLM(ctx context.Context, cfg *Config, outDir string) {
 		log.Warn("Failed to check OLM API: %v", err)
 		return
 	}
-	if !hasOLM {
-		log.Info("OLM not available, skipping OLM collection")
-		return
-	}
-
 	log.Info("Collecting OLM (Operator Lifecycle Manager) information...")
 	olmDir := filepath.Join(outDir, "olm")
 	_ = os.MkdirAll(olmDir, 0o755)
@@ -87,6 +82,15 @@ func (o *Operator) gatherOLM(ctx context.Context, cfg *Config, outDir string) {
 		{installPlanGVR, "installplans-all.txt", "InstallPlans", installPlanColumns, false},
 		{operatorGroupGVR, "operatorgroups-all.txt", "OperatorGroups", operatorGroupColumns, false},
 		{catalogSourceGVR, "catalogsources-all.txt", "CatalogSources", catalogSourceColumns, false},
+	}
+
+	if !hasOLM {
+		log.Info("\tOLM API (operators.coreos.com) not available on this cluster")
+		msg := "OLM API (operators.coreos.com) not available on this cluster\n"
+		for _, r := range resources {
+			_ = os.WriteFile(filepath.Join(olmDir, r.path), []byte(msg), 0o644)
+		}
+		return
 	}
 
 	for _, r := range resources {
@@ -127,6 +131,7 @@ func (o *Operator) gatherCRDs(ctx context.Context, cfg *Config, outDir string) {
 			continue
 		}
 		writeResource(filepath.Join(crdsDir, name+".yaml"), crd)
+		writeResource(filepath.Join(crdsDir, name+".describe.txt"), crd)
 	}
 }
 
@@ -260,6 +265,7 @@ func (o *Operator) gatherOperatorConfig(ctx context.Context, cfg *Config, ns, ns
 			continue
 		}
 		writeResource(filepath.Join(configsDir, name+".yaml"), cm)
+		writeResource(filepath.Join(configsDir, name+".describe.txt"), cm)
 	}
 }
 
@@ -289,6 +295,7 @@ func (o *Operator) gatherOperatorDeployments(ctx context.Context, cfg *Config, n
 	}
 	if len(opDeps.Items) > 0 {
 		writeResource(filepath.Join(depsDir, "app=rhdh-operator.yaml"), opDeps)
+		writeResource(filepath.Join(depsDir, "app=rhdh-operator.describe.txt"), opDeps)
 	}
 
 	for i := range opDeps.Items {
@@ -607,9 +614,8 @@ func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns st
 			}
 		}
 	}
-	if sb.Len() > 0 {
-		_ = os.WriteFile(path, []byte(sb.String()), 0o644)
-	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
 func podReadyContainers(pod *corev1.Pod) int {

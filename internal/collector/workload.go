@@ -288,6 +288,7 @@ func CollectNamespaceData(ctx context.Context, cfg *Config, ns, outDir string, w
 		for i := range cmList.Items {
 			cm := &cmList.Items[i]
 			writeResource(filepath.Join(cmDir, cm.Name+".yaml"), cm)
+			writeResource(filepath.Join(cmDir, cm.Name+".describe.txt"), cm)
 		}
 	}
 
