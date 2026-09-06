@@ -187,7 +187,7 @@ func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instan
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
+	cmd.Env = cfg.Env
 	if err := cmd.Run(); err != nil {
 		log.Warn("Heap dump collection failed for %s/%s: %v", ns, deployName, err)
 	}

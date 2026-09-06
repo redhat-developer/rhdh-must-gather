@@ -81,13 +81,13 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	}
 
 	collectorCfg := &collector.Config{
-		Client:           kubeClient,
-		BasePath:         basePath,
-		Interrupted:      &interrupted,
-		WithSecrets:      opts.withSecrets,
-		WithHeapDumps:    opts.withHeapDumps,
-		HeapDumpInstance: opts.heapDumpInstances,
-		ScriptDir:        scriptDir,
+		Client:        kubeClient,
+		BasePath:      basePath,
+		Interrupted:   &interrupted,
+		WithSecrets:   opts.withSecrets,
+		WithHeapDumps: opts.withHeapDumps,
+		ScriptDir:     scriptDir,
+		Env:           env,
 	}
 
 	scripts := buildScriptList(cmd, opts)
