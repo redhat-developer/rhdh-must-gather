@@ -14,7 +14,6 @@ type Config struct {
 	Interrupted   *atomic.Bool
 	WithSecrets   bool
 	WithHeapDumps bool
-	ScriptDir     string
 	Env           []string
 }
 
