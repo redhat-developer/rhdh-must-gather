@@ -42,7 +42,7 @@ if ${PREFETCH}; then
     . /cachi2/cachi2.env
     extract_clients "/cachi2/output/deps/generic/${TARBALL}"
 else
-    curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.21/${TARBALL}" \
+    curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.22.13/${TARBALL}" \
         -o "/tmp/${TARBALL}"
     extract_clients "/tmp/${TARBALL}"
     rm -f "/tmp/${TARBALL}"
