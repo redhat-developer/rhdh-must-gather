@@ -11,10 +11,8 @@ RHDH Must-Gather is a diagnostic data collection tool for Red Hat Developer Hub 
 ### Development and Testing
 ```bash
 make run-local              # Build and run the Go gather binary locally (requires cluster access)
-make run-local-bash         # Run the original bash orchestrator (for comparison)
-make test                   # Run BATS unit tests
-make go-test                # Run Go unit tests
-make go-lint                # Run Go linter (golangci-lint)
+make test                   # Run Go unit tests
+make lint                   # Run Go linter (golangci-lint)
 make test-e2e               # Run E2E tests in local mode against a K8s cluster
 make test-e2e LOCAL=false   # Run E2E tests using container image
 ```
@@ -50,13 +48,6 @@ The tool is a single Go binary that handles CLI parsing, Kubernetes API access, 
 - **`internal/exec/`** - Command execution utilities
 - **`internal/log/`** - Logging utilities
 
-### Legacy Collection Scripts (`collection-scripts/`)
-The original bash implementation is retained for comparison during the transition:
-- **`must_gather`** - Bash orchestrator
-- **`common.sh`** - Shared bash utilities
-- **`gather_*`** - Individual bash collectors
-- **`sanitize`** - Bash sanitization script
-
 ### Collection Flow
 1. Go binary parses CLI flags (`--namespaces`, `--with-secrets`, `--with-heap-dumps`, etc.)
 2. Runs each enabled collector sequentially using Go SDK clients
@@ -66,7 +57,6 @@ The original bash implementation is retained for comparison during the transitio
 
 ### Tests (`tests/`)
 - **Go unit tests**: `internal/**/*_test.go` - Go tests for collectors and utilities
-- **BATS unit tests**: `tests/*.bats` - Tests for legacy bash functions
 - **E2E tests**: `tests/e2e/` - Full cluster-based tests with Kind
   - `run-e2e-tests.sh` - Test runner
   - `validate-*.sh` - Validation scripts for different deployment types

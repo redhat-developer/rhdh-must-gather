@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - '**.sh'
-      - 'collection-scripts/**'
       - '.github/workflows/scripts-checks.yaml'
       - 'tests/e2e/**'
     branches:
@@ -45,7 +44,6 @@ jobs:
         with:
           files: |
             **.sh
-            collection-scripts/**
             .github/workflows/scripts-checks.yaml
             tests/e2e/**
       - id: ShellCheck

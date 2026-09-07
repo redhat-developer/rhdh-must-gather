@@ -16,46 +16,7 @@ permissions:
 
 jobs:
   unit-tests:
-    name: Unit Tests (BATS)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false # Critical: Do not store GITHUB_TOKEN in .git/config
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-        with:
-          files: |
-            collection-scripts/**
-            tests/**
-            Makefile
-            .github/workflows/test.yaml
-            hack/deploy-k8s.sh
-
-      - name: Install dependencies
-        if: steps.changed-files.outputs.any_changed == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq yq
-
-      - name: Run unit tests
-        if: steps.changed-files.outputs.any_changed == 'true'
-        run: make test
-
-      - name: Publish Test Report
-        uses: mikepenz/action-junit-report@v6
-        if: steps.changed-files.outputs.any_changed == 'true' && (success() || failure())
-        with:
-          report_paths: '**/test-results/*.xml'
-          annotate_only: ${{ github.event.pull_request.head.repo.full_name != github.repository }} # forked repo cannot write to checks so just do annotations
-
-  go-tests:
-    name: Go Tests
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -84,11 +45,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run Go tests
+      - name: Run tests
         if: steps.changed-files.outputs.any_changed == 'true'
-        run: make go-test
+        run: make test
 
-      - name: Run Go lint
+      - name: Run lint
         if: steps.changed-files.outputs.any_changed == 'true'
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
@@ -110,7 +71,6 @@ jobs:
         uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
         with:
           files: |
-            collection-scripts/**
             tests/**
             Makefile
             .github/workflows/test.yaml
@@ -128,7 +88,6 @@ jobs:
           # Install yq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
-          # oc, websocat no longer needed — Go binary handles inspect and websockets natively
 
       - name: Set up Go
         if: steps.changed-files.outputs.any_changed == 'true'
