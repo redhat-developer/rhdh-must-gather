@@ -4,7 +4,6 @@
 VERSION ?= 2.1.0
 GIT_SHA := $(shell git describe --no-match --always --abbrev=9 --dirty --broken 2>/dev/null || echo unknown)
 RHDH_MUST_GATHER_VERSION := $(VERSION)-$(GIT_SHA)
-SCRIPT ?=
 REGISTRY ?= quay.io
 IMAGE_NAME ?= rhdh-community/rhdh-must-gather
 IMAGE_TAG ?= latest
@@ -36,33 +35,6 @@ TEST_RESULTS_DIR ?= ./test-results
 TESTS_OPTIONS ?= --timing --print-output-on-failure --report-formatter junit --output "$(TEST_RESULTS_DIR)"
 TESTS_DIR := ./tests
 
-# Local tools configuration
-# renovate: datasource=pypi depName=yq
-YQ_VERSION := 3.4.2
-YQ_VENV := $(TOOLS_DIR)/yq-venv
-YQ_BIN := $(YQ_VENV)/bin/yq
-
-# Host platform (must be defined before HELM_ARCHIVE_DIR / WEBSOCAT_ARCH)
-OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-
-# latest at https://github.com/helm/helm/releases
-# if version set below is available as a binary in CGW, update the helm-lockfile via: make helm-lockfile-update
-# if version set below is not available as a binary in CGW, vendor the helm source via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
-HELM_VERSION := 4.2.3
-HELM_ARCHIVE_DIR := $(TOOLS_DIR)/helm-$(HELM_VERSION)-$(OS)-$(ARCH)
-HELM_BIN_DL := $(HELM_ARCHIVE_DIR)/helm
-HELM_BIN := $(TOOLS_DIR)/helm
-
-WEBSOCAT_VERSION := 1.14.1
-WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
-WEBSOCAT_BIN_DL := $(WEBSOCAT_ARCHIVE_DIR)/websocat
-WEBSOCAT_BIN := $(TOOLS_DIR)/websocat
-
-# websocat uses different naming: x86_64-unknown-linux-musl, x86_64-apple-darwin, aarch64-apple-darwin
-# Note: Apple Silicon returns 'arm64' but websocat uses 'aarch64'
-WEBSOCAT_ARCH := $(shell uname -m | sed 's/arm64/aarch64/')-$(if $(filter darwin,$(OS)),apple-darwin,unknown-linux-musl)
-
 default: run-local
 
 ##@ Development
@@ -71,60 +43,25 @@ default: run-local
 local-output:
 	@mkdir -p ./out
 
-.PHONY: local-setup
-local-setup: $(YQ_BIN) $(HELM_BIN_DL) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, helm, websocat)
-
 .PHONY: run-local
-run-local: local-output local-setup go-build ## Test the script locally (requires jq, kubectl, oc and cluster access)
-	@echo "Testing must-gather script locally..."
-	@if ! command -v kubectl >/dev/null 2>&1; then \
-		echo "Error: kubectl not found. Please install kubectl to test."; \
-		exit 1; \
-	fi
-	@echo "Running local test (requires cluster access)..."
-	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
-		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
+run-local: local-output go-build ## Run the Go gather binary locally (requires cluster access)
+	@echo "Running must-gather locally..."
+	BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
 		$(GO_BIN) $(OPTS)
 
 .PHONY: run-local-bash
-run-local-bash: local-output local-setup ## Test using the original bash orchestrator (for comparison)
+run-local-bash: local-output ## Test using the original bash orchestrator (for comparison)
 	@echo "Testing must-gather script locally (bash)..."
 	@if ! command -v kubectl >/dev/null 2>&1; then \
 		echo "Error: kubectl not found. Please install kubectl to test."; \
 		exit 1; \
 	fi
-	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
-		BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
+	BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
 		./collection-scripts/must_gather $(OPTS)
-
-.PHONY: run-script
-run-script: local-output local-setup ## Test the specified gather-<SCRIPT> script (set the SCRIPT var)
-	@if [ -z "$(SCRIPT)" ]; then \
-		echo "Error: SCRIPT variable is not set. Please set the SCRIPT variable to the name of the script to test. It will then run ./collection-scripts/gather_<SCRIPT>"; \
-		exit 1; \
-	fi
-	@echo "Testing gather-${SCRIPT} must-gather script locally..."
-	@echo "Running local test (requires cluster access)..."
-	PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
-		BASE_COLLECTION_PATH=./out \
-		LOG_LEVEL=$(LOG_LEVEL)\
-		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
-		./collection-scripts/gather_${SCRIPT} $(OPTS)
-
-# TODO(asoro): Consider adding this back. It currently fails due to permission issues inside the container.
-# .PHONY: run-container
-# run-container: image-build local-output ## Test using container (requires podman)
-# 	@echo "Testing must-gather in container..."
-# 	podman run --rm \
-# 		-v $(HOME)/.kube:/home/must-gather/.kube:ro \
-# 		-v $(PWD)/out:/must-gather \
-# 		-e LOG_LEVEL=$(LOG_LEVEL) \
-# 		$(IMAGE_NAME):$(IMAGE_TAG) \
-# 		$(OPTS)
 
 .PHONY: test-results
 test-results:
@@ -151,18 +88,16 @@ LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
 HEAP_DUMP_METHOD ?= ## Heap dump method: 'inspector' (default) or 'sigusr2'
 .PHONY: test-e2e
-test-e2e: local-setup ## Run E2E tests against a K8s cluster (requires Kind or similar)
+test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
-	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
-		./tests/e2e/run-e2e-tests.sh --local \
+	@./tests/e2e/run-e2e-tests.sh --local \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 else
 	@echo "Running E2E tests with image: $(FULL_IMAGE_NAME)..."
-	@PATH="$(abspath $(YQ_VENV)/bin):$(abspath $(TOOLS_DIR)):$$PATH" \
-		./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
+	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
 		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
 		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
@@ -175,68 +110,6 @@ endif
 .PHONY: $(TOOLS_DIR)
 $(TOOLS_DIR):
 	@mkdir -p "$(TOOLS_DIR)"
-
-$(YQ_BIN): $(TOOLS_DIR)
-	@if [ ! -f "$(YQ_BIN)" ]; then \
-		echo "Installing yq (kislyuk/yq) via pip..."; \
-		python3 -m venv "$(YQ_VENV)"; \
-		"$(YQ_VENV)/bin/pip" install --quiet "yq==$(YQ_VERSION)"; \
-		echo "yq installed successfully: $$($(YQ_BIN) --version)"; \
-	else \
-		echo "yq already installed: $(YQ_BIN)"; \
-	fi
-
-.PHONY: $(HELM_BIN_DL)
-$(HELM_BIN_DL): $(TOOLS_DIR)
-	@mkdir -p "$(HELM_ARCHIVE_DIR)"
-	@if [ ! -f "$(HELM_BIN_DL)" ]; then \
-		./hack/install-helm-local.sh "$(HELM_VERSION)" "$(HELM_BIN_DL)" "$(OS)" "$(ARCH)"; \
-	else \
-		echo "helm $(HELM_VERSION) already installed: $(HELM_BIN_DL)"; \
-	fi
-	@ln -sf "$(shell echo $(HELM_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(HELM_BIN)"
-	@"$(HELM_BIN)" version --short
-
-.PHONY: $(WEBSOCAT_BIN_DL)
-$(WEBSOCAT_BIN_DL): $(TOOLS_DIR)
-	@mkdir -p "$(WEBSOCAT_ARCHIVE_DIR)"
-	@if [ ! -f "$(WEBSOCAT_BIN_DL)" ]; then \
-		echo "Downloading websocat v$(WEBSOCAT_VERSION) for $(WEBSOCAT_ARCH)..."; \
-		curl -sSL "https://github.com/vi/websocat/releases/download/v$(WEBSOCAT_VERSION)/websocat.$(WEBSOCAT_ARCH)" -o "$(WEBSOCAT_BIN_DL)"; \
-		chmod +x "$(WEBSOCAT_BIN_DL)"; \
-		echo "websocat installed successfully: $$($(WEBSOCAT_BIN_DL) --version)"; \
-	else \
-		echo "websocat $(WEBSOCAT_VERSION) already installed: $(WEBSOCAT_BIN_DL)"; \
-	fi
-	@ln -sf "$(shell echo $(WEBSOCAT_BIN_DL) | sed 's|$(TOOLS_DIR)/||')" "$(WEBSOCAT_BIN)"
-	@"$(WEBSOCAT_BIN)" --version
-
-VENDOR_NAME ?= ## Vendor name for vendor-update (e.g., websocat)
-VENDOR_VERSION ?= ## Vendor version for vendor-update (e.g., v1.14.1)
-
-.PHONY: vendor
-vendor: ## Sync vendored sources; refresh Helm CGW lockfile or vendor helm source
-	@if ./hack/check-helm-binary-available.sh "$(HELM_VERSION)"; then \
-		./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"; \
-	else \
-		echo "CGW mirror has no helm v$(HELM_VERSION) binaries; vendoring helm source instead..."; \
-		./hack/update-vendor.sh helm "v$(HELM_VERSION)"; \
-	fi
-	./hack/update-vendor.sh websocat "v$(WEBSOCAT_VERSION)"
-
-.PHONY: helm-lockfile-update
-helm-lockfile-update: ## Refresh artifacts.lock.yaml for Helm CGW binaries (HELM_VERSION from Makefile)
-	./hack/update-helm-lockfile.sh "v$(HELM_VERSION)"
-
-.PHONY: vendor-update
-vendor-update: ## Sync a single vendored subtree to a specific version (VENDOR_NAME, VENDOR_VERSION required)
-	@if [ -z "$(VENDOR_NAME)" ] || [ -z "$(VENDOR_VERSION)" ]; then \
-		echo "Error: VENDOR_NAME and VENDOR_VERSION are required."; \
-		echo "Usage: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1"; \
-		echo "       make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v4.2.3"; \
-		exit 1; \
-	fi
-	./hack/update-vendor.sh "$(VENDOR_NAME)" "$(VENDOR_VERSION)"
 
 ##@ Go
 
@@ -311,17 +184,6 @@ clean: clean-out ## Remove built images and test output
 
 ##@ General
 
-# The help target prints out all targets with their descriptions organized
-# beneath their categories. The categories are represented by '##@' and the
-# target descriptions by '##'. The awk command is responsible for reading the
-# entire set of makefiles included in this invocation, looking for lines of the
-# file as xyz: ## something, and then pretty-format the target and help. Then,
-# if there's a line with ##@ something, that gets pretty-printed as a category.
-# More info on the usage of ANSI control characters for terminal formatting:
-# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
-# More info on the awk command:
-# http://linuxcommand.org/lc3_adv_awk.php
-
 .PHONY: help
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -343,10 +205,6 @@ help: ## Display this help.
 	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
 	@echo "  HELM_VALUES_FILE		- Override Helm values file for test-e2e"
 	@echo "  LOCAL				- Set to 'false' to run test-e2e with container image (default: true, local mode)"
-	@echo "  SCRIPT			- Script name for run-script"
-	@echo "  TOOLS_DIR			- Directory for local tools like websocat and yq (default: $(TOOLS_DIR))"
-	@echo "  VENDOR_NAME			- Vendor name for vendor-update (e.g., websocat)"
-	@echo "  VENDOR_VERSION		- Vendor version for vendor-update (e.g., v1.14.1)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make test                                          # Run all unit tests"
@@ -355,5 +213,4 @@ help: ## Display this help.
 	@echo "  make deploy-k8s OPTS=\"--with-heap-dumps\"           # Run deploy-k8s with heap dumps"
 	@echo "  make deploy-k8s NAMESPACE=my-ns                    # Run deploy-k8s in a specific namespace"
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
-# @echo "  make run-container OPTS=\"--with-secrets --with-heap-dumps\""
 	@echo "  make deploy-openshift OPTS=\"--with-heap-dumps --namespaces my-ns\""
