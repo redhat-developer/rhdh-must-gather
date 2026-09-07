@@ -10,9 +10,11 @@ RHDH Must-Gather is a diagnostic data collection tool for Red Hat Developer Hub 
 
 ### Development and Testing
 ```bash
-make run-local              # Run collection locally (requires kubectl/oc, helm, jq, yq, cluster access)
-make run-script SCRIPT=helm # Test a specific gather_* script (e.g., helm, operator, orchestrator)
+make run-local              # Build and run the Go gather binary locally (requires cluster access)
+make run-local-bash         # Run the original bash orchestrator (for comparison)
 make test                   # Run BATS unit tests
+make go-test                # Run Go unit tests
+make go-lint                # Run Go linter (golangci-lint)
 make test-e2e               # Run E2E tests in local mode against a K8s cluster
 make test-e2e LOCAL=false   # Run E2E tests using container image
 ```
@@ -38,21 +40,33 @@ make clean-out              # Remove only the local output directory (./out)
 
 ## Architecture
 
-### Collection Scripts (`collection-scripts/`)
-- **`must_gather`** - Main orchestrator; parses flags, runs collectors in sequence, triggers sanitization on exit
-- **`common.sh`** - Shared utilities: logging, namespace filtering, `safe_exec()` for timeout-wrapped commands, `collect_rhdh_workload()` for app workload collection, `collect_rhdh_db_statefulset()` for database collection
-- **`gather_*`** - Individual collectors (helm, operator, orchestrator, platform, route, ingress, namespace-inspect, cluster-info)
-- **`sanitize`** - Post-collection data sanitization (secrets, tokens, SSH keys, passwords)
-- **`logs.sh`** - Collects must-gather container logs when running in a pod
+### Go Binary (`cmd/gather/`, `internal/`)
+The tool is a single Go binary that handles CLI parsing, Kubernetes API access, Helm SDK integration, and all collection logic natively. No external tools (kubectl, oc, helm, jq, yq, websocat) are needed at runtime.
+
+- **`cmd/gather/main.go`** - Entry point
+- **`internal/cli/`** - Cobra CLI, flag parsing, orchestration
+- **`internal/collector/`** - Individual collectors (helm, operator, orchestrator, platform, route, ingress, namespace-inspect, cluster-info)
+- **`internal/sanitize/`** - Post-collection data sanitization
+- **`internal/exec/`** - Command execution utilities
+- **`internal/log/`** - Logging utilities
+
+### Legacy Collection Scripts (`collection-scripts/`)
+The original bash implementation is retained for comparison during the transition:
+- **`must_gather`** - Bash orchestrator
+- **`common.sh`** - Shared bash utilities
+- **`gather_*`** - Individual bash collectors
+- **`sanitize`** - Bash sanitization script
 
 ### Collection Flow
-1. `must_gather` parses CLI flags and exports env vars (`RHDH_TARGET_NAMESPACES`, `RHDH_WITH_SECRETS`, `RHDH_WITH_HEAP_DUMPS`)
-2. Runs each enabled `gather_*` script sequentially
-3. On exit (success or interrupt), runs `sanitize` to redact sensitive data
+1. Go binary parses CLI flags (`--namespaces`, `--with-secrets`, `--with-heap-dumps`, etc.)
+2. Runs each enabled collector sequentially using Go SDK clients
+3. On exit (success or interrupt), runs sanitization to redact sensitive data
 4. Outputs to `BASE_COLLECTION_PATH` (default: `/must-gather` in container, `./out` locally)
+5. Namespace inspection uses the `openshift/oc` inspect library for OMC-compatible output
 
 ### Tests (`tests/`)
-- **Unit tests**: `tests/*.bats` - BATS tests for shell functions (use `tests/test_helper.bash` for setup)
+- **Go unit tests**: `internal/**/*_test.go` - Go tests for collectors and utilities
+- **BATS unit tests**: `tests/*.bats` - Tests for legacy bash functions
 - **E2E tests**: `tests/e2e/` - Full cluster-based tests with Kind
   - `run-e2e-tests.sh` - Test runner
   - `validate-*.sh` - Validation scripts for different deployment types
@@ -60,26 +74,11 @@ make clean-out              # Remove only the local output directory (./out)
 ## Key Patterns
 
 ### Adding a New Collector
-1. Create `collection-scripts/gather_<name>` (executable, no extension)
-2. Source `common.sh` for utilities
-3. Add to `mandatory_scripts` array in `must_gather` if it should run by default
-4. Use `safe_exec` for all external commands (provides timeout and error handling)
-5. Respect `RHDH_TARGET_NAMESPACES` via `should_include_namespace()` and `get_namespace_args()`
-6. Respect `RHDH_WITH_SECRETS` when collecting secrets
-
-### Safe Command Execution
-Always use `safe_exec` for kubectl/helm commands — never use bare `timeout`/`kubectl` calls. `safe_exec` provides timeout handling, `RHDH_INTERRUPTED` (Ctrl-C) checking, and detailed error reporting to the output file on failure.
-```bash
-safe_exec "$KUBECTL_CMD -n '$ns' get pods -o yaml" "$output_dir/pods.yaml" "Description"
-```
-
-### Namespace Filtering
-```bash
-if ! should_include_namespace "$ns"; then
-    log_debug "Skipping namespace $ns"
-    continue
-fi
-```
+1. Create a new Go type implementing the collector interface in `internal/collector/`
+2. Register it in the orchestrator's collector list in `internal/cli/gather.go`
+3. Use the Kubernetes client-go SDK for API access (no shell-outs)
+4. Respect `Config.TargetNamespaces` for namespace filtering
+5. Respect `Config.WithSecrets` when collecting secrets
 
 ### PR Workflow Path Filtering
 Workflows triggered by `pull_request` must **not** use `on.pull_request.paths` filtering — it prevents the workflow from firing at all, which blocks required status checks. Instead, always trigger the workflow and use `tj-actions/changed-files` as a step inside each job to gate subsequent steps:
@@ -106,39 +105,9 @@ jobs:
 ```
 For workflows with both `push` (path-filtered) and `pull_request` triggers, gate the changed-files step and subsequent steps with `github.event_name == 'pull_request'` / `github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'`.
 
-## Vendored Dependencies
+## Downstream (Konflux) Build
 
-This project is built downstream via Konflux with hermetic builds (no network access during `docker build`). All build-time dependencies must be available locally in the repo or installable from vendored sources.
-
-### What's vendored and why
-- **helm** — prebuilt Linux binaries from the [Red Hat CGW mirror](https://mirror.openshift.com/pub/cgw/helm/) (`artifacts.lock.yaml` + Hermeto generic fetcher for Konflux; curl in upstream Containerfile). Not vendored as source when CGW publishes the version; `make local-setup` and `make vendor` fall back to `vendor/helm` when the mirror tarball is missing.
-- **websocat** — vendored as a Git subtree under `vendor/websocat/` and built from Rust source in a multi-stage Containerfile. Not available as an RPM, and pre-built binary downloads are incompatible with hermetic build requirements.
-- **yq** ([kislyuk/yq](https://github.com/kislyuk/yq)) — installed via `pip` in the Containerfile. It is a thin Python wrapper around jq for YAML processing, so vendoring is not needed — pip can install from a pre-fetched package index in hermetic mode.
-
-### Updating vendored dependencies
-Sync all vendored subtrees to the versions declared in the Makefile:
-```bash
-make vendor
-```
-To update a specific dependency to a new version (also bumps the version in the Makefile and Containerfile):
-```bash
-make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v1.14.1
-make helm-lockfile-update   # refresh artifacts.lock.yaml when HELM_VERSION changes
-```
-A weekly GitHub Actions workflow (`vendor-update.yaml`) checks for new releases and auto-creates PRs.
-
-### Adding a new vendored dependency
-1. Add a `case` entry in `hack/update-vendor.sh` mapping the name to its Git repo URL
-2. Add a `prune_<name>()` function to strip non-essential files after subtree sync
-3. Add a builder stage in the Containerfile to compile from source
-4. Add the dependency to the `vendor-update.yaml` workflow matrix
-5. Add a `<NAME>_VERSION` variable to the Makefile and a sync line in the `vendor` target
-
-### Script portability
-Scripts in `hack/` must work on both Linux and macOS:
-- No Bash 4+ features (e.g., `declare -A` associative arrays) — use `case` statements instead
-- Use `sed -i.bak '...' file && rm -f file.bak` instead of `sed -i '...'` (GNU vs BSD incompatibility)
-- Use `cp -pPR` instead of `cp -a` (`-a` is GNU-specific)
+The downstream build uses Konflux with hermetic builds (no network access during `docker build`). The downstream Containerfile is at `.rhdh/docker/Containerfile` and uses cachi2 gomod prefetch for Go module dependencies and rpm prefetch for system packages. All dependencies are Go modules — no vendored binaries, pip packages, or external tools are needed.
 
 ## Commit Guidelines
 
