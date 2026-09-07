@@ -7,10 +7,11 @@ COPY go.mod go.sum /opt/app-root/src/
 COPY cmd/ /opt/app-root/src/cmd/
 COPY internal/ /opt/app-root/src/internal/
 WORKDIR /opt/app-root/src
+ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     CGO_ENABLED=0 go build -trimpath \
-        -ldflags "-X 'github.com/redhat-developer/rhdh-must-gather/internal/cli.version=${RHDH_MUST_GATHER_VERSION:-0.0.0-unknown}'" \
+        -ldflags "-X 'github.com/redhat-developer/rhdh-must-gather/internal/cli.version=${RHDH_MUST_GATHER_VERSION}'" \
         -o /tmp/gather ./cmd/gather
 
 # Stage 2: Final image
