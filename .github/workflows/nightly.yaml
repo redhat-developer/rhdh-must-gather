@@ -10,16 +10,32 @@ permissions:
 
 jobs:
   e2e-tests:
-    name: Nightly E2E Tests
+    name: Nightly E2E Tests (${{ matrix.branch }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - main
+          - release-1.10
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ matrix.branch }}
           fetch-depth: 0
-
+      
+      - name: Set branch test variables
+        run: | 
+          branch="${{ matrix.branch }}"
+          echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
+          if [ "$branch" = "main" ]; then 
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=latest-${branch#release-}" >> "$GITHUB_ENV"
+          fi
+        
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -35,7 +51,12 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests
-        run: make test-e2e LOCAL=false HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+        run: >
+          make test-e2e
+          LOCAL=false
+          TARGET_BRANCH=${{ env.TARGET_BRANCH }}
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
@@ -46,7 +67,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: e2e-must-gather-output-nightly
+          name: e2e-must-gather-output-nightly-${{ matrix.branch }}
           path: e2e-cluster.mustgather.tar.gz
           retention-days: 7
 
@@ -54,7 +75,7 @@ jobs:
         if: ${{ success() || failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: must-gather-output-nightly
+          name: must-gather-output-nightly-${{ matrix.branch }}
           path: |
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/
@@ -67,13 +88,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        branch: 
+          - main
+          - release-1.10
         method: [auto, inspector, sigusr2]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ matrix.branch }}
           fetch-depth: 0
+
+      - name: Set branch test variables
+        run: | 
+          branch="${{ matrix.branch }}"
+          echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
+          if [ "$branch" = "main" ]; then
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=latest-${branch#release-}" >> "$GITHUB_ENV"
+          fi
 
       - name: Install dependencies
         run: |
@@ -92,10 +127,16 @@ jobs:
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
-            # Auto: let the tool use its built-in default method (inspector)
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
+            TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
+            IMAGE_TAG=${{ env.IMAGE_TAG }} \
+            HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
+              HEAP_DUMP_METHOD=${{ matrix.method }} \
+              TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
+              IMAGE_TAG=${{ env.IMAGE_TAG }} \
+              HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           fi
 
       - name: Display must-gather process logs
@@ -107,7 +148,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: e2e-must-gather-output-heap-dumps-${{ matrix.method }}-nightly
+          name: e2e-must-gather-output-heap-dumps-${{ matrix.method }}-${{ matrix.branch }}-nightly
           path: e2e-cluster.mustgather.tar.gz
           retention-days: 7
 
@@ -115,7 +156,7 @@ jobs:
         if: ${{ success() || failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: must-gather-output-heap-dumps-${{ matrix.method }}-nightly
+          name: must-gather-output-heap-dumps-${{ matrix.branch }}-${{ matrix.method }}-nightly
           path: |
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/
