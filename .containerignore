@@ -23,11 +23,17 @@ test/
 tests/
 *_test.sh
 
-# Vendored source: exclude non-essential files to reduce build context
-vendor/*/docs/
-vendor/*/.github/
-vendor/*/examples/
-vendor/*/*.md
+# Vendored source (not needed in container build)
+vendor/
+
+# Collection scripts (Go binary has all logic built in)
+collection-scripts/
+
+# Build tooling not needed in container
+hack/
+artifacts.lock.yaml
+requirements.txt
+requirements-build.txt
 
 # Go build artifacts
 bin/gather
