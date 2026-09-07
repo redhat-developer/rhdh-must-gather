@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/hi/rust
-FROM registry.access.redhat.com/hi/rust:1.98.0-builder@sha256:fadaa572dcdbe2fbd96b55428a509834f670f299424ba321bedb037beab3508a AS websocat-builder
+FROM registry.access.redhat.com/hi/rust:1.98.0-builder@sha256:ab3a6a0e1883880499934c6ac4acf7df3522c8ce6b35e300fc7a37c5c9260c5f AS websocat-builder
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
 RUN cargo build --release \
