@@ -1,5 +1,5 @@
 # after editing, run (https://github.com/konflux-ci/rpm-lockfile-prototype):
-#   rpm-lockfile-prototype -f Containerfile rpms.in.yaml
+#   rpm-lockfile-prototype -f .rhdh/docker/Containerfile rpms.in.yaml
 # to regen rpms.lock.yaml
 # Note that the repoid values are special, and must be from here:
 # https://github.com/release-engineering/rhtap-ec-policy/blob/main/data/known_rpm_repositories.yml
@@ -9,10 +9,6 @@ arches:
 allowerasing: true
 contentOrigin:
   repos:
-    - repoid: ubi-10-for-$basearch-appstream-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/appstream/os/
-    - repoid: ubi-10-for-$basearch-appstream-source-rpms
-      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/appstream/source/SRPMS
     - repoid: ubi-10-for-$basearch-baseos-rpms
       baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/$basearch/baseos/os/
     - repoid: ubi-10-for-$basearch-baseos-source-rpms
@@ -20,18 +16,7 @@ contentOrigin:
 
 # New installs beyond base image
 packages:
-  - findutils
-  - gzip
-  - jq
-  - python3
-  - python3-pip
   - rsync
-  - sed
   - shadow-utils
   - tar
   - util-linux
-
-# Already on ubi10-minimal but listed in Containerfile microdnf lines; reinstall forces lockfile entries.
-reinstallPackages:
-  - bash
-  - grep
