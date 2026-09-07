@@ -31,7 +31,7 @@ TESTS_DIR := ./tests
 
 # Local tools configuration
 # renovate: datasource=pypi depName=yq
-YQ_VERSION := 3.4.3
+YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
 
