@@ -16,6 +16,7 @@ contentOrigin:
 
 # New installs beyond base image
 packages:
+  - openssl
   - rsync
   - shadow-utils
   - tar
