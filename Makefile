@@ -27,13 +27,6 @@ GO_BUILD_FLAGS ?= -trimpath -mod=mod
 GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)'
 GO_BIN := $(TOOLS_DIR)/gather
 
-# Test configuration
-BATS_VERSION := 1.13.0
-BATS_CORE_URL := https://github.com/bats-core/bats-core/archive/refs/tags/v$(BATS_VERSION).tar.gz
-BATS_BIN := $(TOOLS_DIR)/bats-core-$(BATS_VERSION)/bin/bats
-TEST_RESULTS_DIR ?= ./test-results
-TESTS_OPTIONS ?= --timing --print-output-on-failure --report-formatter junit --output "$(TEST_RESULTS_DIR)"
-TESTS_DIR := ./tests
 
 default: run-local
 
@@ -50,39 +43,6 @@ run-local: local-output go-build ## Run the Go gather binary locally (requires c
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
 		$(GO_BIN) $(OPTS)
-
-.PHONY: run-local-bash
-run-local-bash: local-output ## Test using the original bash orchestrator (for comparison)
-	@echo "Testing must-gather script locally (bash)..."
-	@if ! command -v kubectl >/dev/null 2>&1; then \
-		echo "Error: kubectl not found. Please install kubectl to test."; \
-		exit 1; \
-	fi
-	BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
-		LOG_LEVEL=$(LOG_LEVEL) \
-		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
-		./collection-scripts/must_gather $(OPTS)
-
-.PHONY: test-results
-test-results:
-	@mkdir -p $(TEST_RESULTS_DIR)
-
-.PHONY: test-setup
-test-setup: test-results ## Download and setup the unit testing framework (BATS)
-	@echo "Setting up BATS testing framework..."
-	@if [ ! -d "$(TOOLS_DIR)/bats-core-$(BATS_VERSION)" ]; then \
-		echo "Downloading BATS v$(BATS_VERSION)..."; \
-		mkdir -p "$(TOOLS_DIR)/bats-core-$(BATS_VERSION)"; \
-		curl -sL $(BATS_CORE_URL) | tar xz -C "$(TOOLS_DIR)/bats-core-$(BATS_VERSION)" --strip-components=1; \
-		echo "BATS installed successfully"; \
-	else \
-		echo "BATS $(BATS_VERSION) already installed: $(TOOLS_DIR)/bats-core-$(BATS_VERSION)"; \
-	fi
-
-.PHONY: test
-test: test-setup ## Run all unit tests
-	@echo "Running BATS unit tests..."
-	@$(BATS_BIN) $(TESTS_OPTIONS) $(TESTS_DIR)/*.bats
 
 LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of local mode
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
@@ -117,12 +77,12 @@ $(TOOLS_DIR):
 go-build: $(TOOLS_DIR) ## Build the Go gather binary
 	$(GO) build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(GO_BIN) ./cmd/gather
 
-.PHONY: go-test
-go-test: ## Run Go unit tests
+.PHONY: test
+test: ## Run unit tests
 	$(GO) test -mod=mod ./... -v -count=1
 
-.PHONY: go-lint
-go-lint: ## Run Go linter (golangci-lint)
+.PHONY: lint
+lint: ## Run linter (golangci-lint)
 	golangci-lint run ./...
 
 ##@ Build
