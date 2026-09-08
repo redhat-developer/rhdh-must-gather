@@ -25,9 +25,10 @@ LABEL name="rhdh-must-gather" \
       description="Collects diagnostic information from RHDH deployments on Kubernetes and OpenShift clusters"
 
 # Install minimal runtime dependencies:
-# tar, rsync: required by `oc adm must-gather` to copy output from the pod
+# tar, gzip, rsync: required by `oc adm must-gather` to copy/compress output from the pod
 # util-linux: provides setsid (required by `oc adm must-gather`)
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs \
+    gzip \
     tar \
     util-linux \
     rsync \

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
@@ -29,7 +28,7 @@ type Result struct {
 	ItemsSanitized int
 }
 
-func Run(dir string, interrupted *atomic.Bool) Result {
+func Run(dir string, interruptCh <-chan struct{}) Result {
 	log.Info("Starting data sanitization on directory: %s", dir)
 
 	if _, err := os.Stat(dir); err != nil {
@@ -42,8 +41,13 @@ func Run(dir string, interrupted *atomic.Bool) Result {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if interrupted != nil && interrupted.Load() {
-			return filepath.SkipAll
+		if interruptCh != nil {
+			select {
+			case <-interruptCh:
+				log.Warn("Sanitization interrupted, stopping walk")
+				return filepath.SkipAll
+			default:
+			}
 		}
 		ext := strings.ToLower(filepath.Ext(path))
 		switch ext {

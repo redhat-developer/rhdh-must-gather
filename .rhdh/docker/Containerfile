@@ -21,7 +21,7 @@ FROM registry.access.redhat.com/ubi10-minimal:10.2-1788940913@sha256:26dc3089ab2
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 
 # Install minimal runtime dependencies:
-# tar, rsync: required by `oc adm must-gather` to copy output from the pod
+# tar, gzip, rsync: required by `oc adm must-gather` to copy/compress output from the pod
 # util-linux: provides setsid (required by `oc adm must-gather`)
 RUN set -eu; \
     . /cachi2/cachi2.env; \
@@ -41,6 +41,7 @@ RUN set -eu; \
     fi; \
     test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs \
+      gzip \
       tar \
       util-linux \
       rsync \

@@ -497,7 +497,8 @@ func filterSecretsFromYAML(input string) string {
 			break
 		}
 		if err != nil {
-			return input
+			log.Warn("Failed to decode YAML document, redacting entire content for safety")
+			return ""
 		}
 		if isSecretDocument(&node) {
 			continue
@@ -506,7 +507,8 @@ func filterSecretsFromYAML(input string) string {
 			buf.WriteString("---\n")
 		}
 		if err := encoder.Encode(&node); err != nil {
-			return input
+			log.Warn("Failed to re-encode YAML document, redacting entire content for safety")
+			return ""
 		}
 		first = false
 	}

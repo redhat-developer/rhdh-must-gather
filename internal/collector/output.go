@@ -249,7 +249,7 @@ func listResourceNames(ctx context.Context, cfg *Config, gk schema.GroupKind, na
 }
 
 func writeCollectError(path, description string, err error) {
-	content := fmt.Sprintf("Command failed: %s\n\n=== Error Details ===\n%s\n", description, err)
+	content := fmt.Sprintf("Command failed or timed out: %s\n\n=== Error Details ===\n%s\n", description, err)
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, []byte(content), 0o644)
 	log.Warn("\tFailed: %s — %v", description, err)

@@ -173,12 +173,14 @@ func streamAndSaveLogs(ctx context.Context, client kubernetes.Interface, ns, pod
 	}
 	defer func() { _ = stream.Close() }()
 
-	data, err := io.ReadAll(stream)
+	f, err := os.Create(outPath)
 	if err != nil {
-		_ = os.WriteFile(outPath, []byte(fmt.Sprintf("Failed to read logs: %v\n", err)), 0o644)
 		return
 	}
-	_ = os.WriteFile(outPath, data, 0o644)
+	defer func() { _ = f.Close() }()
+	if _, err := io.Copy(f, stream); err != nil {
+		log.Warn("Failed to stream logs to %s: %v", outPath, err)
+	}
 }
 
 func execInPod(ctx context.Context, config *rest.Config, client kubernetes.Interface, ns, podName, container, script string) (string, error) {
