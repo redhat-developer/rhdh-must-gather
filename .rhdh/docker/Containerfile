@@ -4,7 +4,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/hi/rust
-FROM registry.access.redhat.com/hi/rust:1.98.0-builder@sha256:ab3a6a0e1883880499934c6ac4acf7df3522c8ce6b35e300fc7a37c5c9260c5f AS websocat-builder
+FROM registry.access.redhat.com/hi/rust:1.98.0-1788737889@sha256:cd252409cc2dd0805808f8d4c80030c4ba8d68b9dd69ecc6df321df3b987016f AS websocat-builder
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
 RUN set -eu; \
@@ -47,7 +47,7 @@ RUN set -eu; \
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
 # update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi10/go-toolset
-# FROM registry.access.redhat.com/ubi10/go-toolset:1.26.5-1786496329@sha256:1db86a2b0f77c1197b011de5140236effc27b1a1724c0105d4926857a0756de5 AS helm-builder
+# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788411200@sha256:be70aa468168f1ecd46e56d5f362e697243bcf9d3a2d98819597e43471a5d0e4 AS helm-builder
 # COPY Makefile /tmp/Makefile
 # COPY vendor/helm /opt/app-root/src/helm
 # WORKDIR /opt/app-root/src/helm
