@@ -1,9 +1,9 @@
 package collector
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -589,7 +589,15 @@ func writeDeploymentSummaryTable(path string, deps []deploymentSummary) {
 }
 
 func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns string, pods []corev1.Pod, previous bool, path string) {
-	var sb strings.Builder
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	w := bufio.NewWriter(f)
+	defer func() { _ = w.Flush() }()
+
 	for i := range pods {
 		pod := &pods[i]
 		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
@@ -602,20 +610,19 @@ func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns st
 			if err != nil {
 				continue
 			}
-			data, _ := io.ReadAll(stream)
-			_ = stream.Close()
 			prefix := fmt.Sprintf("[pod/%s/%s] ", pod.Name, c.Name)
-			for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			scanner := bufio.NewScanner(stream)
+			for scanner.Scan() {
+				line := scanner.Text()
 				if line != "" {
-					sb.WriteString(prefix)
-					sb.WriteString(line)
-					sb.WriteByte('\n')
+					_, _ = w.WriteString(prefix)
+					_, _ = w.WriteString(line)
+					_ = w.WriteByte('\n')
 				}
 			}
+			_ = stream.Close()
 		}
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
 func podReadyContainers(pod *corev1.Pod) int {

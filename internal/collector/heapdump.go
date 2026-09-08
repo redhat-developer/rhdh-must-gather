@@ -314,7 +314,14 @@ func collectHeapDumpInspector(ctx context.Context, cfg *Config, ns, pod, pid, co
 		log.Warn("Failed to start port-forward: %v", err)
 		return false
 	}
-	defer close(stopCh)
+	closeStopCh := func() {
+		select {
+		case <-stopCh:
+		default:
+			close(stopCh)
+		}
+	}
+	defer closeStopCh()
 
 	select {
 	case <-readyCh:
@@ -340,8 +347,15 @@ func collectHeapDumpInspector(ctx context.Context, cfg *Config, ns, pod, pid, co
 		appendLog(logFile, "Heap snapshot failed: %v\n\nAttempting fallback via v8.writeHeapSnapshot()...\n", err)
 		log.Warn("Heap snapshot streaming failed: %v, trying fallback", err)
 
-		close(stopCh)
+		closeStopCh()
 		stopCh = make(chan struct{})
+		closeStopCh = func() {
+			select {
+			case <-stopCh:
+			default:
+				close(stopCh)
+			}
+		}
 		readyCh = make(chan struct{})
 
 		if err := sendSignal(ctx, cfg, ns, pod, backstageContainer, pid, "USR1"); err == nil {
@@ -357,13 +371,13 @@ func collectHeapDumpInspector(ctx context.Context, cfg *Config, ns, pod, pid, co
 				if err == nil {
 					fallbackPath := strings.TrimSuffix(outPath, ".heapsnapshot") + ".fallback.heapsnapshot"
 					if fallbackHeapDump(wsURL2, cfg, ns, pod, backstageContainer, fallbackPath, logFile, timeout) {
-						close(stopCh)
+						closeStopCh()
 						return true
 					}
 				}
 			case <-time.After(10 * time.Second):
 			}
-			close(stopCh)
+			closeStopCh()
 		}
 
 		return false
@@ -411,7 +425,8 @@ func startPortForward(cfg *Config, ns, pod string, remotePort int, stopCh, ready
 }
 
 func getInspectorWSURL(localPort, inspectorPort int) (string, error) {
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/json", localPort))
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/json", localPort))
 	if err != nil {
 		return "", fmt.Errorf("fetching inspector info: %w", err)
 	}
