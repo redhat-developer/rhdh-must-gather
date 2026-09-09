@@ -92,7 +92,11 @@ find /opt/app-root/src/dynamic-plugins-root -maxdepth 2 -name package.json -exec
 func CollectProcesses(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod, outDir string) {
 	_ = os.MkdirAll(outDir, 0o755)
 
-	for _, c := range pod.Spec.Containers {
+	allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+	allContainers = append(allContainers, pod.Spec.InitContainers...)
+	allContainers = append(allContainers, pod.Spec.Containers...)
+
+	for _, c := range allContainers {
 		script := fmt.Sprintf(`
 echo "=== Process List (from /proc filesystem) ==="
 echo "Container: %s"
@@ -151,6 +155,9 @@ func CollectPodLogs(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod
 		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, false, filepath.Join(cDir, "current.txt"))
 		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, true, filepath.Join(cDir, "previous.txt"))
 	}
+
+	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, false, filepath.Join(outDir, "logs-app.current.txt"))
+	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, true, filepath.Join(outDir, "logs-app.previous.txt"))
 }
 
 func streamAndSaveLogs(ctx context.Context, client kubernetes.Interface, ns, podName, container string, previous bool, outPath string) {
@@ -211,14 +218,21 @@ func parseSections(output string) map[string]string {
 
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "===") && strings.HasSuffix(line, "===") {
-			if currentKey != "" {
-				sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+			key := strings.Trim(line, "= ")
+			// Only treat as a section boundary if the key looks like a
+			// top-level marker (ID, ENV, PACKAGES, …). Nested markers
+			// like ===FILE:/path=== contain ':' or '/' and must stay as
+			// content within their parent section.
+			if !strings.ContainsAny(key, ":/") {
+				if currentKey != "" {
+					sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
+				}
+				currentKey = key
+				currentLines = nil
+				continue
 			}
-			currentKey = strings.Trim(line, "= ")
-			currentLines = nil
-		} else {
-			currentLines = append(currentLines, line)
 		}
+		currentLines = append(currentLines, line)
 	}
 	if currentKey != "" {
 		sections[currentKey] = strings.TrimSpace(strings.Join(currentLines, "\n"))
