@@ -53,10 +53,10 @@ jobs:
       - name: Run E2E tests
         run: >
           make test-e2e
-          LOCAL=false
-          TARGET_BRANCH=${{ env.TARGET_BRANCH }}
-          IMAGE_TAG=${{ env.IMAGE_TAG }}
-          HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            LOCAL=false
+            TARGET_BRANCH=${{ env.TARGET_BRANCH }}
+            IMAGE_TAG=${{ env.IMAGE_TAG }}
+            HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
