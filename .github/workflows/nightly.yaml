@@ -128,9 +128,9 @@ jobs:
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
-            TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
-            IMAGE_TAG=${{ env.IMAGE_TAG }} \
-            HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+              TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
+              IMAGE_TAG=${{ env.IMAGE_TAG }} \
+              HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
               HEAP_DUMP_METHOD=${{ matrix.method }} \
