@@ -101,7 +101,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set branch test variables
-        run: | 
+        run: |
           branch="${{ matrix.branch }}"
           echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
           if [ "$branch" = "main" ]; then
