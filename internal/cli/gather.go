@@ -40,10 +40,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	defer cancel()
 
 	var interrupted atomic.Bool
+	sanitizeStop := make(chan struct{})
 
 	defer func() {
 		log.Info("done with data collection. Now sanitizing data...")
-		sanitize.Run(basePath, &interrupted)
+		sanitize.Run(basePath, sanitizeStop)
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -53,6 +54,10 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		interrupted.Store(true)
 		cancel()
 		log.Warn("Interrupt requested, stopping after current step...")
+		// A second signal during sanitization stops it immediately
+		<-sigCh
+		close(sanitizeStop)
+		log.Warn("Second interrupt, aborting sanitization...")
 	}()
 	defer signal.Stop(sigCh)
 

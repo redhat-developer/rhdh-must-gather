@@ -348,7 +348,7 @@ See the [chart documentation](https://github.com/redhat-developer/rhdh-chart/tre
 #### Local execution
 
 ```bash
-HEAP_DUMP_TIMEOUT=900 ./collection-scripts/must_gather --with-heap-dumps
+HEAP_DUMP_TIMEOUT=900 make run-local OPTS="--with-heap-dumps"
 ```
 
 ### Tips and Best Practices

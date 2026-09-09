@@ -2,20 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "baseBranchPatterns": ["main", "/^release-.*/"],
-  "pip-compile": {
-    "enabled": true,
-    "managerFilePatterns": [".rhdh/docker/requirements*.txt"]
-  },
-  "pip_requirements": {
-    "enabled": false
-  },
   "packageRules": [
-    {
-      "description": "yq is tracked via the Makefile custom manager; ignore it in pip-compile",
-      "matchManagers": ["pip-compile"],
-      "matchPackageNames": ["yq"],
-      "enabled": false
-    },
     {
       "description": "Disable all updates on release branches by default",
       "matchBaseBranches": ["/^release-.*/"],
@@ -35,15 +22,6 @@
       "enabled": true
     }
   ],
-  "customDatasources": {
-    "openshift-client": {
-      "defaultRegistryUrlTemplate": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/",
-      "format": "html",
-      "transformTemplates": [
-        "{\"releases\": [$filter($, function($v){$type($v)=\"string\" and $contains($v, /^4\\.\\d+\\.\\d+\\/$/)}).( {\"version\": $replace($, /\\/$/, \"\")} )]}"
-      ]
-    }
-  },
   "customManagers": [
     {
       "customType": "regex",
@@ -60,23 +38,6 @@
         "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s*python3 -m pip install.*?/refs/tags/(?<currentValue>v[\\d.]+)\\.zip"
       ],
       "datasourceTemplate": "github-releases"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^Containerfile$/"],
-      "matchStrings": [
-        "#\\s*renovate:\\s*datasource=custom\\.openshift-client\\nRUN curl.*ocp/(?<currentValue>[\\d.]+)/openshift-client"
-      ],
-      "depNameTemplate": "openshift-client",
-      "datasourceTemplate": "custom.openshift-client"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^Makefile$/"],
-      "matchStrings": [
-        "#\\s*renovate:\\s*datasource=pypi\\s+depName=(?<depName>\\S+)\\nYQ_VERSION := (?<currentValue>[\\d.]+)"
-      ],
-      "datasourceTemplate": "pypi"
     }
   ]
 }

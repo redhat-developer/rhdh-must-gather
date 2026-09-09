@@ -26,9 +26,6 @@ tests/
 # Vendored source (not needed in container build)
 vendor/
 
-# Collection scripts (Go binary has all logic built in)
-collection-scripts/
-
 # Build tooling not needed in container
 hack/
 artifacts.lock.yaml

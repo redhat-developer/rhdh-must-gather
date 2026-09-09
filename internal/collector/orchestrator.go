@@ -257,9 +257,10 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 	if err != nil {
 		writeCollectError(filepath.Join(sfpDir, "all-sonataflow-platforms.txt"),
 			"list SonataFlowPlatform CRs", err)
+	} else {
+		writeDynamicTable(filepath.Join(sfpDir, "all-sonataflow-platforms.txt"), items,
+			sonataFlowPlatformColumns)
 	}
-	writeDynamicTable(filepath.Join(sfpDir, "all-sonataflow-platforms.txt"), items,
-		sonataFlowPlatformColumns)
 
 	if len(items) == 0 {
 		log.Info("\tNo SonataFlowPlatform CRs found")
@@ -343,9 +344,10 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 	if err != nil {
 		writeCollectError(filepath.Join(sfwDir, "all-sonataflow-workflows.txt"),
 			"list SonataFlow workflows", err)
+	} else {
+		writeDynamicTable(filepath.Join(sfwDir, "all-sonataflow-workflows.txt"), items,
+			sonataFlowWorkflowColumns)
 	}
-	writeDynamicTable(filepath.Join(sfwDir, "all-sonataflow-workflows.txt"), items,
-		sonataFlowWorkflowColumns)
 
 	if len(items) == 0 {
 		log.Info("\tNo SonataFlow workflows found")
@@ -455,15 +457,16 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 }
 
 func (o *Orchestrator) collectKnativeCRs(ctx context.Context, cfg *Config, gvr schema.GroupVersionResource, listPath, yamlPath string, columns []tableColumn) []unstructured.Unstructured {
-	list, err := cfg.Client.Dynamic.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
+	items, err := listDynamic(ctx, cfg, gvr)
 	if err != nil {
 		writeCollectError(listPath, "list "+gvr.Resource, err)
 		writeCollectError(yamlPath, "list "+gvr.Resource, err)
 		return nil
 	}
-	writeDynamicTable(listPath, list.Items, columns)
+	writeDynamicTable(listPath, items, columns)
+	list := &unstructured.UnstructuredList{Items: items}
 	writeResource(yamlPath, list)
-	return list.Items
+	return items
 }
 
 func (o *Orchestrator) collectKnativeNamespace(ctx context.Context, cfg *Config, ns, nsDir string) {
