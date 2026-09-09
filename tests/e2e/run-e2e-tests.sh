@@ -374,10 +374,6 @@ if [ "$SKIP_OPERATOR" = false ]; then
     # manifest including CRs.
     OPERATOR_MANIFEST_FILE=$(mktemp)
     curl -sSL "$OPERATOR_MANIFEST" -o "$OPERATOR_MANIFEST_FILE"
-    # Register resource deletion before file removal so cleanup() (which runs
-    # tasks in insertion order) deletes cluster resources while the file exists.
-    CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST_FILE --wait=false")
-    CLEANUP_TASKS+=("rm -f $OPERATOR_MANIFEST_FILE")
     if [ "$EFFECTIVE_OPERATOR_BRANCH" = "main" ]; then
         # On main, the manifest references the productized operator image
         # (quay.io/rhdh/rhdh-rhel10-operator or quay.io/rhdh/rhdh-rhel9-operator),
@@ -401,13 +397,23 @@ if [ "$SKIP_OPERATOR" = false ]; then
             YQ_FILTER="$YQ_FILTER and .kind != \"$kind\""
         done
         YQ_FILTER="$YQ_FILTER)"
-        # Apply everything except custom resources first
-        yq "$YQ_FILTER" "$OPERATOR_MANIFEST_FILE" | kubectl apply -f -
+        # Use the filtered manifest for cleanup — if setup aborts before the CR
+        # API is registered, kubectl delete on the full manifest would fail to
+        # resolve the CR kind. Deleting the CRD cascades to any CR instances.
+        OPERATOR_MANIFEST_FILTERED=$(mktemp)
+        yq "$YQ_FILTER" "$OPERATOR_MANIFEST_FILE" > "$OPERATOR_MANIFEST_FILTERED"
+        CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST_FILTERED --wait=false")
+        CLEANUP_TASKS+=("rm -f $OPERATOR_MANIFEST_FILTERED")
+        # Apply the filtered manifest first
+        kubectl apply -f "$OPERATOR_MANIFEST_FILTERED"
         # Wait for CRDs to be fully registered
         for crd in $(kubectl get crds -o name 2>/dev/null | grep '\.rhdh\.redhat\.com$'); do
             kubectl wait --for=condition=Established "$crd" --timeout=30s
         done
+    else
+        CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST_FILE --wait=false")
     fi
+    CLEANUP_TASKS+=("rm -f $OPERATOR_MANIFEST_FILE")
     # Apply the full manifest (including CRs if any were deferred above)
     kubectl apply -f "$OPERATOR_MANIFEST_FILE"
 
