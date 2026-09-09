@@ -82,7 +82,7 @@ jobs:
           retention-days: 7
 
   e2e-tests-heap-dumps:
-    name: Nightly E2E Tests (Heap Dumps - ${{ matrix.method }})
+    name: Nightly E2E Tests Heap Dumps (${{ matrix.branch }} - ${{ matrix.method }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
