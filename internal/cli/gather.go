@@ -16,6 +16,7 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
+	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
 )
 
 func runGather(cmd *cobra.Command, opts *gatherOptions) error {
@@ -41,15 +42,16 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 
 	env := buildEnv(opts)
 
-	defer func() {
-		log.Info("done with data collection. Now sanitizing data...")
-		_ = runScript(scriptDir, "sanitize", env, basePath)
-	}()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var interrupted atomic.Bool
+
+	defer func() {
+		log.Info("done with data collection. Now sanitizing data...")
+		sanitize.Run(basePath, &interrupted)
+	}()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -192,7 +194,7 @@ func runInit(scriptDir string, env []string) error {
 }
 
 // runScript executes a script from scriptDir. Any extra args are passed as
-// positional arguments (used by sanitize to receive the base path).
+// positional arguments.
 func runScript(scriptDir, name string, env []string, args ...string) int {
 	path := filepath.Join(scriptDir, name)
 	c := exec.Command(path, args...)
