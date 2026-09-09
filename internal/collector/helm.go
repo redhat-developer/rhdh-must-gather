@@ -3,11 +3,13 @@ package collector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,11 +17,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/kubectl/pkg/cmd/get"
 
 	"go.yaml.in/yaml/v3"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/release"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -97,6 +101,7 @@ func (h *Helm) gatherNativeReleases(ctx context.Context, cfg *Config, helmDir st
 	}
 
 	h.writeReleasesTable(filepath.Join(helmDir, "all-rhdh-releases.txt"), rhdhReleases)
+	h.writeReleasesJSON(filepath.Join(helmDir, "all-rhdh-releases.json"), rhdhReleases)
 
 	if len(rhdhReleases) == 0 {
 		log.Info("No native Helm releases found, will check for standalone Helm deployments...")
@@ -223,6 +228,7 @@ func (h *Helm) collectReleaseData(ctx context.Context, cfg *Config, ns, name, re
 
 	// Status
 	statusAction := action.NewStatus(nsCfg)
+	statusAction.ShowResourcesTable = true
 	statusRel, err := statusAction.Run(name)
 	if err != nil {
 		writeCollectError(filepath.Join(releaseDir, "status.txt"), "helm status "+name, err)
@@ -230,7 +236,7 @@ func (h *Helm) collectReleaseData(ctx context.Context, cfg *Config, ns, name, re
 		statusAcc, err := release.NewAccessor(statusRel)
 		if err == nil {
 			_ = os.WriteFile(filepath.Join(releaseDir, "status.txt"),
-				[]byte(formatReleaseStatus(statusAcc)), 0o644)
+				[]byte(formatReleaseStatus(statusAcc, statusRel)), 0o644)
 		}
 	}
 }
@@ -574,8 +580,8 @@ func chartLabel(acc release.Accessor) string {
 		return "unknown"
 	}
 	meta := chartAcc.MetadataAsMap()
-	appVersion, _ := meta["appVersion"].(string)
-	return fmt.Sprintf("%s-%s", chartAcc.Name(), appVersion)
+	version, _ := meta["Version"].(string)
+	return fmt.Sprintf("%s-%s", chartAcc.Name(), version)
 }
 
 func chartAppVersion(acc release.Accessor) string {
@@ -584,25 +590,57 @@ func chartAppVersion(acc release.Accessor) string {
 		return ""
 	}
 	meta := chartAcc.MetadataAsMap()
-	v, _ := meta["appVersion"].(string)
+	v, _ := meta["AppVersion"].(string)
 	return v
 }
 
 func (h *Helm) writeReleasesTable(path string, releases []release.Accessor) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-30s  %-30s  %-10s  %-30s  %-12s  %s\n",
-		"NAMESPACE", "NAME", "REVISION", "CHART", "STATUS", "UPDATED")
+	fmt.Fprintf(&sb, "%-30s\t%-12s\t%-10s\t%-40s\t%-10s\t%-40s\t%s\n",
+		"NAME", "NAMESPACE", "REVISION", "UPDATED", "STATUS", "CHART", "APP VERSION")
 	for _, acc := range releases {
-		fmt.Fprintf(&sb, "%-30s  %-30s  %-10d  %-30s  %-12s  %s\n",
-			acc.Namespace(), acc.Name(), acc.Version(),
-			chartLabel(acc),
-			acc.Status(), acc.DeployedAt().Format(time.RFC3339))
+		fmt.Fprintf(&sb, "%-30s\t%-12s\t%-10d\t%-40s\t%-10s\t%-40s\t%s\n",
+			acc.Name(), acc.Namespace(), acc.Version(),
+			acc.DeployedAt().Format("2006-01-02 15:04:05.999999999 -0700 MST"),
+			acc.Status(), chartLabel(acc), chartAppVersion(acc))
 	}
 	if len(releases) == 0 {
 		sb.WriteString("No RHDH-related Helm releases found\n")
 	}
 	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+func (h *Helm) writeReleasesJSON(path string, releases []release.Accessor) {
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	var items []map[string]any
+	for _, acc := range releases {
+		items = append(items, map[string]any{
+			"name":        acc.Name(),
+			"namespace":   acc.Namespace(),
+			"revision":    fmt.Sprintf("%d", acc.Version()),
+			"updated":     acc.DeployedAt().Format(time.RFC3339),
+			"status":      acc.Status(),
+			"chart":       chartLabel(acc),
+			"app_version": chartAppVersion(acc),
+		})
+	}
+	if items == nil {
+		items = []map[string]any{}
+	}
+	data, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	_ = os.WriteFile(path, data, 0o644)
+}
+
+func releaseDescription(rel release.Releaser) string {
+	if r, ok := rel.(*releasev1.Release); ok && r.Info != nil {
+		return r.Info.Description
+	}
+	return ""
 }
 
 func (h *Helm) writeHistoryText(path string, releases []release.Releaser) {
@@ -616,7 +654,7 @@ func (h *Helm) writeHistoryText(path string, releases []release.Releaser) {
 		}
 		fmt.Fprintf(&sb, "%-10d  %-30s  %-12s  %-30s  %s\n",
 			acc.Version(), acc.DeployedAt().Format(time.RFC3339),
-			acc.Status(), chartLabel(acc), acc.Notes())
+			acc.Status(), chartLabel(acc), releaseDescription(rel))
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
@@ -635,21 +673,43 @@ func (h *Helm) historyToMap(releases []release.Releaser) []map[string]any {
 			"status":      acc.Status(),
 			"chart":       chartLabel(acc),
 			"app_version": chartAppVersion(acc),
-			"description": acc.Notes(),
+			"description": releaseDescription(rel),
 		})
 	}
 	return result
 }
 
-func formatReleaseStatus(acc release.Accessor) string {
+func formatReleaseStatus(acc release.Accessor, rel release.Releaser) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "NAME: %s\n", acc.Name())
-	fmt.Fprintf(&sb, "LAST DEPLOYED: %s\n", acc.DeployedAt().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "LAST DEPLOYED: %s\n", acc.DeployedAt().Format("Mon Jan  2 15:04:05 2006"))
 	fmt.Fprintf(&sb, "NAMESPACE: %s\n", acc.Namespace())
 	fmt.Fprintf(&sb, "STATUS: %s\n", acc.Status())
 	fmt.Fprintf(&sb, "REVISION: %d\n", acc.Version())
-	fmt.Fprintf(&sb, "CHART: %s\n", chartLabel(acc))
-	fmt.Fprintf(&sb, "APP VERSION: %s\n", chartAppVersion(acc))
+	if desc := releaseDescription(rel); desc != "" {
+		fmt.Fprintf(&sb, "DESCRIPTION: %s\n", desc)
+	}
+	if r, ok := rel.(*releasev1.Release); ok && len(r.Info.Resources) > 0 {
+		buf := new(bytes.Buffer)
+		printFlags := get.NewHumanPrintFlags()
+		typePrinter, _ := printFlags.ToPrinter("")
+		printer := &get.TablePrinter{Delegate: typePrinter}
+		var keys []string
+		for key := range r.Info.Resources {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, t := range keys {
+			fmt.Fprintf(buf, "==> %s\n", t)
+			for _, resource := range r.Info.Resources[t] {
+				if err := printer.PrintObj(resource, buf); err != nil {
+					fmt.Fprintf(buf, "failed to print object type %s: %v\n", t, err)
+				}
+			}
+			buf.WriteString("\n")
+		}
+		fmt.Fprintf(&sb, "RESOURCES:\n%s\n", buf.String())
+	}
 	if notes := acc.Notes(); notes != "" {
 		fmt.Fprintf(&sb, "\nNOTES:\n%s\n", notes)
 	}

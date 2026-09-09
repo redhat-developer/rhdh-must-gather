@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/duration"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -24,25 +26,14 @@ func (i *Ingress) Run(ctx context.Context, cfg *Config) error {
 
 	namespaces := cfg.Namespaces()
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-30s %-40s %-15s %-50s\n", "NAMESPACE", "NAME", "CLASS", "HOSTS")
-
-	count := 0
+	var ingresses []networkingv1.Ingress
 	if namespaces == nil {
 		list, err := cfg.Client.Clientset.NetworkingV1().Ingresses("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			writeCollectError(outPath, "list ingresses", err)
 			return nil
 		}
-		for _, ing := range list.Items {
-			class := ""
-			if ing.Spec.IngressClassName != nil {
-				class = *ing.Spec.IngressClassName
-			}
-			hosts := ingressHosts(ing.Spec.Rules)
-			fmt.Fprintf(&sb, "%-30s %-40s %-15s %-50s\n", ing.Namespace, ing.Name, class, hosts)
-			count++
-		}
+		ingresses = list.Items
 	} else {
 		for _, ns := range namespaces {
 			list, err := cfg.Client.Clientset.NetworkingV1().Ingresses(ns).List(ctx, metav1.ListOptions{})
@@ -50,19 +41,27 @@ func (i *Ingress) Run(ctx context.Context, cfg *Config) error {
 				log.Warn("Failed to list ingresses in namespace %s: %v", ns, err)
 				continue
 			}
-			for _, ing := range list.Items {
-				class := ""
-				if ing.Spec.IngressClassName != nil {
-					class = *ing.Spec.IngressClassName
-				}
-				hosts := ingressHosts(ing.Spec.Rules)
-				fmt.Fprintf(&sb, "%-30s %-40s %-15s %-50s\n", ing.Namespace, ing.Name, class, hosts)
-				count++
-			}
+			ingresses = append(ingresses, list.Items...)
 		}
 	}
 
-	if count == 0 {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-15s %-45s %-15s %-50s %-50s %-10s %s\n",
+		"NAMESPACE", "NAME", "CLASS", "HOSTS", "ADDRESS", "PORTS", "AGE")
+	for _, ing := range ingresses {
+		class := "<none>"
+		if ing.Spec.IngressClassName != nil {
+			class = *ing.Spec.IngressClassName
+		}
+		hosts := ingressHosts(ing.Spec.Rules)
+		address := ingressAddress(ing.Status.LoadBalancer.Ingress)
+		ports := ingressPorts(ing.Spec.TLS)
+		age := duration.ShortHumanDuration(time.Since(ing.CreationTimestamp.Time))
+		fmt.Fprintf(&sb, "%-15s %-45s %-15s %-50s %-50s %-10s %s\n",
+			ing.Namespace, ing.Name, class, hosts, address, ports, age)
+	}
+
+	if len(ingresses) == 0 {
 		sb.WriteString("No resources found\n")
 	}
 
@@ -81,3 +80,23 @@ func ingressHosts(rules []networkingv1.IngressRule) string {
 	}
 	return strings.Join(hosts, ",")
 }
+
+func ingressAddress(lbIngress []networkingv1.IngressLoadBalancerIngress) string {
+	var addrs []string
+	for _, lb := range lbIngress {
+		if lb.IP != "" {
+			addrs = append(addrs, lb.IP)
+		} else if lb.Hostname != "" {
+			addrs = append(addrs, lb.Hostname)
+		}
+	}
+	return strings.Join(addrs, ",")
+}
+
+func ingressPorts(tls []networkingv1.IngressTLS) string {
+	if len(tls) > 0 {
+		return "80, 443"
+	}
+	return "80"
+}
+
