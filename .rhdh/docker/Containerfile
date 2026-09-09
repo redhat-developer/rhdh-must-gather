@@ -1,71 +1,28 @@
-# Konflux hermetic: prefetch rpm (repo root), pip (repo root), generic (helm CGW), cargo (`vendor/websocat`); network off during RUN.
+# Konflux hermetic: prefetch rpm (repo root) and gomod (repo root); network off during RUN.
 #
-# Stage 1: Build websocat from vendored source
-# websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
-# Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
-# https://registry.access.redhat.com/hi/rust
-FROM registry.access.redhat.com/hi/rust:1.98.0-1788737889@sha256:cd252409cc2dd0805808f8d4c80030c4ba8d68b9dd69ecc6df321df3b987016f AS websocat-builder
-COPY vendor/websocat /src/websocat
-WORKDIR /src/websocat
-RUN set -eu; \
-    . /cachi2/cachi2.env; \
-    cargo build --release --locked \
-        --no-default-features --features signal_handler,unix_stdio && \
-    cp target/release/websocat /tmp/websocat && \
-    /tmp/websocat --version
-
-# Stage 2a: Install helm from prefetched CGW binaries (artifacts.lock.yaml / generic fetcher)
-# Comment this out and uncomment Stage 2b below when no binary available.
-# https://registry.access.redhat.com/ubi10-minimal
-FROM registry.access.redhat.com/ubi10-minimal:10.2-1788940913@sha256:26dc3089ab24491c1ba01ab92a7d502d181425b6021e362a07484daee696a3aa AS helm-builder
-ARG TARGETPLATFORM
-COPY hack/install-helm-binary.sh /tmp/install-helm-binary.sh
-RUN set -eu; \
-    . /cachi2/cachi2.env; \
-    arch=$(uname -m); \
-    rm -rf /etc/yum.repos.d/*; \
-    if [ -d "/cachi2/output/deps/rpm/${arch}/repos.d" ]; then \
-      cp -a "/cachi2/output/deps/rpm/${arch}/repos.d/." /etc/yum.repos.d/; \
-    else \
-      for repod in /cachi2/output/deps/rpm/"${arch}"/*/repos.d; do \
-        [ -d "${repod}" ] || continue; \
-        suffix=$(basename "$(dirname "$repod")"); \
-        for rf in "${repod}"/*.repo; do \
-          [ -f "${rf}" ] || continue; \
-          install -m0644 "${rf}" "/etc/yum.repos.d/${suffix}-$(basename "${rf}")"; \
-        done; \
-      done; \
-    fi; \
-    test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
-    microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
-      && microdnf clean all; \
-    CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM}" \
-      bash /tmp/install-helm-binary.sh --prefetch; \
-    rm -f /tmp/install-helm-binary.sh
-
-# Stage 2b: Build helm from vendored source (use when no binary available in Stage 2a)
-# Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
-# update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
+# Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
-# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788411200@sha256:be70aa468168f1ecd46e56d5f362e697243bcf9d3a2d98819597e43471a5d0e4 AS helm-builder
-# COPY Makefile /tmp/Makefile
-# COPY vendor/helm /opt/app-root/src/helm
-# WORKDIR /opt/app-root/src/helm
-# RUN set -eu; \
-#     . /cachi2/cachi2.env; \
-#     HELM_VERSION=$(grep '^HELM_VERSION' /tmp/Makefile | sed 's/.*:= *//'); \
-#     CGO_ENABLED=0 go build -mod=vendor -trimpath \
-#         -ldflags "-X helm.sh/helm/v4/internal/version.version=v${HELM_VERSION}" \
-#         -o /tmp/helm ./cmd/helm && \
-#     /tmp/helm version
+FROM registry.access.redhat.com/ubi10/go-toolset:1.26.5-1786496329@sha256:1db86a2b0f77c1197b011de5140236effc27b1a1724c0105d4926857a0756de5 AS go-builder
+COPY go.mod go.sum /opt/app-root/src/
+COPY cmd/ /opt/app-root/src/cmd/
+COPY internal/ /opt/app-root/src/internal/
+WORKDIR /opt/app-root/src
+ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
+RUN set -eu; \
+    . /cachi2/cachi2.env; \
+    CGO_ENABLED=0 go build -trimpath \
+        -ldflags "-X 'github.com/redhat-developer/rhdh-must-gather/internal/cli.version=${RHDH_MUST_GATHER_VERSION}'" \
+        -o /tmp/gather ./cmd/gather
 
-# Stage 3: Final image
+# Stage 2: Final image
 # https://registry.access.redhat.com/ubi10-minimal
 FROM registry.access.redhat.com/ubi10-minimal:10.2-1788940913@sha256:26dc3089ab24491c1ba01ab92a7d502d181425b6021e362a07484daee696a3aa
 
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
-ARG TARGETPLATFORM
 
+# Install minimal runtime dependencies:
+# tar, rsync: required by `oc adm must-gather` to copy output from the pod
+# util-linux: provides setsid (required by `oc adm must-gather`)
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     arch=$(uname -m); \
@@ -85,39 +42,11 @@ RUN set -eu; \
     test -n "$(ls /etc/yum.repos.d/*.repo 2>/dev/null)"; \
     microdnf install -y --setopt=install_weak_deps=0 --nodocs \
       tar \
-      gzip \
-      bash \
-      findutils \
-      grep \
-      sed \
-      jq \
-      python3 \
-      python3-pip \
       util-linux \
       rsync \
       && microdnf clean all
-COPY hack/install-openshift-client.sh /tmp/install-openshift-client.sh
-RUN set -eu; \
-    . /cachi2/cachi2.env; \
-    CONTAINER_BUILD=true TARGETPLATFORM="${TARGETPLATFORM:-linux/amd64}" \
-      bash /tmp/install-openshift-client.sh --prefetch; \
-    rm -f /tmp/install-openshift-client.sh
-COPY requirements-build.txt /tmp/requirements-build.txt
-COPY requirements.txt /tmp/requirements.txt
-RUN set -eu; \
-    . /cachi2/cachi2.env; \
-    pip3 install --no-cache-dir --no-deps --require-hashes \
-      -r /tmp/requirements-build.txt && \
-    pip3 install --no-cache-dir --no-build-isolation --require-hashes \
-      -r /tmp/requirements.txt && \
-    rm -f /tmp/requirements-build.txt /tmp/requirements.txt
 
-# Copy helm binary from prefetched CGW mirror (helm-builder stage)
-COPY --from=helm-builder /tmp/helm /usr/local/bin/helm
-
-# Copy websocat binary built from source (vendor/websocat)
-COPY --from=websocat-builder /tmp/websocat /usr/local/bin/websocat
-
+# Create non-root user for running the container
 RUN set -eu; \
     . /cachi2/cachi2.env; \
     arch=$(uname -m); \
@@ -141,11 +70,8 @@ RUN set -eu; \
     microdnf remove -y shadow-utils && \
     microdnf clean all
 
-# Use our gather script in place of the original one
-# Copy collection scripts
-COPY collection-scripts/* /usr/bin/
-
-RUN mv /usr/bin/must_gather /usr/bin/gather
+# Copy Go gather binary — all collection logic is built in, no external tools needed
+COPY --from=go-builder /tmp/gather /usr/bin/gather
 
 # Set environment variable from build argument
 ENV RHDH_MUST_GATHER_VERSION=$RHDH_MUST_GATHER_VERSION
