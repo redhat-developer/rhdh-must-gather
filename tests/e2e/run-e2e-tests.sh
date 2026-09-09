@@ -367,20 +367,55 @@ BACKSTAGE_CR_STATEFULSET=""
 if [ "$SKIP_OPERATOR" = false ]; then
     log_info "Deploying RHDH Operator from branch: $EFFECTIVE_OPERATOR_BRANCH..."
     OPERATOR_MANIFEST="https://raw.githubusercontent.com/redhat-developer/rhdh-operator/$EFFECTIVE_OPERATOR_BRANCH/dist/rhdh/install.yaml"
+    # The operator's install.yaml bundles CRDs and CRs (e.g. DevHubPluginCatalog)
+    # in a single manifest. Applying it in one pass races: the API server needs
+    # time to register CRD endpoints before CRs of that kind can be created.
+    # Work around this by applying CRDs first, waiting, then applying the full
+    # manifest including CRs.
+    OPERATOR_MANIFEST_FILE=$(mktemp)
+    curl -sSL "$OPERATOR_MANIFEST" -o "$OPERATOR_MANIFEST_FILE"
     if [ "$EFFECTIVE_OPERATOR_BRANCH" = "main" ]; then
         # On main, the manifest references the productized operator image
         # (quay.io/rhdh/rhdh-rhel10-operator or quay.io/rhdh/rhdh-rhel9-operator),
         # which may be outdated or unavailable. Swap it for the upstream 'next' tag
         # so E2E tests always run against a current build of the operator.
         UPSTREAM_OPERATOR_IMAGE="quay.io/rhdh-community/operator:next"
-        curl -sSL "$OPERATOR_MANIFEST" \
-            | sed -e "s|quay.io/rhdh/rhdh-rhel9-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
-                  -e "s|quay.io/rhdh/rhdh-rhel10-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
-            | kubectl apply -f -
-    else
-        kubectl apply -f "$OPERATOR_MANIFEST"
+        sed -i.bak \
+            -e "s|quay.io/rhdh/rhdh-rhel9-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
+            -e "s|quay.io/rhdh/rhdh-rhel10-operator:[^ ]*|${UPSTREAM_OPERATOR_IMAGE}|g" \
+            "$OPERATOR_MANIFEST_FILE" && rm -f "${OPERATOR_MANIFEST_FILE}.bak"
     fi
-    CLEANUP_TASKS+=("curl -sSL $OPERATOR_MANIFEST | kubectl delete -f - --wait=false")
+    # CR kinds whose CRDs are defined in the same manifest. Applied separately
+    # after CRDs are established to avoid the registration race.
+    OPERATOR_CR_KINDS=(
+        "DevHubPluginCatalog"
+    )
+    if [ ${#OPERATOR_CR_KINDS[@]} -gt 0 ]; then
+        # Build a yq select expression that excludes all CR kinds
+        YQ_FILTER="select(.kind != \"${OPERATOR_CR_KINDS[0]}\""
+        for kind in "${OPERATOR_CR_KINDS[@]:1}"; do
+            YQ_FILTER="$YQ_FILTER and .kind != \"$kind\""
+        done
+        YQ_FILTER="$YQ_FILTER)"
+        # Use the filtered manifest for cleanup — if setup aborts before the CR
+        # API is registered, kubectl delete on the full manifest would fail to
+        # resolve the CR kind. Deleting the CRD cascades to any CR instances.
+        OPERATOR_MANIFEST_FILTERED=$(mktemp)
+        yq "$YQ_FILTER" "$OPERATOR_MANIFEST_FILE" > "$OPERATOR_MANIFEST_FILTERED"
+        CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST_FILTERED --wait=false")
+        CLEANUP_TASKS+=("rm -f $OPERATOR_MANIFEST_FILTERED")
+        # Apply the filtered manifest first
+        kubectl apply -f "$OPERATOR_MANIFEST_FILTERED"
+        # Wait for CRDs to be fully registered
+        for crd in $(kubectl get crds -o name 2>/dev/null | grep '\.rhdh\.redhat\.com$'); do
+            kubectl wait --for=condition=Established "$crd" --timeout=30s
+        done
+    else
+        CLEANUP_TASKS+=("kubectl delete -f $OPERATOR_MANIFEST_FILE --wait=false")
+    fi
+    CLEANUP_TASKS+=("rm -f $OPERATOR_MANIFEST_FILE")
+    # Apply the full manifest (including CRs if any were deferred above)
+    kubectl apply -f "$OPERATOR_MANIFEST_FILE"
 
     log_info "Waiting for rhdh-operator deployment to be available in rhdh-operator namespace..."
     if ! kubectl -n rhdh-operator wait --for=condition=Available deployment/rhdh-operator --timeout=${RHDH_READY_TIMEOUT}s; then
