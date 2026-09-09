@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -20,30 +22,74 @@ func (c *ClusterInfo) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("creating cluster-info output directory: %w", err)
 	}
 
-	kubectl := findKubectl()
-	if kubectl == "" {
-		log.Warn("No kubectl or oc command available for cluster-info dump")
-		return os.WriteFile(filepath.Join(outDir, "error.txt"),
-			[]byte("No kubectl or oc command available\n"), 0o644)
+	client := cfg.Client.Clientset
+	log.Info("Collecting cluster-info dump...")
+
+	// Nodes
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err == nil {
+		writeYAML(filepath.Join(outDir, "nodes.yaml"), nodes)
 	}
 
-	cmd := exec.CommandContext(ctx, kubectl, "cluster-info", "dump",
-		"--all-namespaces", "--output-directory="+outDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		log.Warn("cluster-info dump failed: %v", err)
+	// Namespaces
+	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn("cluster-info: failed to list namespaces: %v", err)
+		return nil
 	}
 
+	for _, ns := range namespaces.Items {
+		if cfg.IsInterrupted() {
+			break
+		}
+		nsDir := filepath.Join(outDir, ns.Name)
+		_ = os.MkdirAll(nsDir, 0o755)
+
+		events, err := client.CoreV1().Events(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil {
+			writeYAML(filepath.Join(nsDir, "events.yaml"), events)
+		}
+
+		pods, err := client.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil {
+			writeYAML(filepath.Join(nsDir, "pods.yaml"), pods)
+		}
+
+		rcs, err := client.CoreV1().ReplicationControllers(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil && len(rcs.Items) > 0 {
+			writeYAML(filepath.Join(nsDir, "replication-controllers.yaml"), rcs)
+		}
+
+		svcs, err := client.CoreV1().Services(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil {
+			writeYAML(filepath.Join(nsDir, "services.yaml"), svcs)
+		}
+
+		dss, err := client.AppsV1().DaemonSets(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil && len(dss.Items) > 0 {
+			writeYAML(filepath.Join(nsDir, "daemonsets.yaml"), dss)
+		}
+
+		deps, err := client.AppsV1().Deployments(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil {
+			writeYAML(filepath.Join(nsDir, "deployments.yaml"), deps)
+		}
+
+		rss, err := client.AppsV1().ReplicaSets(ns.Name).List(ctx, metav1.ListOptions{})
+		if err == nil && len(rss.Items) > 0 {
+			writeYAML(filepath.Join(nsDir, "replicasets.yaml"), rss)
+		}
+	}
+
+	log.Info("cluster-info dump completed")
 	return nil
 }
 
-func findKubectl() string {
-	for _, name := range []string{"kubectl", "oc"} {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
-		}
+func writeYAML(path string, obj any) {
+	data, err := yaml.Marshal(obj)
+	if err != nil {
+		return
 	}
-	return ""
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, data, 0o644)
 }
