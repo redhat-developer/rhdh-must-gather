@@ -38,4 +38,5 @@ var Registry = map[string]Collector{
 	"ingress":      &Ingress{},
 	"cluster-info": &ClusterInfo{},
 	"operator":     &Operator{},
+	"orchestrator": &Orchestrator{},
 }
