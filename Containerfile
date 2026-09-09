@@ -13,7 +13,7 @@ RUN cargo build --release \
 # Stage 2a: Install helm from Red Hat CGW mirror (default)
 # Comment this out and uncomment Stage 2b below when no binary available.
 # https://registry.access.redhat.com/ubi10-minimal
-FROM registry.access.redhat.com/ubi10-minimal:10.2-1788137716@sha256:d801168f5e8b108586c27a4fd5c92e3c1e8d061084383713926e2ca61b8b6c64 AS helm-builder
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1788940913@sha256:26dc3089ab24491c1ba01ab92a7d502d181425b6021e362a07484daee696a3aa AS helm-builder
 ARG TARGETPLATFORM
 COPY Makefile artifacts.lock.yaml /tmp/
 COPY hack/install-helm-binary.sh hack/verify-helm-tarball.sh /tmp/
@@ -41,7 +41,7 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 
 # Stage 3: Final image
 # https://registry.access.redhat.com/ubi10-minimal
-FROM registry.access.redhat.com/ubi10-minimal:10.2-1788137716@sha256:d801168f5e8b108586c27a4fd5c92e3c1e8d061084383713926e2ca61b8b6c64
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1788940913@sha256:26dc3089ab24491c1ba01ab92a7d502d181425b6021e362a07484daee696a3aa
 
 # Define build argument before using it in LABEL
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
