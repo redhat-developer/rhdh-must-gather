@@ -28,3 +28,8 @@ vendor/*/docs/
 vendor/*/.github/
 vendor/*/examples/
 vendor/*/*.md
+
+# Go build artifacts
+bin/gather
+*.test
+coverage.out
