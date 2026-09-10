@@ -29,7 +29,7 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
 # update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi10/go-toolset
-# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788411200@sha256:be70aa468168f1ecd46e56d5f362e697243bcf9d3a2d98819597e43471a5d0e4 AS helm-builder
+# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788946935@sha256:de00e16138966f9fed6bca2d22d28f6cc0d50b26ef6977398e2d8980d80be75f AS helm-builder
 # COPY Makefile /tmp/Makefile
 # COPY vendor/helm /opt/app-root/src/helm
 # WORKDIR /opt/app-root/src/helm
