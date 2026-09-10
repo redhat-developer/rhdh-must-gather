@@ -2,7 +2,7 @@
 # websocat v1.14.1 — update via: make vendor-update VENDOR_NAME=websocat VENDOR_VERSION=v<NEW>
 # Rust compat: https://github.com/vi/websocat#rust-versions — verify after bumping either version
 # https://registry.access.redhat.com/hi/rust
-FROM registry.access.redhat.com/hi/rust:1.98.0-1788737889@sha256:cd252409cc2dd0805808f8d4c80030c4ba8d68b9dd69ecc6df321df3b987016f AS websocat-builder
+FROM registry.access.redhat.com/hi/rust:1.98.0-1788911318@sha256:6394a21c5686cf4c6977c9079be13e68b9700c6b713be081b94e5a52bbfc90f3 AS websocat-builder
 COPY vendor/websocat /src/websocat
 WORKDIR /src/websocat
 RUN cargo build --release \
@@ -29,7 +29,7 @@ RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs tar gzip bash \
 # Swap with Stage 2a: comment out Stage 2a, uncomment below, and use gomod prefetch instead of generic.
 # update via: make vendor-update VENDOR_NAME=helm VENDOR_VERSION=v<NEW>
 # https://registry.access.redhat.com/ubi10/go-toolset
-# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788411200@sha256:be70aa468168f1ecd46e56d5f362e697243bcf9d3a2d98819597e43471a5d0e4 AS helm-builder
+# FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1788946935@sha256:de00e16138966f9fed6bca2d22d28f6cc0d50b26ef6977398e2d8980d80be75f AS helm-builder
 # COPY Makefile /tmp/Makefile
 # COPY vendor/helm /opt/app-root/src/helm
 # WORKDIR /opt/app-root/src/helm
