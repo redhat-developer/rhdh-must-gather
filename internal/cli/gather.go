@@ -11,9 +11,13 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
 func runGather(cmd *cobra.Command, opts *gatherOptions) error {
+	log.Init()
+
 	basePath := os.Getenv("BASE_COLLECTION_PATH")
 	if basePath == "" {
 		basePath = "/must-gather"
@@ -35,7 +39,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	env := buildEnv(opts)
 
 	defer func() {
-		logInfo("done with data collection. Now sanitizing data...")
+		log.Info("done with data collection. Now sanitizing data...")
 		_ = runScript(scriptDir, "sanitize", env, basePath)
 	}()
 
@@ -45,13 +49,13 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	go func() {
 		<-sigCh
 		interrupted.Store(true)
-		logWarn("Interrupt requested, stopping after current step...")
+		log.Warn("Interrupt requested, stopping after current step...")
 	}()
 	defer signal.Stop(sigCh)
 
-	logInfo("Starting RHDH must-gather collection...")
-	logInfo("Output directory: %s", basePath)
-	logInfo("Log level: %s", logLevel)
+	log.Info("Starting RHDH must-gather collection...")
+	log.Info("Output directory: %s", basePath)
+	log.Info("Log level: %s", logLevel)
 
 	ver := getVersion()
 	versionFile := filepath.Join(basePath, "version")
@@ -60,32 +64,32 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	}
 
 	if err := runInit(scriptDir, env); err != nil {
-		logError("Failed to initialize must-gather environment")
+		log.Error("Failed to initialize must-gather environment")
 		return err
 	}
 
 	scripts := buildScriptList(cmd, opts)
-	logInfo("running the following scripts: %s", strings.Join(scripts, " "))
+	log.Info("running the following scripts: %s", strings.Join(scripts, " "))
 
 	if opts.withSecrets {
-		logWarn("Secret collection enabled - sensitive data will be included (and sanitized)")
+		log.Warn("Secret collection enabled - sensitive data will be included (and sanitized)")
 	} else {
-		logInfo("Secret collection disabled by default (use --with-secrets to enable)")
+		log.Info("Secret collection disabled by default (use --with-secrets to enable)")
 	}
 	if opts.withHeapDumps {
 		heapTimeout := getEnvDefault("HEAP_DUMP_TIMEOUT", "600")
 		if opts.heapDumpInstances != "" {
-			logWarn("Heap dump collection enabled (method: %s, timeout: %ss, instances: %s)",
+			log.Warn("Heap dump collection enabled (method: %s, timeout: %ss, instances: %s)",
 				opts.heapDumpMethod, heapTimeout, opts.heapDumpInstances)
 		} else {
-			logWarn("Heap dump collection enabled (method: %s, timeout: %ss, all instances)",
+			log.Warn("Heap dump collection enabled (method: %s, timeout: %ss, all instances)",
 				opts.heapDumpMethod, heapTimeout)
 		}
-		logWarn("Heap snapshots block the Node.js event loop. Pods with short liveness probe timeouts may restart.")
-		logWarn("Consider increasing failureThreshold or timeoutSeconds on liveness probes before collecting.")
+		log.Warn("Heap snapshots block the Node.js event loop. Pods with short liveness probe timeouts may restart.")
+		log.Warn("Consider increasing failureThreshold or timeoutSeconds on liveness probes before collecting.")
 	}
 	if opts.namespaces != "" {
-		logInfo("Limiting collection to namespaces: %s", opts.namespaces)
+		log.Info("Limiting collection to namespaces: %s", opts.namespaces)
 	}
 
 	for _, script := range scripts {
@@ -93,24 +97,24 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 			break
 		}
 		name := "gather_" + script
-		logInfo("running %s", name)
+		log.Info("running %s", name)
 		exitCode := runScript(scriptDir, name, env)
 		if exitCode == 130 || exitCode == 143 {
 			return &exitError{code: exitCode}
 		}
 		if exitCode != 0 {
-			logWarn("Failed to run %s, continuing with next script...", name)
+			log.Warn("Failed to run %s, continuing with next script...", name)
 		}
 	}
 
 	if !interrupted.Load() {
-		logInfo("running logs")
+		log.Info("running logs")
 		exitCode := runScript(scriptDir, "logs.sh", env)
 		if exitCode == 130 || exitCode == 143 {
 			return &exitError{code: exitCode}
 		}
 		if exitCode != 0 {
-			logWarn("Failed to run logs.sh, continuing...")
+			log.Warn("Failed to run logs.sh, continuing...")
 		}
 	}
 
