@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -11,6 +12,7 @@ import (
 
 type Client struct {
 	Clientset kubernetes.Interface
+	Dynamic   dynamic.Interface
 	Discovery discovery.DiscoveryInterface
 	Config    *rest.Config
 }
@@ -32,8 +34,14 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
+	dynClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+
 	return &Client{
 		Clientset: clientset,
+		Dynamic:   dynClient,
 		Discovery: clientset.Discovery(),
 		Config:    config,
 	}, nil
