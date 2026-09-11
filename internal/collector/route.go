@@ -87,9 +87,3 @@ func getString(obj unstructured.Unstructured, fields ...string) string {
 	return val
 }
 
-func writeCollectError(path, description string, err error) {
-	content := fmt.Sprintf("Command failed or timed out: %s\n\n=== Error Details ===\n%s\n", description, err)
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, []byte(content), 0o644)
-	log.Warn("\tFailed: %s — %v", description, err)
-}
