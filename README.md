@@ -338,6 +338,13 @@ Usage: ./must_gather [params...]
 │   │           │       ├── pods.txt
 │   │           │       ├── pods.yaml
 │   │           │       └── pods.describe.txt
+│   │           ├── dependencies/        # Additional Helm Deployments, if present (for example, OKP)
+│   │           │   └── [deployment-name]/
+│   │           │       ├── deployment.yaml
+│   │           │       ├── deployment.describe.txt
+│   │           │       ├── logs/        # Per-pod, per-container current and previous logs
+│   │           │       ├── pods/        # Pod listing and descriptions
+│   │           │       └── rollout-history/
 │   │           └── db-statefulset/     # Database StatefulSet info (if database enabled)
 │   │               ├── db-statefulset.yaml
 │   │               ├── db-statefulset.describe.txt
