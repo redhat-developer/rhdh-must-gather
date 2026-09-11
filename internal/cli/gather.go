@@ -86,7 +86,6 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		Interrupted:   &interrupted,
 		WithSecrets:   opts.withSecrets,
 		WithHeapDumps: opts.withHeapDumps,
-		ScriptDir:     scriptDir,
 		Env:           env,
 	}
 

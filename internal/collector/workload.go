@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -166,31 +165,6 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 
 	collectRolloutHistory(ctx, cfg, ns, KindStatefulSet, sts.Spec.Selector.MatchLabels, stsDir)
 	return nil
-}
-
-// collectHeapDumps delegates to the bash collect_heap_dumps_for_pods function.
-// T9 (RHIDP-16552) will replace this with a native Go implementation.
-func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instanceName, kind string) {
-	if !cfg.WithHeapDumps {
-		return
-	}
-	commonSh := filepath.Join(cfg.ScriptDir, "common.sh")
-	if _, err := os.Stat(commonSh); err != nil {
-		log.Debug("Skipping heap dump collection: common.sh not found at %s", commonSh)
-		return
-	}
-
-	script := fmt.Sprintf(
-		`source %q && collect_heap_dumps_for_pods %q %q %q %q %q %q`,
-		commonSh, ns, labelSelector, outDir, deployName, instanceName, kind,
-	)
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = cfg.Env
-	if err := cmd.Run(); err != nil {
-		log.Warn("Heap dump collection failed for %s/%s: %v", ns, deployName, err)
-	}
 }
 
 func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind WorkloadKind, matchLabels map[string]string, outDir string) {
