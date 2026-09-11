@@ -40,6 +40,30 @@ func TestParseSections_Empty(t *testing.T) {
 	}
 }
 
+func TestParseSections_NestedFileMarkers(t *testing.T) {
+	input := `===LS===
+drwxr-xr-x 3 root root 4096 Jan  1 00:00 plugin-a
+===CONFIG===
+some config
+===PACKAGES===
+===FILE:/opt/app-root/src/dynamic-plugins-root/plugin-a/package.json===
+{"name": "plugin-a"}
+===FILE:/opt/app-root/src/dynamic-plugins-root/plugin-b/package.json===
+{"name": "plugin-b"}`
+
+	sections := parseSections(input)
+
+	if !strings.Contains(sections["PACKAGES"], "===FILE:") {
+		t.Errorf("PACKAGES section should preserve ===FILE:...=== markers, got: %q", sections["PACKAGES"])
+	}
+	if !strings.Contains(sections["PACKAGES"], "plugin-a") {
+		t.Error("PACKAGES section missing plugin-a content")
+	}
+	if !strings.Contains(sections["PACKAGES"], "plugin-b") {
+		t.Error("PACKAGES section missing plugin-b content")
+	}
+}
+
 func TestParseKeyValues(t *testing.T) {
 	input := `BACKSTAGE_VERSION=1.2.3
 RHDH_VERSION=1.5.0

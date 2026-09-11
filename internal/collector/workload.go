@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -45,6 +48,7 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 			return fmt.Errorf("getting deployment %s/%s: %w", ns, ref.Name, err)
 		}
 		writeResource(filepath.Join(outDir, "deployment.yaml"), dep)
+		describeResource(ctx, filepath.Join(outDir, "deployment.describe.txt"), "deployment", ns, ref.Name)
 		labelSelector = labels.Set(dep.Spec.Selector.MatchLabels).String()
 		collectRolloutHistory(ctx, cfg, ns, ref.Kind, dep.Spec.Selector.MatchLabels, outDir)
 
@@ -54,6 +58,7 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 			return fmt.Errorf("getting statefulset %s/%s: %w", ns, ref.Name, err)
 		}
 		writeResource(filepath.Join(outDir, "statefulset.yaml"), sts)
+		describeResource(ctx, filepath.Join(outDir, "statefulset.describe.txt"), "statefulset", ns, ref.Name)
 		labelSelector = labels.Set(sts.Spec.Selector.MatchLabels).String()
 		collectRolloutHistory(ctx, cfg, ns, ref.Kind, sts.Spec.Selector.MatchLabels, outDir)
 	}
@@ -75,9 +80,14 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 		ownerKind := ownerRefKind(ref.Kind)
 		msg := fmt.Sprintf("No pods found with owner kind %s\n", ownerKind)
 		_ = os.WriteFile(filepath.Join(podsDir, "pods.yaml"), []byte(msg), 0o644)
+		_ = os.WriteFile(filepath.Join(podsDir, "pods.txt"), []byte(msg), 0o644)
+		_ = os.WriteFile(filepath.Join(podsDir, "pods.describe.txt"), []byte(msg), 0o644)
 		log.Warn("\tNo pods found for %s %s/%s with owner %s", ref.Kind, ns, ref.Name, ownerKind)
 	} else {
-		writeResource(filepath.Join(podsDir, "pods.yaml"), &corev1.PodList{Items: pods})
+		podList := &corev1.PodList{Items: pods}
+		writeResource(filepath.Join(podsDir, "pods.yaml"), podList)
+		describeResource(ctx, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", labelSelector)
+		writePodTable(filepath.Join(podsDir, "pods.txt"), pods)
 	}
 
 	var wg sync.WaitGroup
@@ -128,8 +138,11 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 		return nil
 	}
 	writeResource(filepath.Join(stsDir, "db-statefulset.yaml"), sts)
+	describeResource(ctx, filepath.Join(stsDir, "db-statefulset.describe.txt"), "statefulset", ns, name)
 
 	sel := labels.Set(sts.Spec.Selector.MatchLabels).String()
+	writeAggregatedStatefulSetLogs(ctx, client, ns, name, sel, stsDir)
+
 	if sel == "" {
 		return nil
 	}
@@ -139,6 +152,8 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 		podsDir := filepath.Join(stsDir, "pods")
 		_ = os.MkdirAll(podsDir, 0o755)
 		writeResource(filepath.Join(podsDir, "pods.yaml"), podList)
+		describeResource(ctx, filepath.Join(podsDir, "pods.describe.txt"), "pods", ns, "-l", sel)
+		writePodTable(filepath.Join(podsDir, "pods.txt"), podList.Items)
 
 		for i := range podList.Items {
 			pod := &podList.Items[i]
@@ -163,7 +178,13 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 		_ = os.MkdirAll(rsDir, 0o755)
 		rsList, err := client.AppsV1().ReplicaSets(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 		if err == nil {
+			setGVK(rsList, "ReplicaSetList", "apps/v1")
+			for i := range rsList.Items {
+				setGVK(&rsList.Items[i], "ReplicaSet", "apps/v1")
+			}
 			writeResource(filepath.Join(rsDir, "replicasets.yaml"), rsList)
+			describeResource(ctx, filepath.Join(rsDir, "replicasets.describe.txt"), "replicasets", ns, "-l", sel)
+			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "deployment", rsList.Items)
 		}
 
 	case KindStatefulSet:
@@ -171,7 +192,13 @@ func collectRolloutHistory(ctx context.Context, cfg *Config, ns string, kind Wor
 		_ = os.MkdirAll(crDir, 0o755)
 		crList, err := client.AppsV1().ControllerRevisions(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 		if err == nil {
+			setGVK(crList, "ControllerRevisionList", "apps/v1")
+			for i := range crList.Items {
+				setGVK(&crList.Items[i], "ControllerRevision", "apps/v1")
+			}
 			writeResource(filepath.Join(crDir, "controllerrevisions.yaml"), crList)
+			describeResource(ctx, filepath.Join(crDir, "controllerrevisions.describe.txt"), "controllerrevisions", ns, "-l", sel)
+			writeRolloutHistoryText(filepath.Join(histDir, "history.txt"), "statefulset", crList.Items)
 		}
 	}
 }
@@ -201,6 +228,55 @@ func ownerRefKind(kind WorkloadKind) string {
 	}
 }
 
+func writePodTable(path string, pods []corev1.Pod) {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-60s  %-10s  %s\n", "NAME", "READY", "STATUS")
+	for _, pod := range pods {
+		ready := 0
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.Ready {
+				ready++
+			}
+		}
+		total := len(pod.Spec.Containers)
+		fmt.Fprintf(&sb, "%-60s  %d/%d        %s\n", pod.Name, ready, total, pod.Status.Phase)
+	}
+	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+func writeRolloutHistoryText(path string, kind string, items any) {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s rollout history:\n", kind)
+	sb.WriteString("REVISION  CHANGE-CAUSE\n")
+
+	switch v := items.(type) {
+	case []appsv1.ReplicaSet:
+		for _, rs := range v {
+			rev := rs.Annotations["deployment.kubernetes.io/revision"]
+			cause := rs.Annotations["kubernetes.io/change-cause"]
+			if cause == "" {
+				cause = "<none>"
+			}
+			fmt.Fprintf(&sb, "%-10s%s\n", rev, cause)
+		}
+	case []appsv1.ControllerRevision:
+		for _, cr := range v {
+			fmt.Fprintf(&sb, "%-10d%s\n", cr.Revision, "<none>")
+		}
+	}
+
+	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+func writeAggregatedStatefulSetLogs(ctx context.Context, client kubernetes.Interface, ns, stsName, sel, stsDir string) {
+	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
+	if err != nil || len(pods.Items) == 0 {
+		return
+	}
+	writeAggregatedLogs(ctx, client, ns, pods.Items, false, filepath.Join(stsDir, "logs-db.txt"))
+	writeAggregatedLogs(ctx, client, ns, pods.Items, true, filepath.Join(stsDir, "logs-db-previous.txt"))
+}
+
 func CollectNamespaceData(ctx context.Context, cfg *Config, ns, outDir string, withSecrets bool) {
 	_ = os.MkdirAll(outDir, 0o755)
 	client := cfg.Client.Clientset
@@ -212,6 +288,7 @@ func CollectNamespaceData(ctx context.Context, cfg *Config, ns, outDir string, w
 		for i := range cmList.Items {
 			cm := &cmList.Items[i]
 			writeResource(filepath.Join(cmDir, cm.Name+".yaml"), cm)
+			describeResource(ctx, filepath.Join(cmDir, cm.Name+".describe.txt"), "configmap", ns, cm.Name)
 		}
 	}
 
