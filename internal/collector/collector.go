@@ -9,10 +9,13 @@ import (
 )
 
 type Config struct {
-	Client      *kube.Client
-	BasePath    string
-	Interrupted *atomic.Bool
-	WithSecrets bool
+	Client        *kube.Client
+	BasePath      string
+	Interrupted   *atomic.Bool
+	WithSecrets   bool
+	WithHeapDumps bool
+	ScriptDir     string
+	Env           []string
 }
 
 type Collector interface {
@@ -39,4 +42,5 @@ var Registry = map[string]Collector{
 	"cluster-info": &ClusterInfo{},
 	"operator":     &Operator{},
 	"orchestrator": &Orchestrator{},
+	"helm":         &Helm{},
 }
