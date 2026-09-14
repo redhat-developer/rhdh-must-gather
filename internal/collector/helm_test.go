@@ -1,10 +1,19 @@
 package collector
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+
+	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/release"
+	"helm.sh/helm/v4/pkg/release/common"
+	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 )
 
 func TestFilterSecretsFromYAML(t *testing.T) {
@@ -173,4 +182,152 @@ func TestHelmName(t *testing.T) {
 
 func emptyPodSpec() corev1.PodSpec {
 	return corev1.PodSpec{}
+}
+
+func makeTestRelease(name, ns string, version int, chartName, chartVersion, appVersion, description string) *releasev1.Release {
+	return &releasev1.Release{
+		Name:      name,
+		Namespace: ns,
+		Version:   version,
+		Info: &releasev1.Info{
+			Status:       common.StatusDeployed,
+			LastDeployed: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
+			Description:  description,
+		},
+		Chart: &chartv2.Chart{
+			Metadata: &chartv2.Metadata{
+				Name:       chartName,
+				Version:    chartVersion,
+				AppVersion: appVersion,
+			},
+		},
+	}
+}
+
+func TestChartLabel(t *testing.T) {
+	rel := makeTestRelease("my-release", "default", 1, "backstage", "1.5.0", "1.4.0", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+	got := chartLabel(acc)
+	if got != "backstage-1.5.0" {
+		t.Errorf("chartLabel() = %q, want %q", got, "backstage-1.5.0")
+	}
+}
+
+func TestChartLabel_NoVersion(t *testing.T) {
+	rel := makeTestRelease("my-release", "default", 1, "backstage", "", "1.4.0", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+	got := chartLabel(acc)
+	if got != "backstage-" {
+		t.Errorf("chartLabel(no version) = %q, want %q", got, "backstage-")
+	}
+}
+
+func TestChartAppVersion(t *testing.T) {
+	rel := makeTestRelease("my-release", "default", 1, "backstage", "1.5.0", "1.4.0", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+	got := chartAppVersion(acc)
+	if got != "1.4.0" {
+		t.Errorf("chartAppVersion() = %q, want %q", got, "1.4.0")
+	}
+}
+
+func TestChartAppVersion_Empty(t *testing.T) {
+	rel := makeTestRelease("my-release", "default", 1, "backstage", "1.5.0", "", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+	got := chartAppVersion(acc)
+	if got != "" {
+		t.Errorf("chartAppVersion(no appVersion) = %q, want empty", got)
+	}
+}
+
+func TestReleaseDescription(t *testing.T) {
+	rel := makeTestRelease("my-release", "default", 1, "backstage", "1.0.0", "", "Install complete")
+	got := releaseDescription(rel)
+	if got != "Install complete" {
+		t.Errorf("releaseDescription() = %q, want %q", got, "Install complete")
+	}
+}
+
+func TestReleaseDescription_NilInfo(t *testing.T) {
+	rel := &releasev1.Release{Name: "no-info"}
+	got := releaseDescription(rel)
+	if got != "" {
+		t.Errorf("releaseDescription(nil info) = %q, want empty", got)
+	}
+}
+
+func TestWriteReleasesJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "releases.json")
+
+	rel := makeTestRelease("rhdh", "rhdh-operator", 3, "backstage", "1.5.0", "1.4.0", "Upgrade complete")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	h := &Helm{}
+	h.writeReleasesJSON(path, []release.Accessor{acc})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(data, &items); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+	if items[0]["name"] != "rhdh" {
+		t.Errorf("name = %v, want rhdh", items[0]["name"])
+	}
+	if items[0]["chart"] != "backstage-1.5.0" {
+		t.Errorf("chart = %v, want backstage-1.5.0", items[0]["chart"])
+	}
+	if items[0]["app_version"] != "1.4.0" {
+		t.Errorf("app_version = %v, want 1.4.0", items[0]["app_version"])
+	}
+	ts, ok := items[0]["updated"].(string)
+	if !ok {
+		t.Fatal("updated is not a string")
+	}
+	if _, err := time.Parse(time.RFC3339, ts); err != nil {
+		t.Errorf("updated %q is not valid RFC3339: %v", ts, err)
+	}
+}
+
+func TestWriteReleasesJSON_Empty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "releases.json")
+
+	h := &Helm{}
+	h.writeReleasesJSON(path, nil)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal(data, &items); err != nil {
+		t.Fatalf("Unmarshal: %v (data=%s)", err, data)
+	}
+	if len(items) != 0 {
+		t.Errorf("got %d items, want 0", len(items))
+	}
 }

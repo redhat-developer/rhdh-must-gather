@@ -32,6 +32,8 @@ type Helm struct{}
 
 func (h *Helm) Name() string { return "helm" }
 
+const helmTimestampLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
+
 var (
 	rhdhPatternRE      = regexp.MustCompile(`(?i)(backstage|rhdh|developer-hub)`)
 	rhdhImagePatternRE = regexp.MustCompile(`(?i)(quay\.io/rhdh|registry\.redhat\.io/rhdh|ghcr\.io/backstage/backstage)`)
@@ -602,7 +604,7 @@ func (h *Helm) writeReleasesTable(path string, releases []release.Accessor) {
 	for _, acc := range releases {
 		fmt.Fprintf(&sb, "%-30s\t%-12s\t%-10d\t%-40s\t%-10s\t%-40s\t%s\n",
 			acc.Name(), acc.Namespace(), acc.Version(),
-			acc.DeployedAt().Format("2006-01-02 15:04:05.999999999 -0700 MST"),
+			acc.DeployedAt().Format(helmTimestampLayout),
 			acc.Status(), chartLabel(acc), chartAppVersion(acc))
 	}
 	if len(releases) == 0 {
@@ -645,16 +647,16 @@ func releaseDescription(rel release.Releaser) string {
 
 func (h *Helm) writeHistoryText(path string, releases []release.Releaser) {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-10s  %-30s  %-12s  %-30s  %s\n",
-		"REVISION", "UPDATED", "STATUS", "CHART", "DESCRIPTION")
+	fmt.Fprintf(&sb, "%-10s\t%-40s\t%-12s\t%-30s\t%-20s\t%s\n",
+		"REVISION", "UPDATED", "STATUS", "CHART", "APP VERSION", "DESCRIPTION")
 	for _, rel := range releases {
 		acc, err := release.NewAccessor(rel)
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&sb, "%-10d  %-30s  %-12s  %-30s  %s\n",
-			acc.Version(), acc.DeployedAt().Format(time.RFC3339),
-			acc.Status(), chartLabel(acc), releaseDescription(rel))
+		fmt.Fprintf(&sb, "%-10d\t%-40s\t%-12s\t%-30s\t%-20s\t%s\n",
+			acc.Version(), acc.DeployedAt().Format(helmTimestampLayout),
+			acc.Status(), chartLabel(acc), chartAppVersion(acc), releaseDescription(rel))
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
