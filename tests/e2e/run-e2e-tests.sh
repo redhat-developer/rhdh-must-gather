@@ -244,6 +244,7 @@ log_info "Cloning redhat-developer/rhdh-chart (branch: $EFFECTIVE_CHART_BRANCH).
 git clone --depth 1 --branch "$EFFECTIVE_CHART_BRANCH" \
     https://github.com/redhat-developer/rhdh-chart.git "$RHDH_CHART_DIR"
 RHDH_CHART_PATH="$RHDH_CHART_DIR/charts/backstage"
+helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
 helm dependency build "$RHDH_CHART_PATH"
 CLEANUP_TASKS+=("rm -rf $RHDH_CHART_DIR")
 
