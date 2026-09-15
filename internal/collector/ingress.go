@@ -52,7 +52,7 @@ func (i *Ingress) Run(ctx context.Context, cfg *Config) error {
 		class := ingressClass(&ing)
 		hosts := ingressHosts(ing.Spec.Rules)
 		address := ingressAddress(ing.Status.LoadBalancer.Ingress)
-		ports := ingressPorts(ing.Spec.Rules, ing.Spec.TLS)
+		ports := ingressPorts(ing.Spec.Rules, ing.Spec.TLS, ing.Spec.DefaultBackend)
 		age := duration.ShortHumanDuration(time.Since(ing.CreationTimestamp.Time))
 		fmt.Fprintf(&sb, "%-15s %-45s %-15s %-50s %-50s %-10s %s\n",
 			ing.Namespace, ing.Name, class, hosts, address, ports, age)
@@ -94,15 +94,12 @@ func ingressClass(ing *networkingv1.Ingress) string {
 	if ing.Spec.IngressClassName != nil {
 		return *ing.Spec.IngressClassName
 	}
-	if v, ok := ing.Annotations["kubernetes.io/ingress.class"]; ok {
-		return v
-	}
 	return "<none>"
 }
 
-func ingressPorts(rules []networkingv1.IngressRule, tls []networkingv1.IngressTLS) string {
+func ingressPorts(rules []networkingv1.IngressRule, tls []networkingv1.IngressTLS, defaultBackend *networkingv1.IngressBackend) string {
 	var ports []string
-	if len(rules) > 0 {
+	if len(rules) > 0 || defaultBackend != nil {
 		ports = append(ports, "80")
 	}
 	if len(tls) > 0 {

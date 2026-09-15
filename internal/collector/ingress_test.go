@@ -21,29 +21,18 @@ func TestIngressClass(t *testing.T) {
 			want: "nginx",
 		},
 		{
-			name: "annotation fallback",
-			ing: &networkingv1.Ingress{},
+			name: "no class",
+			ing:  &networkingv1.Ingress{},
 			want: "<none>",
 		},
 		{
-			name: "annotation",
+			name: "annotation ignored",
 			ing: func() *networkingv1.Ingress {
 				ing := &networkingv1.Ingress{}
 				ing.Annotations = map[string]string{"kubernetes.io/ingress.class": "haproxy"}
 				return ing
 			}(),
-			want: "haproxy",
-		},
-		{
-			name: "spec takes precedence over annotation",
-			ing: func() *networkingv1.Ingress {
-				ing := &networkingv1.Ingress{
-					Spec: networkingv1.IngressSpec{IngressClassName: &className},
-				}
-				ing.Annotations = map[string]string{"kubernetes.io/ingress.class": "haproxy"}
-				return ing
-			}(),
-			want: "nginx",
+			want: "<none>",
 		},
 	}
 	for _, tt := range tests {
@@ -57,11 +46,15 @@ func TestIngressClass(t *testing.T) {
 }
 
 func TestIngressPorts(t *testing.T) {
+	defaultBackend := &networkingv1.IngressBackend{
+		Service: &networkingv1.IngressServiceBackend{Name: "svc", Port: networkingv1.ServiceBackendPort{Number: 8080}},
+	}
 	tests := []struct {
-		name  string
-		rules []networkingv1.IngressRule
-		tls   []networkingv1.IngressTLS
-		want  string
+		name           string
+		rules          []networkingv1.IngressRule
+		tls            []networkingv1.IngressTLS
+		defaultBackend *networkingv1.IngressBackend
+		want           string
 	}{
 		{
 			name:  "rules only",
@@ -69,9 +62,10 @@ func TestIngressPorts(t *testing.T) {
 			want:  "80",
 		},
 		{
-			name: "tls only",
-			tls:  []networkingv1.IngressTLS{{Hosts: []string{"example.com"}}},
-			want: "443",
+			name:           "tls and default backend",
+			tls:            []networkingv1.IngressTLS{{Hosts: []string{"example.com"}}},
+			defaultBackend: defaultBackend,
+			want:           "80, 443",
 		},
 		{
 			name:  "rules and tls",
@@ -80,13 +74,23 @@ func TestIngressPorts(t *testing.T) {
 			want:  "80, 443",
 		},
 		{
+			name:           "default backend only",
+			defaultBackend: defaultBackend,
+			want:           "80",
+		},
+		{
+			name: "tls only no backend",
+			tls:  []networkingv1.IngressTLS{{Hosts: []string{"example.com"}}},
+			want: "443",
+		},
+		{
 			name: "neither",
 			want: "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ingressPorts(tt.rules, tt.tls)
+			got := ingressPorts(tt.rules, tt.tls, tt.defaultBackend)
 			if got != tt.want {
 				t.Errorf("ingressPorts() = %q, want %q", got, tt.want)
 			}
