@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2016 # Single quotes are intentional: grep patterns match literal $var in source files
 # Unit tests for gather_helm script
 
 load 'test_helper'
@@ -118,6 +119,19 @@ teardown() {
 
 @test "gather_helm checks container images for standalone detection" {
     run grep -q 'spec.template.spec.containers' "${SCRIPTS_DIR}/gather_helm"
+    [ "$status" -eq 0 ]
+}
+
+@test "gather_helm processes every Deployment in a native Helm release" {
+    run grep -q 'while IFS= read -r deploy' "${SCRIPTS_DIR}/gather_helm"
+    [ "$status" -eq 0 ]
+
+    run grep -q 'done <<< "$deployments"' "${SCRIPTS_DIR}/gather_helm"
+    [ "$status" -eq 0 ]
+}
+
+@test "gather_helm collects non-RHDH Deployments as release dependencies" {
+    run grep -q 'dependencies/\$deploy.*"false"' "${SCRIPTS_DIR}/gather_helm"
     [ "$status" -eq 0 ]
 }
 

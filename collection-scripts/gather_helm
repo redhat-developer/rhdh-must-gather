@@ -139,18 +139,30 @@ for release_info in $releases; do
         fi
     fi
 
-    # Collect app-specific info and track processed deployments
-    deploy=$(yq -r 'select(.kind=="Deployment") | .metadata.name' < "$release_dir/manifest.yaml" || true)
+    # Collect app-specific info and track processed workloads. A release can
+    # contain multiple Deployments (for example, RHDH plus Intelligent
+    # Assistant's OKP). Process each name separately instead of passing the
+    # newline-delimited yq result as one invalid Deployment name.
+    deployments=$(yq -r 'select(.kind=="Deployment") | .metadata.name' < "$release_dir/manifest.yaml" | grep -v '^---$' || true)
     statefulset=$(yq -r 'select(.kind=="StatefulSet") | .metadata.name' < "$release_dir/manifest.yaml" || true)
-    if [[ -n "$deploy" ]]; then
-        collect_rhdh_workload "$release_ns" "$deploy" "deployment" "$release_dir/deployment" "$release_name"
-    fi
+
+    while IFS= read -r deploy; do
+        [[ -z "$deploy" ]] && continue
+
+        container_names=$($KUBECTL_CMD -n "$release_ns" get deployment "$deploy" -o jsonpath='{.spec.template.spec.containers[*].name}' 2>/dev/null || true)
+        if [[ " $container_names " == *" backstage-backend "* ]]; then
+            collect_rhdh_workload "$release_ns" "$deploy" "deployment" "$release_dir/deployment" "$release_name"
+        else
+            log_info "    --> Collecting Helm dependency Deployment: $deploy"
+            collect_rhdh_workload "$release_ns" "$deploy" "deployment" "$release_dir/dependencies/$deploy" "$release_name" "false"
+        fi
+
+        processed_deployments["$release_ns/$deploy"]=1
+    done <<< "$deployments"
+
     collect_rhdh_db_statefulset "$release_ns" "$statefulset" "$release_dir"
 
-    # Track processed deployments to avoid duplicates in Phase 2
-    if [[ -n "$deploy" ]]; then
-        processed_deployments["$release_ns/$deploy"]=1
-    fi
+    # Track processed StatefulSets to avoid duplicates in Phase 2
     if [[ -n "$statefulset" ]]; then
         processed_deployments["$release_ns/$statefulset"]=1
     fi

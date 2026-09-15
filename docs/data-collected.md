@@ -16,6 +16,7 @@ This tool focuses exclusively on RHDH-related resources, as well as some very mi
 - **Release Information**: Helm releases, history, status
 - **Configuration**: User-provided values, computed values, manifests, hooks, and notes
 - **Kubernetes Manifests**: Deployments, StatefulSets with full YAML definitions and descriptions
+- **Release Dependencies**: Additional Deployments in the release, such as the Intelligent Assistant OKP workload, including pod state, rollout history, and per-container logs
 - **[Application Runtime Data](#application-runtime-data-extracted-from-rhdh-containers-if-running)**
 
 #### Operator Deployments
@@ -96,6 +97,7 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 
 #### Logs and Runtime Data
 - **Per-pod, per-container logs**: Logs are collected from all pods (including non-running, for previous logs) and organized under `logs/pod=[pod-name]/container=[container-name]/` with `current.txt` and `previous.txt`. Containers are discovered dynamically (not hardcoded).
+- **Intelligent Assistant diagnostics**: LCORE sidecar logs are collected with the RHDH Deployment, while a Helm-managed OKP Deployment is collected under the release's `dependencies/` directory.
 - **Aggregated pod logs**: Each pod directory also contains `logs-app.current.txt` and `logs-app.previous.txt` combining all container logs with `--all-containers --prefix` for a unified view.
 - **Configurable time windows**: Use `MUST_GATHER_SINCE` or `MUST_GATHER_SINCE_TIME` to limit log collection.
 - **Local Database logs** from PostgreSQL StatefulSets, unless the app is configured to connect to external databases

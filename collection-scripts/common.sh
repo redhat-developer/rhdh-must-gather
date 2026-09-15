@@ -1794,6 +1794,10 @@ collect_rhdh_workload() {
   local kind="$3"  # "deployment" or "statefulset"
   local output_dir="$4"
   local instance_name="${5:-}"
+  # Dependencies such as Intelligent Assistant's OKP Deployment need their
+  # resource state, pods, and logs collected, but do not contain an RHDH app
+  # container from which Backstage metadata or heap dumps can be gathered.
+  local collect_app_data="${6:-true}"
 
   log_debug "Collecting $kind $name in $ns"
   ensure_directory "$output_dir"
@@ -1847,9 +1851,13 @@ collect_rhdh_workload() {
     _collect_pod_logs "$ns" "$pod" "$output_dir/logs/pod=$pod"
   done
 
-  # Per-pod app data + processes (from running pods only)
-  collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
-  collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
+  # Per-pod app data + processes (from running pods only). Skip this for
+  # non-RHDH dependency workloads; their pod and per-container logs above are
+  # still collected.
+  if [[ "$collect_app_data" == "true" ]]; then
+    collect_rhdh_info_from_running_pods "$ns" "$labels" "$output_dir" "$kind"
+    collect_heap_dumps_for_pods "$ns" "$labels" "$output_dir" "$name" "$instance_name" "$kind" || true
+  fi
 }
 
 _collect_pod_logs() {
