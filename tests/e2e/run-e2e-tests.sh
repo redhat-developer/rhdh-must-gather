@@ -12,7 +12,7 @@
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
 #   --target-branch <branch> Target branch (used for defaults, default: main)
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
-
+#   --chart-branch <branch> Override RHDH Helm chart branch (default: derived from --target-branch)
 #   --helm-values-file <file> Override Helm values file (default: auto-generated from --target-branch)
 #   --skip-helm         Skip Helm release test
 #   --skip-helm-standalone Skip standalone Helm deployment test
@@ -89,7 +89,7 @@ FULL_IMAGE_NAME=""
 LOCAL_MODE=false
 TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
-
+CHART_BRANCH=""
 HELM_VALUES_FILE=""
 SKIP_HELM=false
 SKIP_HELM_STANDALONE=false
@@ -118,6 +118,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --operator-branch)
             OPERATOR_BRANCH="$2"
+            shift 2
+            ;;
+        --chart-branch)
+            CHART_BRANCH="$2"
             shift 2
             ;;
         --helm-chart-version)
@@ -214,8 +218,9 @@ cd "$PROJECT_ROOT"
 
 log_info "Working directory: $PROJECT_ROOT"
 
-# Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
+# Use override branches if provided, otherwise use TARGET_BRANCH
 EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
+EFFECTIVE_CHART_BRANCH="${CHART_BRANCH:-$TARGET_BRANCH}"
 
 # Generate timestamp for namespace naming
 TIMESTAMP=$(date +%s)
@@ -235,9 +240,8 @@ log_info "=========================================="
 # This avoids downstream OCI chart quirks (digest-based image refs,
 # lightspeed enabled by default, etc.).
 RHDH_CHART_DIR="$(mktemp -d)"
-RHDH_CHART_BRANCH="${TARGET_BRANCH}"
-log_info "Cloning redhat-developer/rhdh-chart (branch: $RHDH_CHART_BRANCH)..."
-git clone --depth 1 --branch "$RHDH_CHART_BRANCH" \
+log_info "Cloning redhat-developer/rhdh-chart (branch: $EFFECTIVE_CHART_BRANCH)..."
+git clone --depth 1 --branch "$EFFECTIVE_CHART_BRANCH" \
     https://github.com/redhat-developer/rhdh-chart.git "$RHDH_CHART_DIR"
 RHDH_CHART_PATH="$RHDH_CHART_DIR/charts/backstage"
 helm dependency build "$RHDH_CHART_PATH"
