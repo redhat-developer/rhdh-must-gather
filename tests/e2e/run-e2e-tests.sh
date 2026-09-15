@@ -265,10 +265,6 @@ upstream:
     # Purposely disable the local database to simulate a misconfigured application (missing external database info)
     enabled: false
 global:
-  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
-  catalogIndex:
-    image:
-      tag: "1.10-51"
   # Disabling lightspeed as the main RHDH container is expected to fail to start anyway
   lightspeed:
     enabled: false
@@ -376,10 +372,6 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
 route:
   enabled: false
 global:
-  # TODO(asoro): RHDHBUGS-3095: remove this pin once the ghcr.io reference issue is fixed
-  catalogIndex:
-    image:
-      tag: "1.10-51"
   dynamic:
     includes:
       - dynamic-plugins.default.yaml
@@ -521,18 +513,11 @@ EOF
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
-    BACKSTAGE_CR_EXTRA_ENVS='
+    BACKSTAGE_CR_EXTRA_ENVS=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_EXTRA_ENVS='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_EXTRA_ENVS="$BACKSTAGE_CR_EXTRA_ENVS"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi
@@ -549,18 +534,11 @@ EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-    # TODO(asoro): RHDHBUGS-3095: remove CATALOG_INDEX_IMAGE pin once the ghcr.io reference issue is fixed
-    # Build CR spec - add CATALOG_INDEX_IMAGE (RHDHBUGS-3095 workaround) and
-    # optionally NODE_OPTIONS for SIGUSR2 heap dump method
-    BACKSTAGE_CR_STS_EXTRA='
+    BACKSTAGE_CR_STS_EXTRA=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_STS_EXTRA='
     extraEnvs:
       envs:
-        - name: CATALOG_INDEX_IMAGE
-          value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-          containers:
-            - install-dynamic-plugins'
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_STS_EXTRA="$BACKSTAGE_CR_STS_EXTRA"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi
