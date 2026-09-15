@@ -125,6 +125,10 @@ test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
 	@./tests/e2e/run-e2e-tests.sh --local \
+		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
+		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
+		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
+		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)") \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")

@@ -78,7 +78,9 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests (local mode)
-        run: make test-e2e
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: make test-e2e TARGET_BRANCH="$BASE_REF"
 
       - name: Upload E2E must-gather output in case of failure
         if: ${{ failure() }}
