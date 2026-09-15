@@ -94,6 +94,9 @@ func ingressClass(ing *networkingv1.Ingress) string {
 	if ing.Spec.IngressClassName != nil {
 		return *ing.Spec.IngressClassName
 	}
+	if v, ok := ing.Annotations["kubernetes.io/ingress.class"]; ok {
+		return v
+	}
 	return "<none>"
 }
 

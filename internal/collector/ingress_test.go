@@ -26,13 +26,24 @@ func TestIngressClass(t *testing.T) {
 			want: "<none>",
 		},
 		{
-			name: "annotation ignored",
+			name: "annotation fallback",
 			ing: func() *networkingv1.Ingress {
 				ing := &networkingv1.Ingress{}
 				ing.Annotations = map[string]string{"kubernetes.io/ingress.class": "haproxy"}
 				return ing
 			}(),
-			want: "<none>",
+			want: "haproxy",
+		},
+		{
+			name: "spec takes precedence over annotation",
+			ing: func() *networkingv1.Ingress {
+				ing := &networkingv1.Ingress{
+					Spec: networkingv1.IngressSpec{IngressClassName: &className},
+				}
+				ing.Annotations = map[string]string{"kubernetes.io/ingress.class": "haproxy"}
+				return ing
+			}(),
+			want: "nginx",
 		},
 	}
 	for _, tt := range tests {
