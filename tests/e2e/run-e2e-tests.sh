@@ -12,7 +12,7 @@
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
 #   --target-branch <branch> Target branch (used for defaults, default: main)
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
-#   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
+
 #   --helm-values-file <file> Override Helm values file (default: auto-generated from --target-branch)
 #   --skip-helm         Skip Helm release test
 #   --skip-helm-standalone Skip standalone Helm deployment test
@@ -89,7 +89,7 @@ FULL_IMAGE_NAME=""
 LOCAL_MODE=false
 TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
-HELM_CHART_VERSION=""
+
 HELM_VALUES_FILE=""
 SKIP_HELM=false
 SKIP_HELM_STANDALONE=false
@@ -121,7 +121,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --helm-chart-version)
-            HELM_CHART_VERSION="$2"
+            log_warn "--helm-chart-version is deprecated and ignored (chart is sourced from rhdh-chart repo)"
             shift 2
             ;;
         --helm-values-file)
