@@ -272,33 +272,22 @@ if [ "$SKIP_HELM" = false ]; then
         TEMP_VALUES_FILE="$HELM_VALUES_FILE"
     else
         TEMP_VALUES_FILE="$(mktemp)"
-        # Generate Helm values based on TARGET_BRANCH (chart structure may differ between versions)
-        case "$TARGET_BRANCH" in
-            main|release-1.9|release-1.[1-9][0-9])
-                cat > "$TEMP_VALUES_FILE" <<EOF
-route:
+        cat > "$TEMP_VALUES_FILE" <<EOF
+replicaCount: 2
+postgresql:
   enabled: false
-upstream:
-  backstage:
-    replicas: 2
-  postgresql:
-    # Purposely disable the local database to simulate a misconfigured application (missing external database info)
-    enabled: false
-global:
-  lightspeed:
-    enabled: false
-  dynamic:
-    includes: []
+intelligentAssistant:
+  enabled: false
+dynamicPlugins:
+  includes: []
 EOF
-                if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-                    append_heap_dump_sigusr2_values "$TEMP_VALUES_FILE"
-                fi
-                ;;
-            *)
-                log_error "Unsupported target branch: $TARGET_BRANCH"
-                exit 1
-                ;;
-        esac
+        if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+            cat >> "$TEMP_VALUES_FILE" <<'EOF'
+extraEnv:
+  - name: NODE_OPTIONS
+    value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
+        fi
     fi
 
     HELM_RELEASE="my-helm"
@@ -328,16 +317,16 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
     cat > "$STANDALONE_VALUES_FILE" <<EOF
-route:
-  enabled: false
-global:
-  dynamic:
-    includes:
-      - dynamic-plugins.default.yaml
+dynamicPlugins:
+  includes:
+    - dynamic-plugins.default.yaml
 EOF
-    write_standalone_postgresql_values "$STANDALONE_VALUES_FILE"
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        append_heap_dump_sigusr2_values "$STANDALONE_VALUES_FILE"
+        cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
+extraEnv:
+  - name: NODE_OPTIONS
+    value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
     fi
 
     # Render the Helm chart and apply directly (no Helm release tracking)

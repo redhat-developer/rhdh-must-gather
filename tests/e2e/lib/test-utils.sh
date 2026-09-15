@@ -194,47 +194,6 @@ reset_errors() {
     ERRORS=0
 }
 
-# Append SIGUSR2 heap-dump env vars to a Helm values file (must preserve chart defaults).
-append_heap_dump_sigusr2_values() {
-    local outfile="$1"
-    cat >> "$outfile" <<'EOF'
-upstream:
-  backstage:
-    extraEnvVars:
-      - name: BACKEND_SECRET
-        valueFrom:
-          secretKeyRef:
-            key: backend-secret
-            name: '{{ include "rhdh.backend-secret-name" $ }}'
-      - name: POSTGRESQL_ADMIN_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            key: postgres-password
-            name: '{{- include "rhdh.postgresql.secretName" . }}'
-      - name: NODE_OPTIONS
-        value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
-EOF
-}
-
-# Kind-friendly PostgreSQL image (registry.redhat.io requires authenticated pull).
-write_standalone_postgresql_values() {
-    local outfile="$1"
-    cat >> "$outfile" <<'EOF'
-upstream:
-  postgresql:
-    enabled: true
-    image:
-      registry: quay.io
-      repository: fedora/postgresql-15
-      tag: latest
-    primary:
-      podSecurityContext:
-        enabled: false
-      containerSecurityContext:
-        enabled: false
-EOF
-}
-
 # Wait until misconfigured Helm pods finish init and backstage-backend hits CreateContainerConfigError.
 # Tolerates transient kubectl failures under the caller's set -euo pipefail.
 wait_for_helm_misconfigured_backstage_pods() {
