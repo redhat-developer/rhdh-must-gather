@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '38 21 * * *'
   workflow_dispatch:
+    inputs:
+      target-branch:
+        description: 'Target branch for E2E tests (must exist in rhdh-chart and rhdh-operator repos)'
+        required: false
 
 permissions:
   contents: read
@@ -35,7 +39,7 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests
-        run: make test-e2e LOCAL=false TARGET_BRANCH="${GITHUB_REF_NAME}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+        run: make test-e2e LOCAL=false TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
@@ -93,9 +97,9 @@ jobs:
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
             # Auto: let the tool use its built-in default method (inspector)
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true TARGET_BRANCH="${GITHUB_REF_NAME}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} TARGET_BRANCH="${GITHUB_REF_NAME}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           fi
 
       - name: Display must-gather process logs

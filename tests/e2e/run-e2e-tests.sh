@@ -239,14 +239,17 @@ log_info "=========================================="
 # Clone the RHDH Helm chart repo to use the chart source directly.
 # This avoids downstream OCI chart quirks (digest-based image refs,
 # lightspeed enabled by default, etc.).
-RHDH_CHART_DIR="$(mktemp -d)"
-log_info "Cloning redhat-developer/rhdh-chart (branch: $EFFECTIVE_CHART_BRANCH)..."
-git clone --depth 1 --branch "$EFFECTIVE_CHART_BRANCH" \
-    https://github.com/redhat-developer/rhdh-chart.git "$RHDH_CHART_DIR"
-RHDH_CHART_PATH="$RHDH_CHART_DIR/charts/backstage"
-helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
-helm dependency build "$RHDH_CHART_PATH"
-CLEANUP_TASKS+=("rm -rf $RHDH_CHART_DIR")
+RHDH_CHART_PATH=""
+if [ "$SKIP_HELM" = false ] || [ "$SKIP_HELM_STANDALONE" = false ]; then
+    RHDH_CHART_DIR="$(mktemp -d)"
+    CLEANUP_TASKS+=("rm -rf $RHDH_CHART_DIR")
+    log_info "Cloning redhat-developer/rhdh-chart (branch: $EFFECTIVE_CHART_BRANCH)..."
+    git clone --depth 1 --branch "$EFFECTIVE_CHART_BRANCH" \
+        https://github.com/redhat-developer/rhdh-chart.git "$RHDH_CHART_DIR"
+    RHDH_CHART_PATH="$RHDH_CHART_DIR/charts/backstage"
+    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+    helm dependency build "$RHDH_CHART_PATH"
+fi
 
 # --- Helm Release Setup ---
 NS_HELM=""
