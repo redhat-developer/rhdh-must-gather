@@ -52,6 +52,10 @@ test-e2e: ## Run E2E tests against a K8s cluster (requires Kind or similar)
 ifneq ($(LOCAL),false)
 	@echo "Running E2E tests in local mode..."
 	@./tests/e2e/run-e2e-tests.sh --local \
+		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
+		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
+		$(if $(CHART_BRANCH),--chart-branch "$(CHART_BRANCH)") \
+		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)") \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
@@ -60,7 +64,7 @@ else
 	@./tests/e2e/run-e2e-tests.sh --image "$(FULL_IMAGE_NAME)" \
 		$(if $(TARGET_BRANCH),--target-branch "$(TARGET_BRANCH)") \
 		$(if $(OPERATOR_BRANCH),--operator-branch "$(OPERATOR_BRANCH)") \
-		$(if $(HELM_CHART_VERSION),--helm-chart-version "$(HELM_CHART_VERSION)") \
+		$(if $(CHART_BRANCH),--chart-branch "$(CHART_BRANCH)") \
 		$(if $(HELM_VALUES_FILE),--helm-values-file "$(HELM_VALUES_FILE)") \
 		$(if $(filter true,$(WITH_HEAP_DUMPS)),--with-heap-dumps) \
 		$(if $(HEAP_DUMP_METHOD),--heap-dump-method "$(HEAP_DUMP_METHOD)") \
@@ -162,7 +166,7 @@ help: ## Display this help.
 	@echo "  HELM_TIMEOUT			- Timeout for Helm install/upgrade in deploy-k8s (default: 60m)"
 	@echo "  TARGET_BRANCH			- Target branch for test-e2e defaults (default: main)"
 	@echo "  OPERATOR_BRANCH		- Override RHDH operator branch for test-e2e"
-	@echo "  HELM_CHART_VERSION		- Override Helm chart version for test-e2e"
+	@echo "  CHART_BRANCH			- Override RHDH Helm chart branch for test-e2e"
 	@echo "  HELM_VALUES_FILE		- Override Helm values file for test-e2e"
 	@echo "  LOCAL				- Set to 'false' to run test-e2e with container image (default: true, local mode)"
 	@echo ""
