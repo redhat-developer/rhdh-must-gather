@@ -84,7 +84,7 @@ jobs:
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq skopeo
+          sudo apt-get install -y jq
           # Install yq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq

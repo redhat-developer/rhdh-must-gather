@@ -189,7 +189,7 @@ jobs:
         if: needs.pr-build.outputs.image-built == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq skopeo
+          sudo apt-get install -y jq
 
       - name: Create Kind cluster
         if: needs.pr-build.outputs.image-built == 'true'
