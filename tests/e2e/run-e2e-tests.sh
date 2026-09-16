@@ -275,8 +275,12 @@ if [ "$SKIP_HELM" = false ]; then
         cat > "$TEMP_VALUES_FILE" <<EOF
 replicaCount: 2
 host: rhdh-helm.127.0.0.1.sslip.io
+resources: null
 intelligentAssistant:
   plugins: []
+dynamicPlugins:
+  initContainer:
+    resources: null
 openshift:
   route:
     enabled: false
