@@ -582,34 +582,25 @@ if [ ! -f "$RHDHSUPP308_MANIFEST" ]; then
 fi
 kubectl apply -n "$NS_RHDHSUPP308" -f "$RHDHSUPP308_MANIFEST"
 
-# Wait for PostgreSQL to be ready first
-log_info "Waiting for PostgreSQL pod to be ready..."
-kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
-    -n "$NS_RHDHSUPP308" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null || log_warn "PostgreSQL pod not ready, continuing..."
-
-# Wait for backstage pod to be running
-log_info "Waiting for RHDHSUPP-308 backstage pod to be running..."
-RHDHSUPP308_POD=""
-TIMEOUT=$RHDH_READY_TIMEOUT
-until RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$RHDHSUPP308_POD" ]; do
-    sleep 2
-    TIMEOUT=$((TIMEOUT - 2))
-    if [ $TIMEOUT -le 0 ]; then
-        log_error "Timed out waiting for RHDHSUPP-308 backstage pod."
-        kubectl get pods -n "$NS_RHDHSUPP308"
-        exit 1
-    fi
-done
-log_info "Found RHDHSUPP-308 pod: $RHDHSUPP308_POD"
-if ! kubectl -n "$NS_RHDHSUPP308" wait --for=jsonpath='{.status.phase}'=Running pod/"$RHDHSUPP308_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
-    log_error "RHDHSUPP-308 pod $RHDHSUPP308_POD did not reach Running state."
+# Wait for PostgreSQL to be ready first (backstage needs a running DB)
+log_info "Waiting for RHDHSUPP-308 PostgreSQL pod to be ready..."
+if ! kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
+    -n "$NS_RHDHSUPP308" --timeout=${RHDH_READY_TIMEOUT}s; then
+    log_error "RHDHSUPP-308 PostgreSQL pod did not become ready."
+    kubectl get pods -n "$NS_RHDHSUPP308"
     exit 1
 fi
-log_info "RHDHSUPP-308 pod $RHDHSUPP308_POD is running."
 
-# Wait a bit for Node.js to fully start (needed for heap dump collection)
-log_info "Waiting for Node.js process to start..."
-sleep 10
+# Wait for backstage pod to be ready (not just Running)
+log_info "Waiting for RHDHSUPP-308 backstage pod to be ready..."
+if ! kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
+    -n "$NS_RHDHSUPP308" --timeout=${RHDH_READY_TIMEOUT}s; then
+    log_error "RHDHSUPP-308 backstage pod did not become ready."
+    kubectl get pods -n "$NS_RHDHSUPP308"
+    exit 1
+fi
+RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}')
+log_info "RHDHSUPP-308 pod $RHDHSUPP308_POD is ready."
 
 # ============================================================================
 # RUN MUST-GATHER
