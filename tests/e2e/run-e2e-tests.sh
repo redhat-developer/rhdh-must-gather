@@ -280,6 +280,9 @@ intelligentAssistant:
   enabled: false
 dynamicPlugins:
   includes: []
+openshift:
+  route:
+    enabled: false
 EOF
         if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
             cat >> "$TEMP_VALUES_FILE" <<'EOF'
@@ -320,6 +323,9 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
 dynamicPlugins:
   includes:
     - dynamic-plugins.default.yaml
+openshift:
+  route:
+    enabled: false
 EOF
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
