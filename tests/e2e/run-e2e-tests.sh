@@ -275,9 +275,6 @@ if [ "$SKIP_HELM" = false ]; then
         cat > "$TEMP_VALUES_FILE" <<EOF
 replicaCount: 2
 host: rhdh-helm.127.0.0.1.sslip.io
-extraAppConfig:
-  - filename: app-config.extra.yaml
-    configMapRef: nonexistent-cm
 dynamicPlugins:
   includes: []
 openshift:
@@ -285,10 +282,15 @@ openshift:
     enabled: false
 ingress:
   enabled: true
+extraEnv:
+  - name: RHDH_MISCONFIG_TRIGGER
+    valueFrom:
+      secretKeyRef:
+        name: nonexistent-secret
+        key: dummy
 EOF
         if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
             cat >> "$TEMP_VALUES_FILE" <<'EOF'
-extraEnv:
   - name: NODE_OPTIONS
     value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
 EOF
