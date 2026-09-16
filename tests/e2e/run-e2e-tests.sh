@@ -274,15 +274,16 @@ if [ "$SKIP_HELM" = false ]; then
         TEMP_VALUES_FILE="$(mktemp)"
         cat > "$TEMP_VALUES_FILE" <<EOF
 replicaCount: 2
+host: rhdh-helm.127.0.0.1.sslip.io
 postgresql:
-  enabled: false
-intelligentAssistant:
   enabled: false
 dynamicPlugins:
   includes: []
 openshift:
   route:
     enabled: false
+ingress:
+  enabled: true
 EOF
         if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
             cat >> "$TEMP_VALUES_FILE" <<'EOF'
@@ -320,12 +321,15 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
     cat > "$STANDALONE_VALUES_FILE" <<EOF
+host: rhdh-standalone.127.0.0.1.sslip.io
 dynamicPlugins:
   includes:
     - dynamic-plugins.default.yaml
 openshift:
   route:
     enabled: false
+ingress:
+  enabled: true
 EOF
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
         cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
