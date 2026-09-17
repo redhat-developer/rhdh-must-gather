@@ -253,6 +253,14 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 	sfpDir := filepath.Join(outDir, "sonataflow-platforms")
 	_ = os.MkdirAll(sfpDir, 0o755)
 
+	hasSonataFlow, _ := cfg.Client.HasAPIGroup("sonataflow.org")
+	if !hasSonataFlow {
+		log.Info("\tSonataFlow API not available, skipping SonataFlowPlatform CRs")
+		_ = os.WriteFile(filepath.Join(sfpDir, "no-platforms.txt"),
+			[]byte("SonataFlow API not available\n"), 0o644)
+		return false
+	}
+
 	items, err := listDynamic(ctx, cfg, sonataFlowPlatformGVR)
 	if err != nil {
 		writeCollectError(filepath.Join(sfpDir, "all-sonataflow-platforms.txt"),
@@ -340,6 +348,14 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 	sfwDir := filepath.Join(outDir, "sonataflow-workflows")
 	_ = os.MkdirAll(sfwDir, 0o755)
 
+	hasSonataFlow, _ := cfg.Client.HasAPIGroup("sonataflow.org")
+	if !hasSonataFlow {
+		log.Info("\tSonataFlow API not available, skipping SonataFlow workflows")
+		_ = os.WriteFile(filepath.Join(sfwDir, "no-workflows.txt"),
+			[]byte("SonataFlow API not available\n"), 0o644)
+		return false
+	}
+
 	items, err := listDynamic(ctx, cfg, sonataFlowGVR)
 	if err != nil {
 		writeCollectError(filepath.Join(sfwDir, "all-sonataflow-workflows.txt"),
@@ -411,11 +427,30 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 	detected := false
 	client := cfg.Client.Clientset
 
-	// KnativeServing CRs
-	servingItems := o.collectKnativeCRs(ctx, cfg, knativeServingGVR,
-		filepath.Join(knativeDir, "knative-serving-list.txt"),
-		filepath.Join(knativeDir, "knative-serving.yaml"),
-		knativeServingColumns)
+	hasKnativeOperator, _ := cfg.Client.HasAPIGroup("operator.knative.dev")
+	hasServerlessOperator, _ := cfg.Client.HasAPIGroup("operator.serverless.openshift.io")
+
+	if hasKnativeOperator {
+		// KnativeServing CRs
+		servingItems := o.collectKnativeCRs(ctx, cfg, knativeServingGVR,
+			filepath.Join(knativeDir, "knative-serving-list.txt"),
+			filepath.Join(knativeDir, "knative-serving.yaml"),
+			knativeServingColumns)
+		if len(servingItems) > 0 {
+			detected = true
+		}
+
+		// KnativeEventing CRs
+		eventingItems := o.collectKnativeCRs(ctx, cfg, knativeEventingGVR,
+			filepath.Join(knativeDir, "knative-eventing-list.txt"),
+			filepath.Join(knativeDir, "knative-eventing.yaml"),
+			knativeEventingColumns)
+		if len(eventingItems) > 0 {
+			detected = true
+		}
+	} else {
+		log.Info("\tKnative Operator API not available, skipping KnativeServing/KnativeEventing CRs")
+	}
 
 	// knative-serving namespace resources
 	if _, err := client.CoreV1().Namespaces().Get(ctx, "knative-serving", metav1.GetOptions{}); err == nil {
@@ -425,15 +460,6 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 		_ = os.MkdirAll(servingDir, 0o755)
 		o.collectKnativeNamespace(ctx, cfg, "knative-serving", servingDir)
 	}
-	if len(servingItems) > 0 {
-		detected = true
-	}
-
-	// KnativeEventing CRs
-	eventingItems := o.collectKnativeCRs(ctx, cfg, knativeEventingGVR,
-		filepath.Join(knativeDir, "knative-eventing-list.txt"),
-		filepath.Join(knativeDir, "knative-eventing.yaml"),
-		knativeEventingColumns)
 
 	// knative-eventing namespace resources
 	if _, err := client.CoreV1().Namespaces().Get(ctx, "knative-eventing", metav1.GetOptions{}); err == nil {
@@ -443,15 +469,16 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 		_ = os.MkdirAll(eventingDir, 0o755)
 		o.collectKnativeNamespace(ctx, cfg, "knative-eventing", eventingDir)
 	}
-	if len(eventingItems) > 0 {
-		detected = true
-	}
 
 	// KnativeKafka CRs (optional)
-	o.collectKnativeCRs(ctx, cfg, knativeKafkaGVR,
-		filepath.Join(knativeDir, "knative-kafka-list.txt"),
-		filepath.Join(knativeDir, "knative-kafka.yaml"),
-		knativeKafkaColumns)
+	if hasServerlessOperator {
+		o.collectKnativeCRs(ctx, cfg, knativeKafkaGVR,
+			filepath.Join(knativeDir, "knative-kafka-list.txt"),
+			filepath.Join(knativeDir, "knative-kafka.yaml"),
+			knativeKafkaColumns)
+	} else {
+		log.Info("\tServerless Operator API not available, skipping KnativeKafka CRs")
+	}
 
 	return detected
 }
