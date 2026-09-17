@@ -229,7 +229,7 @@ jobs:
           retention-days: 7
 
       - name: Upload must-gather output
-        if: needs.pr-build.outputs.image-built == 'true' && (success() || failure())
+        if: needs.pr-build.outputs.image-built == 'true' && failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: must-gather-output-e2e-image
