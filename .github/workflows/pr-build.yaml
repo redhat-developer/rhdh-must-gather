@@ -39,7 +39,6 @@ jobs:
         with:
           files: |
             .github/workflows/pr-build.yaml
-            .github/workflows/pr-push.yaml
             Makefile
             Containerfile
             .containerignore
