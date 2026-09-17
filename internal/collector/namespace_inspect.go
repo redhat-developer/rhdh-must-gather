@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"k8s.io/klog/v2"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/release"
 
@@ -186,7 +188,12 @@ func (n *NamespaceInspect) runInspect(_ context.Context, _ *Config, outDir strin
 
 	log.Info("Inspecting all namespaces: %s", strings.Join(namespaces, " "))
 
-	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
+	// Redirect klog and stderr to a log file to avoid noisy warnings from the
+	// oc inspect library (e.g., "the server doesn't have a resource type ...").
+	klogFile, klogCleanup := redirectKlog(outDir)
+	defer klogCleanup()
+
+	streams := genericiooptions.IOStreams{In: os.Stdin, Out: klogFile, ErrOut: klogFile}
 	opts := inspect.NewInspectOptions(streams)
 	opts.DestDir = outDir
 
@@ -199,9 +206,29 @@ func (n *NamespaceInspect) runInspect(_ context.Context, _ *Config, outDir strin
 		return
 	}
 	if err := opts.Run(); err != nil {
-		log.Warn("Namespace inspect completed with errors: %v", err)
+		log.Info("Namespace inspect completed with non-fatal errors (see inspect.log for details)")
+		_, _ = fmt.Fprintln(klogFile, err)
 	} else {
 		log.Info("Completed inspection of all %d namespace(s)", len(namespaces))
+	}
+}
+
+// redirectKlog sends klog output (used by the oc inspect library) to a file
+// instead of stderr, and returns a cleanup function that restores klog to its
+// original destination. klog defaults to logtostderr=true, which bypasses
+// SetOutput, so we must disable it first.
+func redirectKlog(outDir string) (io.Writer, func()) {
+	logPath := filepath.Join(outDir, "inspect.log")
+	f, err := os.Create(logPath)
+	if err != nil {
+		return os.Stderr, func() {}
+	}
+	klog.LogToStderr(false)
+	klog.SetOutput(f)
+	return f, func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+		_ = f.Close()
 	}
 }
 
