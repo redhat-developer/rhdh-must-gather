@@ -17,7 +17,6 @@ HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
 BUILD_ARGS ?=
 LABELS ?=
-TOOLS_DIR ?= ./bin
 BASE_COLLECTION_PATH ?= ./out
 
 # Go configuration
@@ -25,7 +24,6 @@ GO ?= go
 GO_MODULE := github.com/redhat-developer/rhdh-must-gather
 GO_BUILD_FLAGS ?= -trimpath -mod=mod
 GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)'
-GO_BIN := $(TOOLS_DIR)/gather
 
 
 default: run-local
@@ -37,12 +35,12 @@ local-output:
 	@mkdir -p ./out
 
 .PHONY: run-local
-run-local: local-output go-build ## Run the Go gather binary locally (requires cluster access)
+run-local: local-output ## Run the Go gather binary locally (requires cluster access)
 	@echo "Running must-gather locally..."
 	BASE_COLLECTION_PATH=$(BASE_COLLECTION_PATH) \
 		LOG_LEVEL=$(LOG_LEVEL) \
 		RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) \
-		$(GO_BIN) $(OPTS)
+		$(GO) run $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" ./cmd/gather $(OPTS)
 
 LOCAL ?= true ## Set to 'false' to run E2E tests with container image instead of local mode
 WITH_HEAP_DUMPS ?= ## Set to 'true' to enable heap dump collection and validation in E2E tests
@@ -71,15 +69,7 @@ else
 		$(if $(HELM_TIMEOUT),--helm-timeout "$(HELM_TIMEOUT)")
 endif
 
-.PHONY: $(TOOLS_DIR)
-$(TOOLS_DIR):
-	@mkdir -p "$(TOOLS_DIR)"
-
 ##@ Go
-
-.PHONY: go-build
-go-build: $(TOOLS_DIR) ## Build the Go gather binary
-	$(GO) build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(GO_BIN) ./cmd/gather
 
 .PHONY: test
 test: ## Run unit tests
@@ -142,7 +132,6 @@ clean: clean-out ## Remove built images and test output
 	@echo "Cleaning up..."
 	-podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
-	-rm -rf "$(TOOLS_DIR)"
 	-rm -rf "$(TEST_RESULTS_DIR)"
 	@echo "Cleanup complete"
 
