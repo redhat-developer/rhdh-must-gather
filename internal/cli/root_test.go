@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -104,79 +105,39 @@ func TestHeapDumpMethodValidation(t *testing.T) {
 	}
 }
 
-func TestBuildEnv_Namespaces(t *testing.T) {
-	opts := &gatherOptions{
+func TestSetEnvFromFlags_Namespaces(t *testing.T) {
+	t.Setenv("RHDH_TARGET_NAMESPACES", "")
+	setEnvFromFlags(&gatherOptions{
 		namespaces:     "ns1,ns2",
 		heapDumpMethod: "inspector",
-	}
-	env := buildEnv(opts)
-
-	found := false
-	for _, e := range env {
-		if e == "RHDH_TARGET_NAMESPACES=ns1,ns2" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("RHDH_TARGET_NAMESPACES not set in env")
+	})
+	if got := os.Getenv("RHDH_TARGET_NAMESPACES"); got != "ns1,ns2" {
+		t.Errorf("RHDH_TARGET_NAMESPACES = %q, want %q", got, "ns1,ns2")
 	}
 }
 
-func TestBuildEnv_Secrets(t *testing.T) {
-	opts := &gatherOptions{
-		withSecrets:    true,
-		heapDumpMethod: "inspector",
-	}
-	env := buildEnv(opts)
-
-	found := false
-	for _, e := range env {
-		if e == "RHDH_WITH_SECRETS=true" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("RHDH_WITH_SECRETS=true not set in env")
-	}
-}
-
-func TestBuildEnv_HeapDumps(t *testing.T) {
-	opts := &gatherOptions{
-		withHeapDumps:     true,
+func TestSetEnvFromFlags_HeapDumps(t *testing.T) {
+	t.Setenv("RHDH_HEAP_DUMP_METHOD", "")
+	t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "")
+	setEnvFromFlags(&gatherOptions{
 		heapDumpMethod:    "sigusr2",
 		heapDumpInstances: "my-rhdh,dev-hub",
+	})
+	if got := os.Getenv("RHDH_HEAP_DUMP_METHOD"); got != "sigusr2" {
+		t.Errorf("RHDH_HEAP_DUMP_METHOD = %q, want %q", got, "sigusr2")
 	}
-	env := buildEnv(opts)
-
-	checks := map[string]bool{
-		"RHDH_WITH_HEAP_DUMPS=true":              false,
-		"RHDH_HEAP_DUMP_METHOD=sigusr2":           false,
-		"RHDH_HEAP_DUMP_INSTANCES=my-rhdh,dev-hub": false,
-	}
-	for _, e := range env {
-		if _, ok := checks[e]; ok {
-			checks[e] = true
-		}
-	}
-	for k, found := range checks {
-		if !found {
-			t.Errorf("%s not found in env", k)
-		}
+	if got := os.Getenv("RHDH_HEAP_DUMP_INSTANCES"); got != "my-rhdh,dev-hub" {
+		t.Errorf("RHDH_HEAP_DUMP_INSTANCES = %q, want %q", got, "my-rhdh,dev-hub")
 	}
 }
 
-func TestBuildEnv_NoNamespacesOmitted(t *testing.T) {
-	opts := &gatherOptions{
+func TestSetEnvFromFlags_NoNamespacesOmitted(t *testing.T) {
+	t.Setenv("RHDH_TARGET_NAMESPACES", "pre-existing")
+	setEnvFromFlags(&gatherOptions{
 		heapDumpMethod: "inspector",
-	}
-	env := buildEnv(opts)
-
-	for _, e := range env {
-		if e == "RHDH_TARGET_NAMESPACES=" {
-			t.Error("RHDH_TARGET_NAMESPACES should not be set when empty")
-		}
+	})
+	if got := os.Getenv("RHDH_TARGET_NAMESPACES"); got != "pre-existing" {
+		t.Errorf("RHDH_TARGET_NAMESPACES = %q, want %q (should not be overwritten)", got, "pre-existing")
 	}
 }
 
@@ -193,15 +154,6 @@ func TestGetVersion_Compiled(t *testing.T) {
 	v := getVersion()
 	if v != version {
 		t.Errorf("getVersion() = %q, want compiled-in %q", v, version)
-	}
-}
-
-func TestBoolStr(t *testing.T) {
-	if boolStr(true) != "true" {
-		t.Error("boolStr(true) != true")
-	}
-	if boolStr(false) != "false" {
-		t.Error("boolStr(false) != false")
 	}
 }
 

@@ -77,7 +77,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	env := buildEnv(opts)
+	setEnvFromFlags(opts)
 
 	since, sinceTime := resolveSince(opts)
 
@@ -87,7 +87,6 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		Interrupted:   &interrupted,
 		WithSecrets:   opts.withSecrets,
 		WithHeapDumps: opts.withHeapDumps,
-		Env:           env,
 		Since:         since,
 		SinceTime:     sinceTime,
 	}
@@ -201,6 +200,8 @@ func resolveSince(opts *gatherOptions) (time.Duration, string) {
 		parsed, err := time.ParseDuration(since)
 		if err != nil {
 			log.Warn("Ignoring invalid since value %q: %v", since, err)
+		} else if parsed <= 0 {
+			log.Warn("Ignoring since value %q: must be a positive duration", since)
 		} else if parsed < time.Second {
 			log.Warn("Ignoring since value %q: must be at least 1s", since)
 		} else {

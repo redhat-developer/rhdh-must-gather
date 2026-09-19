@@ -18,7 +18,6 @@ type Config struct {
 	Interrupted   *atomic.Bool
 	WithSecrets   bool
 	WithHeapDumps bool
-	Env           []string
 	Since         time.Duration
 	SinceTime     string
 }

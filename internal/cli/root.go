@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -109,42 +108,23 @@ func buildScriptList(cmd *cobra.Command, opts *gatherOptions) []string {
 	return scripts
 }
 
-func buildEnv(opts *gatherOptions) []string {
-	env := os.Environ()
-	set := func(key, value string) {
-		for i, e := range env {
-			if strings.HasPrefix(e, key+"=") {
-				env[i] = key + "=" + value
-				return
-			}
-		}
-		env = append(env, key+"="+value)
-	}
-
+// setEnvFromFlags propagates CLI flag values into the process environment so
+// that collectors reading os.Getenv (e.g. namespace.TargetNamespaces,
+// heapdump config helpers) see them.
+func setEnvFromFlags(opts *gatherOptions) {
 	if opts.namespaces != "" {
-		set("RHDH_TARGET_NAMESPACES", opts.namespaces)
+		_ = os.Setenv("RHDH_TARGET_NAMESPACES", opts.namespaces)
 	}
-	set("RHDH_WITH_SECRETS", boolStr(opts.withSecrets))
-	set("RHDH_WITH_HEAP_DUMPS", boolStr(opts.withHeapDumps))
-	set("RHDH_HEAP_DUMP_METHOD", opts.heapDumpMethod)
+	_ = os.Setenv("RHDH_HEAP_DUMP_METHOD", opts.heapDumpMethod)
 	if opts.heapDumpInstances != "" {
-		set("RHDH_HEAP_DUMP_INSTANCES", opts.heapDumpInstances)
+		_ = os.Setenv("RHDH_HEAP_DUMP_INSTANCES", opts.heapDumpInstances)
 	}
 	if opts.since != "" {
-		set("MUST_GATHER_SINCE", opts.since)
+		_ = os.Setenv("MUST_GATHER_SINCE", opts.since)
 	}
 	if opts.sinceTime != "" {
-		set("MUST_GATHER_SINCE_TIME", opts.sinceTime)
+		_ = os.Setenv("MUST_GATHER_SINCE_TIME", opts.sinceTime)
 	}
-
-	return env
-}
-
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
 
 func Execute() error {
