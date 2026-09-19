@@ -32,7 +32,10 @@ type Helm struct{}
 
 func (h *Helm) Name() string { return "helm" }
 
-const helmTimestampLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
+const (
+	helmTimestampLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
+	okpContainer        = "okp"
+)
 
 var (
 	rhdhPatternRE      = regexp.MustCompile(`(?i)(backstage|rhdh|developer-hub)`)
@@ -221,12 +224,17 @@ func (h *Helm) collectReleaseData(ctx context.Context, cfg *Config, ns, name, re
 		}
 
 		for _, dep := range deployments {
-			outDir := filepath.Join(releaseDir, "dependencies", dep.Name)
+			var outDir string
 			skipAppData := true
-			if dep == primary {
+			switch {
+			case dep == primary:
 				outDir = filepath.Join(releaseDir, "deployment")
 				skipAppData = false
-			} else {
+			case deploymentHasContainer(dep, okpContainer):
+				outDir = filepath.Join(releaseDir, "okp-deployment")
+				log.Info("    --> Collecting OKP Deployment: %s", dep.Name)
+			default:
+				outDir = filepath.Join(releaseDir, "dependencies", dep.Name)
 				log.Info("    --> Collecting Helm dependency Deployment: %s", dep.Name)
 			}
 
@@ -438,8 +446,14 @@ func (h *Helm) collectDependentServices(ctx context.Context, cfg *Config, ns, ma
 			if dep.Name == mainName || processedWorkloads[ns+"/"+dep.Name] {
 				continue
 			}
-			log.Info("    --> Collecting dependent service: %s (Deployment)", dep.Name)
-			depDir := filepath.Join(wlDir, "dependencies", dep.Name)
+			var depDir string
+			if deploymentHasContainer(&dep, okpContainer) {
+				log.Info("    --> Collecting OKP Deployment: %s", dep.Name)
+				depDir = filepath.Join(wlDir, "okp-deployment")
+			} else {
+				log.Info("    --> Collecting dependent service: %s (Deployment)", dep.Name)
+				depDir = filepath.Join(wlDir, "dependencies", dep.Name)
+			}
 			_ = os.MkdirAll(depDir, 0o755)
 
 			writeResource(filepath.Join(depDir, "deployment.yaml"), &dep)
