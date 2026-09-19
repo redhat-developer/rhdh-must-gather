@@ -567,7 +567,7 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 	sb.WriteString("==============================================\n\n")
 
 	sb.WriteString("=== OpenShift Serverless Operator ===\n")
-	if hasOLM {
+	if hasOLM && cfg.ShouldInclude("openshift-serverless") {
 		csvs, err := cfg.Client.Dynamic.Resource(csvGVR).Namespace("openshift-serverless").List(ctx, metav1.ListOptions{})
 		if err == nil {
 			found := false
@@ -586,13 +586,15 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 		} else {
 			sb.WriteString("Not installed\n")
 		}
-	} else {
+	} else if !hasOLM {
 		sb.WriteString("Not installed\n")
+	} else {
+		sb.WriteString("Skipped (not in target namespaces)\n")
 	}
 	sb.WriteString("\n")
 
 	sb.WriteString("=== OpenShift Serverless Logic Operator ===\n")
-	if hasOLM {
+	if hasOLM && cfg.ShouldInclude("openshift-serverless-logic") {
 		csvs, err := cfg.Client.Dynamic.Resource(csvGVR).Namespace("openshift-serverless-logic").List(ctx, metav1.ListOptions{})
 		if err == nil {
 			found := false
@@ -611,13 +613,15 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 		} else {
 			sb.WriteString("Not installed\n")
 		}
-	} else {
+	} else if !hasOLM {
 		sb.WriteString("Not installed\n")
+	} else {
+		sb.WriteString("Skipped (not in target namespaces)\n")
 	}
 	sb.WriteString("\n")
 
 	sb.WriteString("=== SonataFlowPlatform CRs ===\n")
-	sfps, err := listAllNamespaces(ctx, cfg, sonataFlowPlatformGVR)
+	sfps, err := listFilteredNamespaces(ctx, cfg, sonataFlowPlatformGVR)
 	if err == nil && len(sfps) > 0 {
 		fmt.Fprintf(&sb, "%-30s  %-50s  %s\n", "NAMESPACE", "NAME", "PHASE")
 		for _, sfp := range sfps {
@@ -630,7 +634,7 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 	sb.WriteString("\n")
 
 	sb.WriteString("=== SonataFlow Workflows ===\n")
-	sflows, err := listAllNamespaces(ctx, cfg, sonataFlowGVR)
+	sflows, err := listFilteredNamespaces(ctx, cfg, sonataFlowGVR)
 	if err == nil && len(sflows) > 0 {
 		fmt.Fprintf(&sb, "%-30s  %-50s  %s\n", "NAMESPACE", "NAME", "PHASE")
 		for _, sf := range sflows {
@@ -643,7 +647,7 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 	sb.WriteString("\n")
 
 	sb.WriteString("=== Knative Serving ===\n")
-	kservings, err := listAllNamespaces(ctx, cfg, knativeServingGVR)
+	kservings, err := listFilteredNamespaces(ctx, cfg, knativeServingGVR)
 	if err == nil && len(kservings) > 0 {
 		fmt.Fprintf(&sb, "%-30s  %-50s  %-12s  %s\n", "NAMESPACE", "NAME", "VERSION", "READY")
 		for _, ks := range kservings {
@@ -657,7 +661,7 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 	sb.WriteString("\n")
 
 	sb.WriteString("=== Knative Eventing ===\n")
-	keventings, err := listAllNamespaces(ctx, cfg, knativeEventingGVR)
+	keventings, err := listFilteredNamespaces(ctx, cfg, knativeEventingGVR)
 	if err == nil && len(keventings) > 0 {
 		fmt.Fprintf(&sb, "%-30s  %-50s  %-12s  %s\n", "NAMESPACE", "NAME", "VERSION", "READY")
 		for _, ke := range keventings {
@@ -684,12 +688,21 @@ func (o *Orchestrator) generateSummary(ctx context.Context, cfg *Config, outDir 
 
 }
 
-func listAllNamespaces(ctx context.Context, cfg *Config, gvr schema.GroupVersionResource) ([]unstructured.Unstructured, error) {
+func listFilteredNamespaces(ctx context.Context, cfg *Config, gvr schema.GroupVersionResource) ([]unstructured.Unstructured, error) {
 	list, err := cfg.Client.Dynamic.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	return list.Items, nil
+	if len(cfg.TargetNamespaces) == 0 {
+		return list.Items, nil
+	}
+	filtered := make([]unstructured.Unstructured, 0, len(list.Items))
+	for _, item := range list.Items {
+		if cfg.ShouldInclude(item.GetNamespace()) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 func getConditionStatus(obj map[string]any, condType string) string {
