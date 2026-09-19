@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -102,42 +101,6 @@ func TestHeapDumpMethodValidation(t *testing.T) {
 		if (err != nil) != tt.wantErr {
 			t.Errorf("method=%q: got err=%v, wantErr=%v", tt.method, err, tt.wantErr)
 		}
-	}
-}
-
-func TestSetEnvFromFlags_Namespaces(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "")
-	setEnvFromFlags(&gatherOptions{
-		namespaces:     "ns1,ns2",
-		heapDumpMethod: "inspector",
-	})
-	if got := os.Getenv("RHDH_TARGET_NAMESPACES"); got != "ns1,ns2" {
-		t.Errorf("RHDH_TARGET_NAMESPACES = %q, want %q", got, "ns1,ns2")
-	}
-}
-
-func TestSetEnvFromFlags_HeapDumps(t *testing.T) {
-	t.Setenv("RHDH_HEAP_DUMP_METHOD", "")
-	t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "")
-	setEnvFromFlags(&gatherOptions{
-		heapDumpMethod:    "sigusr2",
-		heapDumpInstances: "my-rhdh,dev-hub",
-	})
-	if got := os.Getenv("RHDH_HEAP_DUMP_METHOD"); got != "sigusr2" {
-		t.Errorf("RHDH_HEAP_DUMP_METHOD = %q, want %q", got, "sigusr2")
-	}
-	if got := os.Getenv("RHDH_HEAP_DUMP_INSTANCES"); got != "my-rhdh,dev-hub" {
-		t.Errorf("RHDH_HEAP_DUMP_INSTANCES = %q, want %q", got, "my-rhdh,dev-hub")
-	}
-}
-
-func TestSetEnvFromFlags_NoNamespacesOmitted(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "pre-existing")
-	setEnvFromFlags(&gatherOptions{
-		heapDumpMethod: "inspector",
-	})
-	if got := os.Getenv("RHDH_TARGET_NAMESPACES"); got != "pre-existing" {
-		t.Errorf("RHDH_TARGET_NAMESPACES = %q, want %q (should not be overwritten)", got, "pre-existing")
 	}
 }
 

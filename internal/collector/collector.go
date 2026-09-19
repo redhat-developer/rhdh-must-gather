@@ -9,17 +9,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
-	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
 )
 
 type Config struct {
-	Client        *kube.Client
-	BasePath      string
-	Interrupted   *atomic.Bool
-	WithSecrets   bool
-	WithHeapDumps bool
-	Since         time.Duration
-	SinceTime     string
+	Client            *kube.Client
+	BasePath          string
+	Interrupted       *atomic.Bool
+	WithSecrets       bool
+	WithHeapDumps     bool
+	Since             time.Duration
+	SinceTime         string
+	TargetNamespaces  []string
+	HeapDumpMethod    string
+	HeapDumpInstances string
 }
 
 type Collector interface {
@@ -32,11 +34,19 @@ func (c *Config) IsInterrupted() bool {
 }
 
 func (c *Config) Namespaces() []string {
-	return namespace.TargetNamespaces()
+	return c.TargetNamespaces
 }
 
 func (c *Config) ShouldInclude(ns string) bool {
-	return namespace.ShouldInclude(ns)
+	if len(c.TargetNamespaces) == 0 {
+		return true
+	}
+	for _, t := range c.TargetNamespaces {
+		if ns == t {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyLogSince sets SinceSeconds/SinceTime on opts based on the configured

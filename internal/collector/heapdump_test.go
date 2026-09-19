@@ -25,36 +25,31 @@ func TestMatchesInstance(t *testing.T) {
 
 func TestMatchesInstanceFilter(t *testing.T) {
 	t.Run("no filter set", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "")
-		if !matchesInstanceFilter("anything", "anything") {
+		if !matchesInstanceFilter("anything", "anything", "") {
 			t.Error("expected true when no filter set")
 		}
 	})
 
 	t.Run("deploy name matches", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "rhdhsupp-308")
-		if !matchesInstanceFilter("rhdhsupp-308-backstage", "other") {
+		if !matchesInstanceFilter("rhdhsupp-308-backstage", "other", "rhdhsupp-308") {
 			t.Error("expected true when deploy name matches")
 		}
 	})
 
 	t.Run("instance name matches", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "my-release")
-		if !matchesInstanceFilter("other-deploy", "my-release") {
+		if !matchesInstanceFilter("other-deploy", "my-release", "my-release") {
 			t.Error("expected true when instance name matches")
 		}
 	})
 
 	t.Run("no match", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "rhdhsupp-308")
-		if matchesInstanceFilter("other-deploy", "other-instance") {
+		if matchesInstanceFilter("other-deploy", "other-instance", "rhdhsupp-308") {
 			t.Error("expected false when nothing matches")
 		}
 	})
 
 	t.Run("multiple instances", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_INSTANCES", "foo, rhdhsupp-308, bar")
-		if !matchesInstanceFilter("rhdhsupp-308-backstage", "") {
+		if !matchesInstanceFilter("rhdhsupp-308-backstage", "", "foo, rhdhsupp-308, bar") {
 			t.Error("expected true with multiple instances")
 		}
 	})
@@ -74,22 +69,6 @@ func TestHeapDumpTimeout(t *testing.T) {
 		got := heapDumpTimeout()
 		if got.Seconds() != 120 {
 			t.Errorf("heapDumpTimeout() = %v, want 120s", got)
-		}
-	})
-}
-
-func TestHeapDumpMethod(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_METHOD", "")
-		if got := heapDumpMethod(); got != "inspector" {
-			t.Errorf("heapDumpMethod() = %q, want inspector", got)
-		}
-	})
-
-	t.Run("sigusr2", func(t *testing.T) {
-		t.Setenv("RHDH_HEAP_DUMP_METHOD", "sigusr2")
-		if got := heapDumpMethod(); got != "sigusr2" {
-			t.Errorf("heapDumpMethod() = %q, want sigusr2", got)
 		}
 	})
 }

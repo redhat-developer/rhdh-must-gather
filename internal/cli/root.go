@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -106,25 +105,6 @@ func buildScriptList(cmd *cobra.Command, opts *gatherOptions) []string {
 		scripts = append(scripts, "cluster-info")
 	}
 	return scripts
-}
-
-// setEnvFromFlags propagates CLI flag values into the process environment so
-// that collectors reading os.Getenv (e.g. namespace.TargetNamespaces,
-// heapdump config helpers) see them.
-func setEnvFromFlags(opts *gatherOptions) {
-	if opts.namespaces != "" {
-		_ = os.Setenv("RHDH_TARGET_NAMESPACES", opts.namespaces)
-	}
-	_ = os.Setenv("RHDH_HEAP_DUMP_METHOD", opts.heapDumpMethod)
-	if opts.heapDumpInstances != "" {
-		_ = os.Setenv("RHDH_HEAP_DUMP_INSTANCES", opts.heapDumpInstances)
-	}
-	if opts.since != "" {
-		_ = os.Setenv("MUST_GATHER_SINCE", opts.since)
-	}
-	if opts.sinceTime != "" {
-		_ = os.Setenv("MUST_GATHER_SINCE_TIME", opts.sinceTime)
-	}
 }
 
 func Execute() error {

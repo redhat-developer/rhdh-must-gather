@@ -23,7 +23,6 @@ import (
 
 const (
 	defaultHeapDumpTimeout = 600
-	defaultHeapDumpMethod  = "inspector"
 	backstageContainer     = "backstage-backend"
 )
 
@@ -31,8 +30,8 @@ func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instan
 	if !cfg.WithHeapDumps {
 		return
 	}
-	if !matchesInstanceFilter(deployName, instanceName) {
-		log.Debug("Skipping heap dump for %s (not in filter: %s)", deployName, os.Getenv("RHDH_HEAP_DUMP_INSTANCES"))
+	if !matchesInstanceFilter(deployName, instanceName, cfg.HeapDumpInstances) {
+		log.Debug("Skipping heap dump for %s (not in filter: %s)", deployName, cfg.HeapDumpInstances)
 		return
 	}
 
@@ -41,7 +40,7 @@ func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instan
 	_ = os.MkdirAll(heapDir, 0o755)
 
 	timeout := heapDumpTimeout()
-	method := heapDumpMethod()
+	method := cfg.HeapDumpMethod
 
 	pods := findRunningPods(cfg, ns, labelSelector, kind)
 	if len(pods) == 0 {
@@ -57,8 +56,7 @@ func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instan
 	log.Info("Heap dump collection completed for namespace: %s", ns)
 }
 
-func matchesInstanceFilter(deployName, instanceName string) bool {
-	filter := os.Getenv("RHDH_HEAP_DUMP_INSTANCES")
+func matchesInstanceFilter(deployName, instanceName, filter string) bool {
 	if filter == "" {
 		return true
 	}
@@ -88,13 +86,6 @@ func heapDumpTimeout() time.Duration {
 		}
 	}
 	return defaultHeapDumpTimeout * time.Second
-}
-
-func heapDumpMethod() string {
-	if m := os.Getenv("RHDH_HEAP_DUMP_METHOD"); m != "" {
-		return m
-	}
-	return defaultHeapDumpMethod
 }
 
 func findRunningPods(cfg *Config, ns, labelSelector, kind string) []string {
