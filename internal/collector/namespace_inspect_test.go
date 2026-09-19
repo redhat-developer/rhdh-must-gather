@@ -75,13 +75,3 @@ func TestContainsImagePattern(t *testing.T) {
 	}
 }
 
-func TestEnvOrNone(t *testing.T) {
-	t.Setenv("TEST_ENV_OR_NONE_SET", "value123")
-
-	if got := envOrNone("TEST_ENV_OR_NONE_SET"); got != "value123" {
-		t.Errorf("envOrNone(set) = %q, want value123", got)
-	}
-	if got := envOrNone("TEST_ENV_OR_NONE_UNSET"); got != "none" {
-		t.Errorf("envOrNone(unset) = %q, want none", got)
-	}
-}

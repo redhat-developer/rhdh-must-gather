@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -146,7 +145,7 @@ func CollectDBStatefulSet(ctx context.Context, cfg *Config, ns, name, outDir str
 	describeResource(ctx, cfg, filepath.Join(stsDir, "db-statefulset.describe.txt"), "statefulset", ns, name)
 
 	sel := labels.Set(sts.Spec.Selector.MatchLabels).String()
-	writeAggregatedStatefulSetLogs(ctx, client, ns, name, sel, stsDir)
+	writeAggregatedStatefulSetLogs(ctx, cfg, ns, sel, stsDir)
 
 	if sel == "" {
 		return nil
@@ -273,13 +272,13 @@ func writeRolloutHistoryText(path string, kind string, items any) {
 	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
-func writeAggregatedStatefulSetLogs(ctx context.Context, client kubernetes.Interface, ns, stsName, sel, stsDir string) {
-	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
+func writeAggregatedStatefulSetLogs(ctx context.Context, cfg *Config, ns, sel, stsDir string) {
+	pods, err := cfg.Client.Clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 	if err != nil || len(pods.Items) == 0 {
 		return
 	}
-	writeAggregatedLogs(ctx, client, ns, pods.Items, false, filepath.Join(stsDir, "logs-db.txt"))
-	writeAggregatedLogs(ctx, client, ns, pods.Items, true, filepath.Join(stsDir, "logs-db-previous.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, pods.Items, false, filepath.Join(stsDir, "logs-db.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, pods.Items, true, filepath.Join(stsDir, "logs-db-previous.txt"))
 }
 
 func CollectNamespaceData(ctx context.Context, cfg *Config, ns, outDir string, withSecrets bool) {

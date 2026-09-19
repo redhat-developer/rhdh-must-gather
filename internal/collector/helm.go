@@ -485,9 +485,9 @@ func (h *Helm) collectDependentLogs(ctx context.Context, cfg *Config, ns, depNam
 
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, false,
+		writeAggregatedLogs(ctx, cfg, ns, []corev1.Pod{*pod}, false,
 			filepath.Join(depDir, "logs-"+pod.Name+".txt"))
-		writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, true,
+		writeAggregatedLogs(ctx, cfg, ns, []corev1.Pod{*pod}, true,
 			filepath.Join(depDir, "logs-"+pod.Name+"-previous.txt"))
 	}
 }

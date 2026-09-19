@@ -3,6 +3,10 @@ package collector
 import (
 	"context"
 	"sync/atomic"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
@@ -15,6 +19,8 @@ type Config struct {
 	WithSecrets   bool
 	WithHeapDumps bool
 	Env           []string
+	Since         time.Duration
+	SinceTime     string
 }
 
 type Collector interface {
@@ -32,6 +38,22 @@ func (c *Config) Namespaces() []string {
 
 func (c *Config) ShouldInclude(ns string) bool {
 	return namespace.ShouldInclude(ns)
+}
+
+// ApplyLogSince sets SinceSeconds/SinceTime on opts based on the configured
+// --since or --since-time value. Only one may be set; the CLI validates this.
+func (c *Config) ApplyLogSince(opts *corev1.PodLogOptions) {
+	if c.Since > 0 {
+		s := int64(c.Since.Round(time.Second).Seconds())
+		opts.SinceSeconds = &s
+	}
+	if c.SinceTime != "" {
+		t, err := time.Parse(time.RFC3339, c.SinceTime)
+		if err == nil {
+			mt := metav1.NewTime(t)
+			opts.SinceTime = &mt
+		}
+	}
 }
 
 var Registry = map[string]Collector{

@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
+	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/release"
 
@@ -44,7 +46,7 @@ func (n *NamespaceInspect) Run(ctx context.Context, cfg *Config) error {
 
 	n.runInspect(ctx, cfg, outDir, namespaces)
 	n.removeSecrets(cfg, outDir)
-	n.writeSummary(outDir, namespaces, cfg.WithSecrets)
+	n.writeSummary(cfg, outDir, namespaces)
 
 	log.Info("Namespace inspect collection completed.")
 	return nil
@@ -180,7 +182,7 @@ func (n *NamespaceInspect) addOrchestratorNamespaces(cfg *Config, nsSet map[stri
 	}
 }
 
-func (n *NamespaceInspect) runInspect(_ context.Context, _ *Config, outDir string, namespaces []string) {
+func (n *NamespaceInspect) runInspect(_ context.Context, cfg *Config, outDir string, namespaces []string) {
 	args := make([]string, len(namespaces))
 	for i, ns := range namespaces {
 		args[i] = "namespace/" + ns
@@ -194,23 +196,51 @@ func (n *NamespaceInspect) runInspect(_ context.Context, _ *Config, outDir strin
 	defer klogCleanup()
 
 	streams := genericiooptions.IOStreams{In: os.Stdin, Out: klogFile, ErrOut: klogFile}
-	opts := inspect.NewInspectOptions(streams)
-	opts.DestDir = outDir
 
-	if err := opts.Complete(args); err != nil {
-		log.Warn("Failed to initialize namespace inspect: %v", err)
-		return
+	// Use NewCmdInspect to get a cobra command with properly bound flags,
+	// including the unexported since/sinceTime fields on InspectOptions.
+	// Setting flag values via cmd.Flags().Set() writes through the bound
+	// pointers into the internal InspectOptions.
+	cmd := inspect.NewCmdInspect(streams)
+	_ = cmd.Flags().Set("dest-dir", outDir)
+	if cfg.Since > 0 {
+		_ = cmd.Flags().Set("since", cfg.Since.String())
 	}
-	if err := opts.Validate(); err != nil {
-		log.Warn("Invalid namespace inspect options: %v", err)
-		return
+	if cfg.SinceTime != "" {
+		_ = cmd.Flags().Set("since-time", cfg.SinceTime)
 	}
-	if err := opts.Run(); err != nil {
+	cmd.SetArgs(args)
+
+	// The oc inspect command uses kcmdutil.CheckErr which calls os.Exit on
+	// error. Override the fatal handler to convert errors into a panic that
+	// we recover from, so errors are non-fatal to our process.
+	if err := runInspectCmd(cmd); err != nil {
 		log.Info("Namespace inspect completed with non-fatal errors (see inspect.log for details)")
 		_, _ = fmt.Fprintln(klogFile, err)
 	} else {
 		log.Info("Completed inspection of all %d namespace(s)", len(namespaces))
 	}
+}
+
+type inspectFatalError string
+
+func (e inspectFatalError) Error() string { return string(e) }
+
+func runInspectCmd(cmd *cobra.Command) (retErr error) {
+	kcmdutil.BehaviorOnFatal(func(msg string, _ int) {
+		panic(inspectFatalError(msg))
+	})
+	defer kcmdutil.DefaultBehaviorOnFatal()
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(inspectFatalError); ok {
+				retErr = e
+			} else {
+				panic(r)
+			}
+		}
+	}()
+	return cmd.Execute()
 }
 
 // redirectKlog sends klog output (used by the oc inspect library) to a file
@@ -257,7 +287,7 @@ func (n *NamespaceInspect) removeSecrets(cfg *Config, outDir string) {
 	log.Info("Secret files excluded from collection")
 }
 
-func (n *NamespaceInspect) writeSummary(outDir string, namespaces []string, withSecrets bool) {
+func (n *NamespaceInspect) writeSummary(cfg *Config, outDir string, namespaces []string) {
 	var sb strings.Builder
 	sb.WriteString("Namespace inspect Summary\n")
 	sb.WriteString("============================\n\n")
@@ -268,15 +298,23 @@ func (n *NamespaceInspect) writeSummary(outDir string, namespaces []string, with
 		fmt.Fprintf(&sb, "  - %s\n", ns)
 	}
 	sb.WriteString("\nTime constraints:\n")
-	fmt.Fprintf(&sb, "  MUST_GATHER_SINCE: %s\n", envOrNone("MUST_GATHER_SINCE"))
-	fmt.Fprintf(&sb, "  MUST_GATHER_SINCE_TIME: %s\n", envOrNone("MUST_GATHER_SINCE_TIME"))
+	if cfg.Since > 0 {
+		fmt.Fprintf(&sb, "  since: %s\n", cfg.Since)
+	} else {
+		sb.WriteString("  since: none\n")
+	}
+	if cfg.SinceTime != "" {
+		fmt.Fprintf(&sb, "  since-time: %s\n", cfg.SinceTime)
+	} else {
+		sb.WriteString("  since-time: none\n")
+	}
 	sb.WriteString("\nData collected per namespace:\n")
 	sb.WriteString("  - All Kubernetes resources (YAML definitions)\n")
 	sb.WriteString("  - Pod logs (current and previous)\n")
 	sb.WriteString("  - Events\n")
 	sb.WriteString("  - Resource descriptions\n")
 	sb.WriteString("  - Network configurations\n")
-	if withSecrets {
+	if cfg.WithSecrets {
 		sb.WriteString("  - Secrets (included and will be sanitized)\n")
 	} else {
 		sb.WriteString("  - Secrets (excluded - use --with-secrets to collect)\n")
@@ -284,13 +322,6 @@ func (n *NamespaceInspect) writeSummary(outDir string, namespaces []string, with
 	fmt.Fprintf(&sb, "\nOutput directory: %s\n", outDir)
 
 	_ = os.WriteFile(filepath.Join(outDir, "inspection-summary.txt"), []byte(sb.String()), 0o644)
-}
-
-func envOrNone(key string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return "none"
 }
 
 func matchesAnyPattern(value string, patterns []string) bool {

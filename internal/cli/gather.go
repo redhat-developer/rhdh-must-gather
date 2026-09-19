@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -78,6 +79,8 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 
 	env := buildEnv(opts)
 
+	since, sinceTime := resolveSince(opts)
+
 	collectorCfg := &collector.Config{
 		Client:        kubeClient,
 		BasePath:      basePath,
@@ -85,6 +88,8 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		WithSecrets:   opts.withSecrets,
 		WithHeapDumps: opts.withHeapDumps,
 		Env:           env,
+		Since:         since,
+		SinceTime:     sinceTime,
 	}
 
 	scripts := buildScriptList(cmd, opts)
@@ -167,6 +172,41 @@ func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(basePath, "must-gather.log"), data, 0o644)
+}
+
+// resolveSince returns the since duration and sinceTime string, preferring
+// CLI flags over env vars. The env vars MUST_GATHER_SINCE and
+// MUST_GATHER_SINCE_TIME are set by "oc adm must-gather --since=..." when
+// running inside a must-gather pod.
+func resolveSince(opts *gatherOptions) (time.Duration, string) {
+	since := opts.since
+	if since == "" {
+		since = os.Getenv("MUST_GATHER_SINCE")
+	}
+	sinceTime := opts.sinceTime
+	if sinceTime == "" {
+		sinceTime = os.Getenv("MUST_GATHER_SINCE_TIME")
+	}
+
+	var d time.Duration
+	if since != "" {
+		parsed, err := time.ParseDuration(since)
+		if err == nil {
+			d = parsed
+			log.Info("Log collection limited to last %s", d)
+		} else {
+			log.Warn("Ignoring invalid since value %q: %v", since, err)
+		}
+	}
+	if sinceTime != "" {
+		if _, err := time.Parse(time.RFC3339, sinceTime); err == nil {
+			log.Info("Log collection limited to logs after %s", sinceTime)
+		} else {
+			log.Warn("Ignoring invalid since-time value %q: %v", sinceTime, err)
+			sinceTime = ""
+		}
+	}
+	return d, sinceTime
 }
 
 func getEnvDefault(key, fallback string) string {

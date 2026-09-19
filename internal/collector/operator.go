@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -318,8 +317,8 @@ func (o *Operator) gatherOperatorLogs(ctx context.Context, cfg *Config, ns, nsDi
 		return
 	}
 
-	writeAggregatedLogs(ctx, client, ns, pods.Items, false, filepath.Join(nsDir, "logs.txt"))
-	writeAggregatedLogs(ctx, client, ns, pods.Items, true, filepath.Join(nsDir, "logs-previous.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, pods.Items, false, filepath.Join(nsDir, "logs.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, pods.Items, true, filepath.Join(nsDir, "logs-previous.txt"))
 }
 
 func (o *Operator) gatherBackstageCRs(ctx context.Context, cfg *Config, outDir string) {
@@ -588,7 +587,7 @@ func writeDeploymentSummaryTable(path string, deps []deploymentSummary) {
 	_ = os.WriteFile(path, []byte(sb.String()), 0o644)
 }
 
-func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns string, pods []corev1.Pod, previous bool, path string) {
+func writeAggregatedLogs(ctx context.Context, cfg *Config, ns string, pods []corev1.Pod, previous bool, path string) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	f, err := os.Create(path)
 	if err != nil {
@@ -598,6 +597,7 @@ func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns st
 	w := bufio.NewWriter(f)
 	defer func() { _ = w.Flush() }()
 
+	client := cfg.Client.Clientset
 	for i := range pods {
 		pod := &pods[i]
 		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
@@ -606,6 +606,7 @@ func writeAggregatedLogs(ctx context.Context, client kubernetes.Interface, ns st
 
 		for _, c := range allContainers {
 			opts := &corev1.PodLogOptions{Container: c.Name, Previous: previous}
+			cfg.ApplyLogSince(opts)
 			stream, err := client.CoreV1().Pods(ns).GetLogs(pod.Name, opts).Stream(ctx)
 			if err != nil {
 				continue

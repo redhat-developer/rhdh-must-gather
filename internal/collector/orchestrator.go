@@ -207,8 +207,8 @@ func (o *Orchestrator) collectServerlessNamespace(ctx context.Context, cfg *Conf
 	for _, ls := range logSelectors {
 		labeledPods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: ls.selector})
 		if err == nil && len(labeledPods.Items) > 0 {
-			writeAggregatedLogs(ctx, client, ns, labeledPods.Items, false, filepath.Join(nsDir, ls.prefix+".txt"))
-			writeAggregatedLogs(ctx, client, ns, labeledPods.Items, true, filepath.Join(nsDir, ls.prefix+"-previous.txt"))
+			writeAggregatedLogs(ctx, cfg, ns, labeledPods.Items, false, filepath.Join(nsDir, ls.prefix+".txt"))
+			writeAggregatedLogs(ctx, cfg, ns, labeledPods.Items, true, filepath.Join(nsDir, ls.prefix+"-previous.txt"))
 		} else {
 			_ = os.WriteFile(filepath.Join(nsDir, ls.prefix+".txt"), []byte(""), 0o644)
 			_ = os.WriteFile(filepath.Join(nsDir, ls.prefix+"-previous.txt"), []byte(""), 0o644)
@@ -332,8 +332,8 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 			LabelSelector: "sonataflow.org/platform=" + name,
 		})
 		if err == nil && len(sfpPods.Items) > 0 {
-			writeAggregatedLogs(ctx, client, ns, sfpPods.Items, false, filepath.Join(crDir, "logs.txt"))
-			writeAggregatedLogs(ctx, client, ns, sfpPods.Items, true, filepath.Join(crDir, "logs-previous.txt"))
+			writeAggregatedLogs(ctx, cfg, ns, sfpPods.Items, false, filepath.Join(crDir, "logs.txt"))
+			writeAggregatedLogs(ctx, cfg, ns, sfpPods.Items, true, filepath.Join(crDir, "logs-previous.txt"))
 		} else {
 			_ = os.WriteFile(filepath.Join(crDir, "logs.txt"), []byte(""), 0o644)
 			_ = os.WriteFile(filepath.Join(crDir, "logs-previous.txt"), []byte(""), 0o644)
@@ -407,8 +407,8 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 		if err == nil {
 			writePodTable(filepath.Join(wfDir, "pods.txt"), wfPods.Items)
 			if len(wfPods.Items) > 0 {
-				writeAggregatedLogs(ctx, client, ns, wfPods.Items, false, filepath.Join(wfDir, "logs.txt"))
-				writeAggregatedLogs(ctx, client, ns, wfPods.Items, true, filepath.Join(wfDir, "logs-previous.txt"))
+				writeAggregatedLogs(ctx, cfg, ns, wfPods.Items, false, filepath.Join(wfDir, "logs.txt"))
+				writeAggregatedLogs(ctx, cfg, ns, wfPods.Items, true, filepath.Join(wfDir, "logs-previous.txt"))
 			} else {
 				_ = os.WriteFile(filepath.Join(wfDir, "logs.txt"), []byte(""), 0o644)
 				_ = os.WriteFile(filepath.Join(wfDir, "logs-previous.txt"), []byte(""), 0o644)

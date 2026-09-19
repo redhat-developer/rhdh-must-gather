@@ -142,7 +142,6 @@ echo "Total processes: $count"
 // Optimized: uses the streaming API directly instead of shelling out to kubectl.
 func CollectPodLogs(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod, outDir string) {
 	_ = os.MkdirAll(outDir, 0o755)
-	client := cfg.Client.Clientset
 
 	allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
 	allContainers = append(allContainers, pod.Spec.InitContainers...)
@@ -152,19 +151,21 @@ func CollectPodLogs(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod
 		cDir := filepath.Join(outDir, "container="+c.Name)
 		_ = os.MkdirAll(cDir, 0o755)
 
-		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, false, filepath.Join(cDir, "current.txt"))
-		streamAndSaveLogs(ctx, client, ns, pod.Name, c.Name, true, filepath.Join(cDir, "previous.txt"))
+		streamAndSaveLogs(ctx, cfg, ns, pod.Name, c.Name, false, filepath.Join(cDir, "current.txt"))
+		streamAndSaveLogs(ctx, cfg, ns, pod.Name, c.Name, true, filepath.Join(cDir, "previous.txt"))
 	}
 
-	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, false, filepath.Join(outDir, "logs-app.current.txt"))
-	writeAggregatedLogs(ctx, client, ns, []corev1.Pod{*pod}, true, filepath.Join(outDir, "logs-app.previous.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, []corev1.Pod{*pod}, false, filepath.Join(outDir, "logs-app.current.txt"))
+	writeAggregatedLogs(ctx, cfg, ns, []corev1.Pod{*pod}, true, filepath.Join(outDir, "logs-app.previous.txt"))
 }
 
-func streamAndSaveLogs(ctx context.Context, client kubernetes.Interface, ns, podName, container string, previous bool, outPath string) {
+func streamAndSaveLogs(ctx context.Context, cfg *Config, ns, podName, container string, previous bool, outPath string) {
 	opts := &corev1.PodLogOptions{
 		Container: container,
 		Previous:  previous,
 	}
+	cfg.ApplyLogSince(opts)
+	client := cfg.Client.Clientset
 	req := client.CoreV1().Pods(ns).GetLogs(podName, opts)
 	stream, err := req.Stream(ctx)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,8 @@ type gatherOptions struct {
 	heapDumpMethod    string
 	heapDumpInstances string
 	clusterInfo       bool
+	since             string
+	sinceTime         string
 }
 
 func newRootCmd() *cobra.Command {
@@ -47,6 +50,19 @@ from both Helm-based and Operator-managed RHDH instances.`,
 			if method != "inspector" && method != "sigusr2" {
 				return fmt.Errorf("--heap-dump-method must be 'inspector' or 'sigusr2', got %q", method)
 			}
+			if opts.since != "" && opts.sinceTime != "" {
+				return fmt.Errorf("at most one of --since or --since-time may be specified")
+			}
+			if opts.since != "" {
+				if _, err := time.ParseDuration(opts.since); err != nil {
+					return fmt.Errorf("--since must be a valid Go duration (e.g. 5s, 2m, 3h): %w", err)
+				}
+			}
+			if opts.sinceTime != "" {
+				if _, err := time.Parse(time.RFC3339, opts.sinceTime); err != nil {
+					return fmt.Errorf("--since-time must be a valid RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z): %w", err)
+				}
+			}
 			return nil
 		},
 	}
@@ -60,6 +76,8 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.StringVar(&opts.heapDumpMethod, "heap-dump-method", "inspector", "Heap dump collection method: inspector or sigusr2")
 	flags.StringVar(&opts.heapDumpInstances, "heap-dump-instances", "", "Comma-separated list of instance names to collect heap dumps from")
 	flags.BoolVar(&opts.clusterInfo, "cluster-info", false, "Collect cluster-wide diagnostic information")
+	flags.StringVar(&opts.since, "since", "", "Only collect logs newer than a relative duration (e.g. 5s, 2m, 3h)")
+	flags.StringVar(&opts.sinceTime, "since-time", "", "Only collect logs after a specific date (RFC3339, e.g. 2006-01-02T15:04:05Z)")
 
 	for _, script := range mandatoryScripts {
 		flags.Bool("without-"+script, false, "Skip "+script+" data collection")
@@ -104,6 +122,12 @@ func buildEnv(opts *gatherOptions) []string {
 	set("RHDH_HEAP_DUMP_METHOD", opts.heapDumpMethod)
 	if opts.heapDumpInstances != "" {
 		set("RHDH_HEAP_DUMP_INSTANCES", opts.heapDumpInstances)
+	}
+	if opts.since != "" {
+		set("MUST_GATHER_SINCE", opts.since)
+	}
+	if opts.sinceTime != "" {
+		set("MUST_GATHER_SINCE_TIME", opts.sinceTime)
 	}
 
 	return env
