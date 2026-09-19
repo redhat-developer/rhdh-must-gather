@@ -348,6 +348,9 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 	count := 0
 
 	for _, wl := range workloads {
+		if processedWorkloads[wl.namespace+"/"+wl.name] {
+			continue
+		}
 		log.Info("--> Processing standalone Helm deployment: %s in namespace %s", wl.name, wl.namespace)
 		count++
 
