@@ -18,6 +18,7 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
+	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
 	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
 )
 
@@ -225,21 +226,7 @@ func resolveNamespaces(opts *gatherOptions) []string {
 	if raw == "" {
 		raw = os.Getenv("RHDH_TARGET_NAMESPACES")
 	}
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		ns := strings.TrimSpace(p)
-		if ns != "" {
-			result = append(result, ns)
-		}
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
+	return namespace.ParseNamespaces(raw)
 }
 
 func resolveHeapDumpMethod(cmd *cobra.Command, opts *gatherOptions) string {

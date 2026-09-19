@@ -112,15 +112,18 @@ func (o *Orchestrator) gatherServerlessOperators(ctx context.Context, cfg *Confi
 	if _, err := client.CoreV1().Namespaces().Get(ctx, serverlessNS, metav1.GetOptions{}); err == nil {
 		log.Info("\tFound OpenShift Serverless namespace: %s", serverlessNS)
 		detected = true
-		addNS(serverlessNS)
-
-		nsDir := filepath.Join(serverlessDir, "ns="+serverlessNS)
-		_ = os.MkdirAll(nsDir, 0o755)
-		o.collectServerlessNamespace(ctx, cfg, serverlessNS, nsDir,
-			[]logSelector{
-				{"logs-knative-openshift", "name=knative-openshift"},
-				{"logs-knative-openshift-ingress", "name=knative-openshift-ingress"},
-			})
+		if cfg.ShouldInclude(serverlessNS) {
+			addNS(serverlessNS)
+			nsDir := filepath.Join(serverlessDir, "ns="+serverlessNS)
+			_ = os.MkdirAll(nsDir, 0o755)
+			o.collectServerlessNamespace(ctx, cfg, serverlessNS, nsDir,
+				[]logSelector{
+					{"logs-knative-openshift", "name=knative-openshift"},
+					{"logs-knative-openshift-ingress", "name=knative-openshift-ingress"},
+				})
+		} else {
+			log.Debug("Skipping serverless namespace %s (not in target list)", serverlessNS)
+		}
 	} else {
 		log.Info("\tOpenShift Serverless namespace not found (namespace: %s)", serverlessNS)
 		_ = os.WriteFile(filepath.Join(serverlessDir, "serverless-not-installed.txt"),
@@ -132,14 +135,17 @@ func (o *Orchestrator) gatherServerlessOperators(ctx context.Context, cfg *Confi
 	if _, err := client.CoreV1().Namespaces().Get(ctx, logicNS, metav1.GetOptions{}); err == nil {
 		log.Info("\tFound OpenShift Serverless Logic namespace: %s", logicNS)
 		detected = true
-		addNS(logicNS)
-
-		nsDir := filepath.Join(serverlessDir, "ns="+logicNS)
-		_ = os.MkdirAll(nsDir, 0o755)
-		o.collectServerlessNamespace(ctx, cfg, logicNS, nsDir,
-			[]logSelector{
-				{"logs-logic-operator", "app.kubernetes.io/name=logic-operator-rhel8"},
-			})
+		if cfg.ShouldInclude(logicNS) {
+			addNS(logicNS)
+			nsDir := filepath.Join(serverlessDir, "ns="+logicNS)
+			_ = os.MkdirAll(nsDir, 0o755)
+			o.collectServerlessNamespace(ctx, cfg, logicNS, nsDir,
+				[]logSelector{
+					{"logs-logic-operator", "app.kubernetes.io/name=logic-operator-rhel8"},
+				})
+		} else {
+			log.Debug("Skipping serverless-logic namespace %s (not in target list)", logicNS)
+		}
 	} else {
 		log.Info("\tOpenShift Serverless Logic namespace not found (namespace: %s)", logicNS)
 		_ = os.WriteFile(filepath.Join(serverlessDir, "serverless-logic-not-installed.txt"),
@@ -282,6 +288,10 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 	for _, item := range items {
 		ns := item.GetNamespace()
 		name := item.GetName()
+		if !cfg.ShouldInclude(ns) {
+			log.Debug("Skipping SonataFlowPlatform %s/%s (not in target list)", ns, name)
+			continue
+		}
 		addNS(ns)
 
 		log.Info("--> Processing SonataFlowPlatform %s in namespace %s", name, ns)
@@ -378,6 +388,10 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 	for _, item := range items {
 		ns := item.GetNamespace()
 		name := item.GetName()
+		if !cfg.ShouldInclude(ns) {
+			log.Debug("Skipping SonataFlow workflow %s/%s (not in target list)", ns, name)
+			continue
+		}
 		addNS(ns)
 
 		nsDir := filepath.Join(sfwDir, "ns="+ns)
@@ -455,19 +469,27 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 	// knative-serving namespace resources
 	if _, err := client.CoreV1().Namespaces().Get(ctx, "knative-serving", metav1.GetOptions{}); err == nil {
 		detected = true
-		addNS("knative-serving")
-		servingDir := filepath.Join(knativeDir, "knative-serving")
-		_ = os.MkdirAll(servingDir, 0o755)
-		o.collectKnativeNamespace(ctx, cfg, "knative-serving", servingDir)
+		if cfg.ShouldInclude("knative-serving") {
+			addNS("knative-serving")
+			servingDir := filepath.Join(knativeDir, "knative-serving")
+			_ = os.MkdirAll(servingDir, 0o755)
+			o.collectKnativeNamespace(ctx, cfg, "knative-serving", servingDir)
+		} else {
+			log.Debug("Skipping knative-serving namespace (not in target list)")
+		}
 	}
 
 	// knative-eventing namespace resources
 	if _, err := client.CoreV1().Namespaces().Get(ctx, "knative-eventing", metav1.GetOptions{}); err == nil {
 		detected = true
-		addNS("knative-eventing")
-		eventingDir := filepath.Join(knativeDir, "knative-eventing")
-		_ = os.MkdirAll(eventingDir, 0o755)
-		o.collectKnativeNamespace(ctx, cfg, "knative-eventing", eventingDir)
+		if cfg.ShouldInclude("knative-eventing") {
+			addNS("knative-eventing")
+			eventingDir := filepath.Join(knativeDir, "knative-eventing")
+			_ = os.MkdirAll(eventingDir, 0o755)
+			o.collectKnativeNamespace(ctx, cfg, "knative-eventing", eventingDir)
+		} else {
+			log.Debug("Skipping knative-eventing namespace (not in target list)")
+		}
 	}
 
 	// KnativeKafka CRs (optional)

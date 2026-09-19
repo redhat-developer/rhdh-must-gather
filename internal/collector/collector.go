@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
+	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
 )
 
 type Config struct {
@@ -38,15 +39,7 @@ func (c *Config) Namespaces() []string {
 }
 
 func (c *Config) ShouldInclude(ns string) bool {
-	if len(c.TargetNamespaces) == 0 {
-		return true
-	}
-	for _, t := range c.TargetNamespaces {
-		if ns == t {
-			return true
-		}
-	}
-	return false
+	return namespace.Includes(c.TargetNamespaces, ns)
 }
 
 // ApplyLogSince sets SinceSeconds/SinceTime on opts based on the configured
