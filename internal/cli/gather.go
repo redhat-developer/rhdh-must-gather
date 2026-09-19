@@ -174,28 +174,38 @@ func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
 	_ = os.WriteFile(filepath.Join(basePath, "must-gather.log"), data, 0o644)
 }
 
-// resolveSince returns the since duration and sinceTime string, preferring
-// CLI flags over env vars. The env vars MUST_GATHER_SINCE and
-// MUST_GATHER_SINCE_TIME are set by "oc adm must-gather --since=..." when
+// resolveSince returns the since duration and sinceTime string. CLI flags
+// take precedence as a group: if either flag is set, both env vars are
+// ignored. Otherwise both env vars are read. The env vars MUST_GATHER_SINCE
+// and MUST_GATHER_SINCE_TIME are set by "oc adm must-gather --since=..." when
 // running inside a must-gather pod.
 func resolveSince(opts *gatherOptions) (time.Duration, string) {
 	since := opts.since
-	if since == "" {
-		since = os.Getenv("MUST_GATHER_SINCE")
-	}
 	sinceTime := opts.sinceTime
-	if sinceTime == "" {
+
+	// CLI flags were validated in PreRunE; if either is set, use only CLI.
+	// Otherwise fall back to env vars.
+	if since == "" && sinceTime == "" {
+		since = os.Getenv("MUST_GATHER_SINCE")
 		sinceTime = os.Getenv("MUST_GATHER_SINCE_TIME")
+	}
+
+	// Env vars may conflict; pick since over since-time if both are set.
+	if since != "" && sinceTime != "" {
+		log.Warn("Both MUST_GATHER_SINCE and MUST_GATHER_SINCE_TIME are set; using MUST_GATHER_SINCE")
+		sinceTime = ""
 	}
 
 	var d time.Duration
 	if since != "" {
 		parsed, err := time.ParseDuration(since)
-		if err == nil {
+		if err != nil {
+			log.Warn("Ignoring invalid since value %q: %v", since, err)
+		} else if parsed < time.Second {
+			log.Warn("Ignoring since value %q: must be at least 1s", since)
+		} else {
 			d = parsed
 			log.Info("Log collection limited to last %s", d)
-		} else {
-			log.Warn("Ignoring invalid since value %q: %v", since, err)
 		}
 	}
 	if sinceTime != "" {

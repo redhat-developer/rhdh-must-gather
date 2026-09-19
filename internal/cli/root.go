@@ -54,8 +54,15 @@ from both Helm-based and Operator-managed RHDH instances.`,
 				return fmt.Errorf("at most one of --since or --since-time may be specified")
 			}
 			if opts.since != "" {
-				if _, err := time.ParseDuration(opts.since); err != nil {
+				d, err := time.ParseDuration(opts.since)
+				if err != nil {
 					return fmt.Errorf("--since must be a valid Go duration (e.g. 5s, 2m, 3h): %w", err)
+				}
+				if d <= 0 {
+					return fmt.Errorf("--since must be a positive duration, got %s", d)
+				}
+				if d < time.Second {
+					return fmt.Errorf("--since must be at least 1s, got %s", d)
 				}
 			}
 			if opts.sinceTime != "" {

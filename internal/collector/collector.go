@@ -43,9 +43,11 @@ func (c *Config) ShouldInclude(ns string) bool {
 // ApplyLogSince sets SinceSeconds/SinceTime on opts based on the configured
 // --since or --since-time value. Only one may be set; the CLI validates this.
 func (c *Config) ApplyLogSince(opts *corev1.PodLogOptions) {
-	if c.Since > 0 {
+	if c.Since >= time.Second {
 		s := int64(c.Since.Round(time.Second).Seconds())
-		opts.SinceSeconds = &s
+		if s > 0 {
+			opts.SinceSeconds = &s
+		}
 	}
 	if c.SinceTime != "" {
 		t, err := time.Parse(time.RFC3339, c.SinceTime)
