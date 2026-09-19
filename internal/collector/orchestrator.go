@@ -253,8 +253,8 @@ func (o *Orchestrator) gatherSonataFlowPlatforms(ctx context.Context, cfg *Confi
 	sfpDir := filepath.Join(outDir, "sonataflow-platforms")
 	_ = os.MkdirAll(sfpDir, 0o755)
 
-	hasSonataFlow, _ := cfg.Client.HasAPIGroup("sonataflow.org")
-	if !hasSonataFlow {
+	hasSonataFlow, discErr := cfg.Client.HasAPIGroup("sonataflow.org")
+	if !hasSonataFlow && discErr == nil {
 		log.Info("\tSonataFlow API not available, skipping SonataFlowPlatform CRs")
 		_ = os.WriteFile(filepath.Join(sfpDir, "no-platforms.txt"),
 			[]byte("SonataFlow API not available\n"), 0o644)
@@ -348,8 +348,8 @@ func (o *Orchestrator) gatherSonataFlowWorkflows(ctx context.Context, cfg *Confi
 	sfwDir := filepath.Join(outDir, "sonataflow-workflows")
 	_ = os.MkdirAll(sfwDir, 0o755)
 
-	hasSonataFlow, _ := cfg.Client.HasAPIGroup("sonataflow.org")
-	if !hasSonataFlow {
+	hasSonataFlow, discErr := cfg.Client.HasAPIGroup("sonataflow.org")
+	if !hasSonataFlow && discErr == nil {
 		log.Info("\tSonataFlow API not available, skipping SonataFlow workflows")
 		_ = os.WriteFile(filepath.Join(sfwDir, "no-workflows.txt"),
 			[]byte("SonataFlow API not available\n"), 0o644)
@@ -427,10 +427,10 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 	detected := false
 	client := cfg.Client.Clientset
 
-	hasKnativeOperator, _ := cfg.Client.HasAPIGroup("operator.knative.dev")
-	hasServerlessOperator, _ := cfg.Client.HasAPIGroup("operator.serverless.openshift.io")
+	hasKnativeOperator, knativeDiscErr := cfg.Client.HasAPIGroup("operator.knative.dev")
+	hasServerlessOperator, serverlessDiscErr := cfg.Client.HasAPIGroup("operator.serverless.openshift.io")
 
-	if hasKnativeOperator {
+	if hasKnativeOperator || knativeDiscErr != nil {
 		// KnativeServing CRs
 		servingItems := o.collectKnativeCRs(ctx, cfg, knativeServingGVR,
 			filepath.Join(knativeDir, "knative-serving-list.txt"),
@@ -471,7 +471,7 @@ func (o *Orchestrator) gatherKnativeResources(ctx context.Context, cfg *Config, 
 	}
 
 	// KnativeKafka CRs (optional)
-	if hasServerlessOperator {
+	if hasServerlessOperator || serverlessDiscErr != nil {
 		o.collectKnativeCRs(ctx, cfg, knativeKafkaGVR,
 			filepath.Join(knativeDir, "knative-kafka-list.txt"),
 			filepath.Join(knativeDir, "knative-kafka.yaml"),

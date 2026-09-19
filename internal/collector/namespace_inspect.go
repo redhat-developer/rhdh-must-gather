@@ -221,6 +221,7 @@ func redirectKlog(outDir string) (io.Writer, func()) {
 	logPath := filepath.Join(outDir, "inspect.log")
 	f, err := os.Create(logPath)
 	if err != nil {
+		log.Warn("Failed to create inspect.log, inspect warnings will appear in stderr: %v", err)
 		return os.Stderr, func() {}
 	}
 	klog.LogToStderr(false)
