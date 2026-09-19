@@ -103,15 +103,26 @@ func CollectWorkload(ctx context.Context, cfg *Config, ref WorkloadRef, outDir s
 			CollectPodLogs(ctx, cfg, ns, pod, filepath.Join(outDir, "logs", "pod="+pod.Name))
 		}()
 
-		if pod.Status.Phase == corev1.PodRunning && !ref.SkipAppData {
+		if pod.Status.Phase == corev1.PodRunning {
+			if !ref.SkipAppData {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if cfg.IsInterrupted() {
+						return
+					}
+					log.Info("\tCollecting app data from pod %s", pod.Name)
+					CollectPodData(ctx, cfg, ns, pod, filepath.Join(outDir, "data", "pod="+pod.Name, "container=backstage-backend"))
+				}()
+			}
+
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				if cfg.IsInterrupted() {
 					return
 				}
-				log.Info("\tCollecting app data and processes from pod %s", pod.Name)
-				CollectPodData(ctx, cfg, ns, pod, filepath.Join(outDir, "data", "pod="+pod.Name, "container=backstage-backend"))
+				log.Info("\tCollecting processes from pod %s", pod.Name)
 				CollectProcesses(ctx, cfg, ns, pod, filepath.Join(outDir, "processes", "pod="+pod.Name))
 			}()
 		}
