@@ -3,11 +3,12 @@
 # (Deployments created via `helm template | kubectl apply`, not tracked by Helm releases)
 #
 # Usage:
-#   ./tests/e2e/test-helm-standalone.sh --validate --output-dir <dir> --namespace <ns> --deployment <name> [--postgres <name>]
+#   ./tests/e2e/test-helm-standalone.sh --validate --output-dir <dir> --namespace <ns> --instance <name> --deployment <name> [--postgres <name>]
 #
 # Options:
 #   --output-dir <dir>   Path to must-gather output directory (required)
 #   --namespace <ns>     Namespace where deployment was created (required)
+#   --instance <name>    Helm instance name (app.kubernetes.io/instance label, used as folder name) (required)
 #   --deployment <name>  Name of the RHDH deployment (required)
 #   --postgres <name>    Name of the PostgreSQL StatefulSet (optional)
 #
@@ -25,6 +26,7 @@ source "$SCRIPT_DIR/lib/test-utils.sh"
 MODE=""
 NAMESPACE=""
 OUTPUT_DIR=""
+INSTANCE_NAME=""
 DEPLOYMENT_NAME=""
 POSTGRES_NAME=""
 
@@ -43,6 +45,10 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_DIR="$2"
             shift 2
             ;;
+        --instance)
+            INSTANCE_NAME="$2"
+            shift 2
+            ;;
         --deployment)
             DEPLOYMENT_NAME="$2"
             shift 2
@@ -59,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$MODE" != "validate" ]; then
-    log_error "Usage: $0 --validate --output-dir <dir> --namespace <ns> --deployment <name> [--postgres <name>]"
+    log_error "Usage: $0 --validate --output-dir <dir> --namespace <ns> --instance <name> --deployment <name> [--postgres <name>]"
     exit 1
 fi
 
@@ -69,6 +75,10 @@ if [ -z "$OUTPUT_DIR" ]; then
 fi
 if [ -z "$NAMESPACE" ]; then
     log_error "--namespace is required"
+    exit 1
+fi
+if [ -z "$INSTANCE_NAME" ]; then
+    log_error "--instance is required"
     exit 1
 fi
 if [ -z "$DEPLOYMENT_NAME" ]; then
@@ -82,6 +92,7 @@ log_info "Validating standalone Helm deployment collection"
 log_info "=========================================="
 log_info "Output directory: $OUTPUT_DIR"
 log_info "Namespace: $NAMESPACE"
+log_info "Instance: $INSTANCE_NAME"
 log_info "Deployment: $DEPLOYMENT_NAME"
 if [ -n "$POSTGRES_NAME" ]; then
     log_info "PostgreSQL StatefulSet: $POSTGRES_NAME"
@@ -91,22 +102,20 @@ reset_errors
 
 check_dir_not_empty "$OUTPUT_DIR/helm/standalone" "standalone Helm deployments directory"
 check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE" "$NAMESPACE namespace in standalone directory"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME" "$DEPLOYMENT_NAME in standalone directory"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/standalone-note.txt" "standalone deployment note"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/helm-metadata.txt" "Helm metadata for standalone deployment"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment.yaml" "deployment YAML for standalone deployment"
-check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment.describe.txt" "deployment description for standalone deployment"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME" "$INSTANCE_NAME in standalone directory"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/standalone-note.txt" "standalone deployment note"
+check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/helm-metadata.txt" "Helm metadata for standalone deployment"
 
 # Verify the standalone deployment is listed in the all-rhdh-releases.txt with (standalone) marker
 check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "(standalone)" "standalone marker in releases list"
 check_file_contains "$OUTPUT_DIR/helm/all-rhdh-releases.txt" "$NAMESPACE" "standalone namespace in releases list"
 
 # Verify that standalone deployments have the deployment data collected
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment" "deployment data in standalone directory"
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/pods" "pod data for standalone deployment"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment" "deployment data in standalone directory"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment/pods" "pod data for standalone deployment"
 
 # Validate per-pod logs structure for standalone deployment
-STANDALONE_DEPLOY_DIR="$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment"
+STANDALONE_DEPLOY_DIR="$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment"
 if [ -d "$STANDALONE_DEPLOY_DIR/logs" ]; then
     standalone_log_pod_count=$(find "$STANDALONE_DEPLOY_DIR/logs" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
     if [ "$standalone_log_pod_count" -ge 1 ]; then
@@ -140,10 +149,10 @@ fi
 
 # Verify process collection from the running standalone deployment
 # Unlike the native Helm deployment (which is in CreateContainerConfigError), the standalone deployment is running
-check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/processes" "processes directory for running standalone deployment"
+check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment/processes" "processes directory for running standalone deployment"
 
 # Find the pod directory and verify process files exist
-standalone_pod_dirs=$(find "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
+standalone_pod_dirs=$(find "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment/processes" -mindepth 1 -maxdepth 1 -type d -name 'pod=*' 2>/dev/null | wc -l)
 if [ "$standalone_pod_dirs" -ge 1 ]; then
     log_info "✓ Found $standalone_pod_dirs pod process directory(ies) for standalone deployment"
 else
@@ -152,7 +161,7 @@ else
 fi
 
 # Validate process files in each pod directory
-for pod_dir in "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/processes"/pod=*; do
+for pod_dir in "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment/processes"/pod=*; do
     if [ -d "$pod_dir" ]; then
         pod_name=$(basename "$pod_dir")
         check_file_not_empty "$pod_dir/container=backstage-backend.txt" "backstage-backend container process list in standalone $pod_name"
@@ -165,12 +174,12 @@ done
 log_info ""
 log_info "--- Validating dependent services collection for standalone deployment ---"
 if [ -n "$POSTGRES_NAME" ]; then
-    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/dependencies" "dependencies directory for standalone deployment"
-    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/dependencies/$POSTGRES_NAME" "PostgreSQL dependency in standalone deployment"
-    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/dependencies/$POSTGRES_NAME/statefulset.yaml" "PostgreSQL StatefulSet YAML"
-    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/dependencies/$POSTGRES_NAME/statefulset.describe.txt" "PostgreSQL StatefulSet description"
+    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/dependencies" "dependencies directory for standalone deployment"
+    check_dir_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/dependencies/$POSTGRES_NAME" "PostgreSQL dependency in standalone deployment"
+    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/dependencies/$POSTGRES_NAME/statefulset.yaml" "PostgreSQL StatefulSet YAML"
+    check_file_not_empty "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/dependencies/$POSTGRES_NAME/statefulset.describe.txt" "PostgreSQL StatefulSet description"
     # Verify PostgreSQL logs are collected
-    postgres_log_files=$(find "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/dependencies/$POSTGRES_NAME" -name 'logs-*.txt' 2>/dev/null | wc -l)
+    postgres_log_files=$(find "$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/dependencies/$POSTGRES_NAME" -name 'logs-*.txt' 2>/dev/null | wc -l)
     if [ "$postgres_log_files" -ge 1 ]; then
         log_info "✓ Found $postgres_log_files PostgreSQL log file(s)"
     else

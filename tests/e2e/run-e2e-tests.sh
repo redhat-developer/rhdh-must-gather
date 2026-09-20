@@ -753,7 +753,7 @@ fi
 if [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
     log_info ""
     log_info "Running standalone Helm validation..."
-    STANDALONE_VALIDATE_ARGS=(--validate --output-dir "$OUTPUT_DIR" --namespace "$NS_STANDALONE" --deployment "$STANDALONE_DEPLOY")
+    STANDALONE_VALIDATE_ARGS=(--validate --output-dir "$OUTPUT_DIR" --namespace "$NS_STANDALONE" --instance "$STANDALONE_RELEASE" --deployment "$STANDALONE_DEPLOY")
     if [ -n "$STANDALONE_POSTGRES" ]; then
         STANDALONE_VALIDATE_ARGS+=(--postgres "$STANDALONE_POSTGRES")
     fi
@@ -782,6 +782,7 @@ RHDHSUPP308_POSTGRES="rhdhsupp-308-postgresql"
 if ! "$SCRIPT_DIR/validate-helm-standalone.sh" --validate \
     --output-dir "$OUTPUT_DIR" \
     --namespace "$NS_RHDHSUPP308" \
+    --instance "$RHDHSUPP308_INSTANCE" \
     --deployment "$RHDHSUPP308_DEPLOY" \
     --postgres "$RHDHSUPP308_POSTGRES"; then
     log_error "RHDHSUPP-308 standalone validation failed!"
@@ -794,6 +795,7 @@ log_info "Running heap dump validation for RHDHSUPP-308 instance..."
 if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
     --output-dir "$OUTPUT_DIR" \
     --namespace "$NS_RHDHSUPP308" \
+    --instance "$RHDHSUPP308_INSTANCE" \
     --deployment "$RHDHSUPP308_DEPLOY" \
     --type standalone \
     --require-success; then
@@ -810,6 +812,7 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
         if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
             --output-dir "$OUTPUT_DIR" \
             --namespace "$NS_STANDALONE" \
+            --instance "$STANDALONE_RELEASE" \
             --deployment "$STANDALONE_DEPLOY" \
             --type standalone \
             --require-success; then
