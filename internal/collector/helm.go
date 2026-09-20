@@ -407,7 +407,7 @@ func (h *Helm) gatherStandaloneDeployments(ctx context.Context, cfg *Config, hel
 			sb.WriteString("\n# Standalone Helm Deployments (detected via labels/images)\n")
 			sb.WriteString("# =========================================================\n")
 			for _, wl := range workloads {
-				if processedWorkloads[wl.namespace+"/"+wl.name] {
+				if processedWorkloads[workloadKey(wl.kind, wl.namespace, wl.name)] {
 					fmt.Fprintf(&sb, "%s/%s (standalone)\n", wl.namespace, wl.name)
 				}
 			}
