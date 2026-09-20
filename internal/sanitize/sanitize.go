@@ -1,6 +1,7 @@
 package sanitize
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,34 +111,69 @@ func sanitizeStructured(path string, res *Result) {
 }
 
 func sanitizeText(path string, res *Result) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return
 	}
+
 	res.FilesProcessed++
-	content := string(data)
-	changed := false
 
-	if jwtRe.MatchString(content) {
-		content = jwtRe.ReplaceAllString(content, "${1}[REDACTED-JWT-TOKEN]${2}")
-		changed = true
-		res.ItemsSanitized++
+	tmpPath := path + ".sanitize.tmp"
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		_ = f.Close()
+		return
 	}
 
-	if authHdrRe.MatchString(content) {
-		content = authHdrRe.ReplaceAllString(content, "${1}[REDACTED-TOKEN]")
-		changed = true
-		res.ItemsSanitized++
+	w := bufio.NewWriter(out)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var foundJWT, foundAuth, foundPasswd bool
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if r := jwtRe.ReplaceAllString(line, "${1}[REDACTED-JWT-TOKEN]${2}"); r != line {
+			line = r
+			foundJWT = true
+		}
+		if r := authHdrRe.ReplaceAllString(line, "${1}[REDACTED-TOKEN]"); r != line {
+			line = r
+			foundAuth = true
+		}
+		if r := passwdRe.ReplaceAllString(line, "${1}=[REDACTED]"); r != line {
+			line = r
+			foundPasswd = true
+		}
+
+		_, _ = w.WriteString(line)
+		_ = w.WriteByte('\n')
+	}
+	scanErr := scanner.Err()
+	_ = f.Close()
+	_ = w.Flush()
+	_ = out.Close()
+
+	if scanErr != nil {
+		log.Warn("Error scanning %s: %v", path, scanErr)
+		_ = os.Remove(tmpPath)
+		return
 	}
 
-	if passwdRe.MatchString(content) {
-		content = passwdRe.ReplaceAllString(content, "${1}=[REDACTED]")
-		changed = true
-		res.ItemsSanitized++
-	}
-
-	if changed {
-		_ = os.WriteFile(path, []byte(content), 0o644)
+	if foundJWT || foundAuth || foundPasswd {
+		if foundJWT {
+			res.ItemsSanitized++
+		}
+		if foundAuth {
+			res.ItemsSanitized++
+		}
+		if foundPasswd {
+			res.ItemsSanitized++
+		}
+		_ = os.Rename(tmpPath, path)
+	} else {
+		_ = os.Remove(tmpPath)
 	}
 }
 

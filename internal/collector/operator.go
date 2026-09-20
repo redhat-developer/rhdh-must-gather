@@ -613,6 +613,7 @@ func writeAggregatedLogs(ctx context.Context, cfg *Config, ns string, pods []cor
 			}
 			prefix := fmt.Sprintf("[pod/%s/%s] ", pod.Name, c.Name)
 			scanner := bufio.NewScanner(stream)
+			scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 			for scanner.Scan() {
 				line := scanner.Text()
 				if line != "" {
@@ -620,6 +621,9 @@ func writeAggregatedLogs(ctx context.Context, cfg *Config, ns string, pods []cor
 					_, _ = w.WriteString(line)
 					_ = w.WriteByte('\n')
 				}
+			}
+			if err := scanner.Err(); err != nil {
+				log.Warn("Error reading logs from %s/%s: %v", pod.Name, c.Name, err)
 			}
 			_ = stream.Close()
 		}
