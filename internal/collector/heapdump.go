@@ -584,14 +584,8 @@ func fallbackHeapDump(wsURL string, cfg *Config, ns, pod, container, outPath, lo
 
 			ctx := context.Background()
 			copyScript := fmt.Sprintf("cat %q", remoteFile)
-			data, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, copyScript)
-			if err != nil {
+			if err := execInPodToFile(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, copyScript, outPath); err != nil {
 				appendLog(logFile, "Failed to copy heap snapshot from container: %v\n", err)
-				return false
-			}
-
-			if err := os.WriteFile(outPath, []byte(data), 0o644); err != nil {
-				appendLog(logFile, "Failed to write fallback heap dump: %v\n", err)
 				return false
 			}
 
@@ -688,14 +682,8 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 
 	localPath := filepath.Join(containerDir, heapFile)
 	copyScript := fmt.Sprintf("cat %q", foundFile)
-	data, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, copyScript)
-	if err != nil {
+	if err := execInPodToFile(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, copyScript, localPath); err != nil {
 		appendLog(logFile, "Failed to copy heap dump: %v\n", err)
-		return false
-	}
-
-	if err := os.WriteFile(localPath, []byte(data), 0o644); err != nil {
-		appendLog(logFile, "Failed to write heap dump: %v\n", err)
 		return false
 	}
 
