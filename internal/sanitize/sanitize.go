@@ -111,6 +111,12 @@ func sanitizeStructured(path string, res *Result) {
 }
 
 func sanitizeText(path string, res *Result) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	srcMode := info.Mode()
+
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -118,45 +124,49 @@ func sanitizeText(path string, res *Result) {
 
 	res.FilesProcessed++
 
-	tmpPath := path + ".sanitize.tmp"
-	out, err := os.Create(tmpPath)
+	out, err := os.CreateTemp(filepath.Dir(path), ".sanitize-*.tmp")
 	if err != nil {
 		_ = f.Close()
 		return
 	}
+	tmpPath := out.Name()
 
 	w := bufio.NewWriter(out)
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	reader := bufio.NewReaderSize(f, 64*1024)
 
 	var foundJWT, foundAuth, foundPasswd bool
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			// Strip the trailing newline for pattern matching, re-add after.
+			trimmed := strings.TrimSuffix(line, "\n")
 
-		if r := jwtRe.ReplaceAllString(line, "${1}[REDACTED-JWT-TOKEN]${2}"); r != line {
-			line = r
-			foundJWT = true
-		}
-		if r := authHdrRe.ReplaceAllString(line, "${1}[REDACTED-TOKEN]"); r != line {
-			line = r
-			foundAuth = true
-		}
-		if r := passwdRe.ReplaceAllString(line, "${1}=[REDACTED]"); r != line {
-			line = r
-			foundPasswd = true
-		}
+			if r := jwtRe.ReplaceAllString(trimmed, "${1}[REDACTED-JWT-TOKEN]${2}"); r != trimmed {
+				trimmed = r
+				foundJWT = true
+			}
+			if r := authHdrRe.ReplaceAllString(trimmed, "${1}[REDACTED-TOKEN]"); r != trimmed {
+				trimmed = r
+				foundAuth = true
+			}
+			if r := passwdRe.ReplaceAllString(trimmed, "${1}=[REDACTED]"); r != trimmed {
+				trimmed = r
+				foundPasswd = true
+			}
 
-		_, _ = w.WriteString(line)
-		_ = w.WriteByte('\n')
+			_, _ = w.WriteString(trimmed)
+			_ = w.WriteByte('\n')
+		}
+		if err != nil {
+			break
+		}
 	}
-	scanErr := scanner.Err()
 	_ = f.Close()
 	_ = w.Flush()
-	_ = out.Close()
+	closeErr := out.Close()
 
-	if scanErr != nil {
-		log.Warn("Error scanning %s: %v", path, scanErr)
+	if closeErr != nil {
 		_ = os.Remove(tmpPath)
 		return
 	}
@@ -171,6 +181,7 @@ func sanitizeText(path string, res *Result) {
 		if foundPasswd {
 			res.ItemsSanitized++
 		}
+		_ = os.Chmod(tmpPath, srcMode)
 		_ = os.Rename(tmpPath, path)
 	} else {
 		_ = os.Remove(tmpPath)

@@ -238,16 +238,21 @@ func execInPodToFile(ctx context.Context, config *rest.Config, client kubernetes
 	if err != nil {
 		return fmt.Errorf("creating output file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
 
 	var stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+	streamErr := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdout: f,
 		Stderr: &stderr,
 	})
-	if err != nil {
+	closeErr := f.Close()
+
+	if streamErr != nil {
 		_ = os.Remove(destPath)
-		return fmt.Errorf("exec failed: %w (stderr: %s)", err, stderr.String())
+		return fmt.Errorf("exec failed: %w (stderr: %s)", streamErr, stderr.String())
+	}
+	if closeErr != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("closing output file: %w", closeErr)
 	}
 
 	return nil
