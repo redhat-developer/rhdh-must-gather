@@ -3,12 +3,84 @@ package collector
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 )
+
+func TestOwnedOKPDeployments(t *testing.T) {
+	controller := true
+	notController := false
+	crUID := types.UID("developer-hub-uid")
+
+	deployment := func(name, container string, owner metav1.OwnerReference) appsv1.Deployment {
+		return appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: name, OwnerReferences: []metav1.OwnerReference{owner}},
+			Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: container}},
+			}}},
+		}
+	}
+	owner := func(name string, uid types.UID, controller *bool) metav1.OwnerReference {
+		return metav1.OwnerReference{
+			APIVersion: "rhdh.redhat.com/v1alpha5",
+			Kind:       "Backstage",
+			Name:       name,
+			UID:        uid,
+			Controller: controller,
+		}
+	}
+
+	deployments := []appsv1.Deployment{
+		deployment("z-okp", "okp", owner("developer-hub", crUID, &controller)),
+		deployment("a-okp", "okp", owner("developer-hub", crUID, &controller)),
+		deployment("backstage-developer-hub", "okp", owner("developer-hub", crUID, &controller)),
+		deployment("wrong-container", "worker", owner("developer-hub", crUID, &controller)),
+		deployment("wrong-cr", "okp", owner("another-hub", crUID, &controller)),
+		deployment("wrong-uid", "okp", owner("developer-hub", "old-uid", &controller)),
+		deployment("not-controller", "okp", owner("developer-hub", crUID, &notController)),
+	}
+
+	got := ownedOKPDeployments(deployments, "developer-hub", crUID, "backstage-developer-hub")
+	var gotNames []string
+	for _, item := range got {
+		gotNames = append(gotNames, item.Name)
+	}
+	want := []string{"a-okp", "z-okp"}
+	if !reflect.DeepEqual(gotNames, want) {
+		t.Errorf("ownedOKPDeployments() = %q, want %q", gotNames, want)
+	}
+}
+
+func TestOwnedOKPDeployments_IAOnly(t *testing.T) {
+	controller := true
+	deployments := []appsv1.Deployment{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "backstage-developer-hub",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "rhdh.redhat.com/v1alpha5",
+				Kind:       "Backstage",
+				Name:       "developer-hub",
+				UID:        "developer-hub-uid",
+				Controller: &controller,
+			}},
+		},
+		Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "backstage-backend"}, {Name: "lightspeed-core"}},
+		}}},
+	}}
+
+	got := ownedOKPDeployments(deployments, "developer-hub", "developer-hub-uid", "backstage-developer-hub")
+	if len(got) != 0 {
+		t.Errorf("ownedOKPDeployments() returned %d workloads for an IA-only deployment", len(got))
+	}
+}
 
 func TestIsRHDHRelated(t *testing.T) {
 	tests := []struct {
@@ -121,9 +193,9 @@ func TestGetFieldAsString(t *testing.T) {
 			"name": "test",
 		},
 		"spec": map[string]any{
-			"approved":  true,
-			"replicas":  float64(3),
-			"approval":  "Automatic",
+			"approved": true,
+			"replicas": float64(3),
+			"approval": "Automatic",
 		},
 	}
 

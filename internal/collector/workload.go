@@ -23,6 +23,8 @@ const (
 	KindStatefulSet WorkloadKind = "statefulset"
 )
 
+const okpContainer = "okp"
+
 type WorkloadRef struct {
 	Namespace    string
 	Name         string
