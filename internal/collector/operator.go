@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
@@ -374,12 +377,12 @@ func (o *Operator) gatherBackstageCRs(ctx context.Context, cfg *Config, outDir s
 
 			writeResource(filepath.Join(crDir, crName+".yaml"), &cr)
 			describeResource(ctx, cfg, filepath.Join(crDir, "describe.txt"), "backstage", ns, crName)
-			o.collectCRWorkloads(ctx, cfg, ns, crName, crDir, backstageGVR)
+			o.collectCRWorkloads(ctx, cfg, ns, crName, cr.GetUID(), crDir, backstageGVR)
 		}
 	}
 }
 
-func (o *Operator) collectCRWorkloads(ctx context.Context, cfg *Config, ns, crName, crDir string, backstageGVR schema.GroupVersionResource) {
+func (o *Operator) collectCRWorkloads(ctx context.Context, cfg *Config, ns, crName string, crUID types.UID, crDir string, backstageGVR schema.GroupVersionResource) {
 	client := cfg.Client.Clientset
 	deployName := "backstage-" + crName
 	stsName := "backstage-psql-" + crName
@@ -402,9 +405,73 @@ func (o *Operator) collectCRWorkloads(ctx context.Context, cfg *Config, ns, crNa
 		}
 	}
 
+	o.collectOKPWorkload(ctx, cfg, ns, crName, crUID, deployName, crDir)
+
 	if err := CollectDBStatefulSet(ctx, cfg, ns, stsName, crDir); err != nil {
 		log.Warn("Failed to collect DB statefulset: %v", err)
 	}
+}
+
+func (o *Operator) collectOKPWorkload(ctx context.Context, cfg *Config, ns, crName string, crUID types.UID, primaryName, crDir string) {
+	deployments, err := cfg.Client.Clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Warn("Failed to list Deployments owned by Backstage CR %s/%s: %v", ns, crName, err)
+		return
+	}
+
+	okpDeployments := ownedOKPDeployments(deployments.Items, crName, crUID, primaryName)
+	if len(okpDeployments) == 0 {
+		return
+	}
+	if len(okpDeployments) > 1 {
+		log.Warn("Multiple OKP Deployments are controlled by Backstage CR %s/%s; collecting %s", ns, crName, okpDeployments[0].Name)
+	}
+
+	deployment := okpDeployments[0]
+	log.Info("--> Collecting operator-managed OKP Deployment: %s", deployment.Name)
+	ref := WorkloadRef{
+		Namespace:    ns,
+		Name:         deployment.Name,
+		Kind:         KindDeployment,
+		InstanceName: crName,
+		SkipAppData:  true,
+	}
+	if err := CollectWorkload(ctx, cfg, ref, filepath.Join(crDir, "okp-deployment")); err != nil {
+		log.Warn("Failed to collect OKP workload %s/%s: %v", ns, deployment.Name, err)
+	}
+}
+
+func ownedOKPDeployments(deployments []appsv1.Deployment, crName string, crUID types.UID, primaryName string) []*appsv1.Deployment {
+	var matches []*appsv1.Deployment
+	for i := range deployments {
+		deployment := &deployments[i]
+		if deployment.Name == primaryName || !deploymentHasContainer(deployment, okpContainer) {
+			continue
+		}
+		if deploymentControlledByBackstageCR(deployment, crName, crUID) {
+			matches = append(matches, deployment)
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Name < matches[j].Name
+	})
+	return matches
+}
+
+func deploymentControlledByBackstageCR(deployment *appsv1.Deployment, crName string, crUID types.UID) bool {
+	for _, owner := range deployment.OwnerReferences {
+		if owner.Controller == nil || !*owner.Controller || owner.Kind != "Backstage" || owner.Name != crName {
+			continue
+		}
+		if !strings.HasPrefix(owner.APIVersion, "rhdh.redhat.com/") {
+			continue
+		}
+		if crUID == "" || owner.UID == crUID {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *Operator) handleDualWorkload(ctx context.Context, cfg *Config, ns, crName, deployName, crDir string, backstageGVR schema.GroupVersionResource) {

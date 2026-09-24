@@ -32,10 +32,7 @@ type Helm struct{}
 
 func (h *Helm) Name() string { return "helm" }
 
-const (
-	helmTimestampLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
-	okpContainer        = "okp"
-)
+const helmTimestampLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
 
 var (
 	rhdhPatternRE      = regexp.MustCompile(`(?i)(backstage|rhdh|developer-hub)`)
