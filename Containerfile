@@ -1,6 +1,6 @@
 # Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
-FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1790256308 AS go-builder
+FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1790256308@sha256:d412481c279355cd7e0494d8c6bea9f58621df1d732222e69b1a6761e63814ff AS go-builder
 COPY go.mod go.sum /opt/app-root/src/
 WORKDIR /opt/app-root/src
 RUN go mod download
