@@ -48,8 +48,9 @@ make image-push REGISTRY=your-registry.com IMAGE_NAME=namespace/my-rhdh-must-gat
 Downstream Konflux builds use `.rhdh/docker/Containerfile` with prefetched RPM and Go modules (no network during `podman build`). CI runs the same path via Hermeto.
 
 ```bash
-# Full hermetic build (fetch deps + build with --network none)
+# Full hermetic build (fetch deps + build with --network none; version matches make image-build)
 make hermetic-build REGISTRY=localhost IMAGE_NAME=rhdh-must-gather IMAGE_TAG=hermetic-test
+# Optional: make hermetic-build VERSION=2.1.0-custom
 
 # Or use the script directly
 ./scripts/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test

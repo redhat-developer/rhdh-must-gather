@@ -33,11 +33,13 @@ Required:
 
 Options:
   -i, --image <name>       Image reference (e.g., localhost/rhdh-must-gather:test)
+  --version <value>        Value for RHDH_MUST_GATHER_VERSION build-arg (default: 0.0.0-local)
   --no-cache               Skip cache build (use existing cache)
   --no-image               Skip image build (only build cache)
   -h, --help               Show this help message
 
 Environment variables:
+  RHDH_MUST_GATHER_VERSION Same as --version when the flag is omitted
   TARGET_PLATFORM          Target platform for podman (e.g., linux/arm64, linux/amd64)
 
 Examples:
@@ -124,6 +126,7 @@ build_image() {
 main() {
   local component_dir=""
   local image=""
+  local version=""
   local no_cache=false
   local no_image=false
 
@@ -135,6 +138,10 @@ main() {
         ;;
       -i|--image)
         image="$2"
+        shift 2
+        ;;
+      --version)
+        version="$2"
         shift 2
         ;;
       --no-cache)
@@ -191,9 +198,13 @@ main() {
     echo "Skipping cache build (--no-cache specified)"
   fi
 
+  if [[ -z "${version}" ]]; then
+    version="${RHDH_MUST_GATHER_VERSION:-0.0.0-local}"
+  fi
+
   if [[ "${no_image}" == false ]]; then
-    echo "Building image..."
-    build_image "${resolved_component_dir}" "${local_cache_dir}" "${image}" "0.0.0-local"
+    echo "Building image (RHDH_MUST_GATHER_VERSION=${version})..."
+    build_image "${resolved_component_dir}" "${local_cache_dir}" "${image}" "${version}"
   else
     echo "Skipping image build"
   fi
