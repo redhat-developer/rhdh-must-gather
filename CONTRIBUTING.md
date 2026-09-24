@@ -42,3 +42,19 @@ make image-push REGISTRY=your-registry.com IMAGE_NAME=namespace/rhdh-must-gather
 # Build and push with custom image name and tag
 make image-push REGISTRY=your-registry.com IMAGE_NAME=namespace/my-rhdh-must-gather IMAGE_TAG=v1.0.0
 ```
+
+#### Hermetic build (Konflux parity)
+
+Downstream Konflux builds use `.rhdh/docker/Containerfile` with prefetched RPM and Go modules (no network during `podman build`). CI runs the same path via Hermeto.
+
+```bash
+# Full hermetic build (fetch deps + build with --network none)
+make hermetic-build REGISTRY=localhost IMAGE_NAME=rhdh-must-gather IMAGE_TAG=hermetic-test
+
+# Or use the script directly
+./scripts/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test
+podman run --rm localhost/rhdh-must-gather:hermetic-test --help
+```
+
+The root `Containerfile` remains for quick local iteration (`make image-build`); production and PR CI use the hermetic Containerfile.
+```

@@ -87,6 +87,10 @@ image-build: ## Build the must-gather container image
 	$(CONTAINER_TOOL) build $(BUILD_ARGS) $(if $(LABELS),$(LABELS)) --build-arg RHDH_MUST_GATHER_VERSION=$(RHDH_MUST_GATHER_VERSION) -t $(IMAGE_NAME):$(IMAGE_TAG) .
 	@echo "Image built: $(IMAGE_NAME):$(IMAGE_TAG)"
 
+.PHONY: hermetic-build
+hermetic-build: ## Build must-gather image hermetically using Hermeto (matches Konflux/CI)
+	scripts/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME)
+
 .PHONY: image-push
 image-push: image-build ## Build and push the image to registry
 	@echo "Tagging image for registry..."
