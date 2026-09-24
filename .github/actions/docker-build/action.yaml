@@ -136,6 +136,7 @@ runs:
         set -ex
         echo "LOCAL_CACHE_DIR_REALPATH=$(realpath "$LOCAL_CACHE_DIR")" >> "$GITHUB_ENV"
         sudo chown -R runner "$(realpath "$LOCAL_CACHE_DIR")"
+        sudo chmod -R a+rwX "$(realpath "$LOCAL_CACHE_DIR")"
 
     - name: Build Docker Image
       id: build

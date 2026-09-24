@@ -3,6 +3,8 @@
 # Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
 FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1790644709@sha256:290ba654458e9a269b1509d10e6ebbd3c2b2456570e73e73201adb3ee54fb244 AS go-builder
+# hadolint ignore=DL3002
+USER 0
 COPY go.mod go.sum /opt/app-root/src/
 COPY cmd/ /opt/app-root/src/cmd/
 COPY internal/ /opt/app-root/src/internal/
@@ -10,6 +12,7 @@ WORKDIR /opt/app-root/src
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 RUN set -eu; \
     . /cachi2/cachi2.env; \
+    export GOCACHE=/tmp/go-build-cache; \
     CGO_ENABLED=0 go build -trimpath \
         -ldflags "-X 'github.com/redhat-developer/rhdh-must-gather/internal/cli.version=${RHDH_MUST_GATHER_VERSION}'" \
         -o /tmp/gather ./cmd/gather
