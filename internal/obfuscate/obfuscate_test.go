@@ -147,7 +147,7 @@ func TestApplyObfuscatesWithoutDroppingResourcesOrReport(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, stagingDirName)); !os.IsNotExist(err) {
 		t.Fatalf("staging directory still present: %v", err)
 	}
-	assertNoReport(t, dir)
+	assertNoReversibleReport(t, dir)
 
 	cm := mustRead(t, filepath.Join(dir, "resources", "app-config.yaml"))
 	if !strings.Contains(cm, "kind: ConfigMap") || !strings.Contains(cm, "name: app-config") {
@@ -205,17 +205,42 @@ func TestApplyFailureKeepsOriginalTree(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(dir, stagingDirName)); !os.IsNotExist(statErr) {
 		t.Fatalf("staging directory left behind: %v", statErr)
 	}
-	assertNoReport(t, dir)
+	assertNoReversibleReport(t, dir)
 }
 
-func assertNoReport(t *testing.T, root string) {
+func TestApplyKeepsResourceNamedReport(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "_configmaps", "report.yaml"), ""+
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: report\ndata:\n  note: keep me\n")
+
+	if err := Apply(dir, nil, func(config, input, output, report string) error {
+		return Clean(config, input, output, report, 1)
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	body := mustRead(t, filepath.Join(dir, "_configmaps", "report.yaml"))
+	if !strings.Contains(body, "kind: ConfigMap") || !strings.Contains(body, "name: report") {
+		t.Fatalf("resource named report was dropped:\n%s", body)
+	}
+	assertNoReversibleReport(t, dir)
+}
+
+func assertNoReversibleReport(t *testing.T, root string) {
 	t.Helper()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && d.Name() == reportFileName {
-			t.Errorf("published tree contains %s", path)
+		if d.IsDir() {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(body), "replacedWith:") {
+			t.Errorf("published tree contains the reversible report %s", path)
 		}
 		return nil
 	})

@@ -82,11 +82,15 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("writing obfuscation config: %w", err)
 	}
 
+	if err := reportStaysOutside(outputPath, basePath, reportDir); err != nil {
+		return err
+	}
 	if err := clean(configPath, basePath, outputPath, reportDir); err != nil {
 		return err
 	}
-	if err := rejectReport(outputPath); err != nil {
-		return err
+	reportPath := filepath.Join(reportDir, reportFileName)
+	if _, err := os.Stat(reportPath); err != nil {
+		return fmt.Errorf("obfuscation report was not written outside the gather: %w", err)
 	}
 	return publish(outputPath, basePath)
 }
@@ -289,16 +293,27 @@ func configYAML(domains []string) string {
 	return b.String()
 }
 
-func rejectReport(root string) error {
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && d.Name() == reportFileName {
-			return fmt.Errorf("refusing to publish %s because it maps obfuscated values back to the original data", path)
-		}
-		return nil
-	})
+// reportStaysOutside rejects a report directory that would be copied into the
+// published gather. Collected files named report.yaml are ordinary resources
+// and are left in place. The reversible map is the report written under reportDir.
+func reportStaysOutside(outputPath, basePath, reportDir string) error {
+	if dirInside(outputPath, reportDir) || dirInside(basePath, reportDir) {
+		return fmt.Errorf("obfuscation report directory must stay outside the published gather")
+	}
+	return nil
+}
+
+func dirInside(parent, child string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	if parent == child {
+		return true
+	}
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func publish(cleaned, basePath string) error {
@@ -311,10 +326,6 @@ func publish(cleaned, basePath string) error {
 			_ = os.RemoveAll(staging)
 			return fmt.Errorf("staging obfuscated output: %w", copyErr)
 		}
-	}
-	if err := rejectReport(staging); err != nil {
-		_ = os.RemoveAll(staging)
-		return err
 	}
 
 	entries, err := os.ReadDir(basePath)
@@ -344,7 +355,7 @@ func publish(cleaned, basePath string) error {
 	if err := os.RemoveAll(staging); err != nil {
 		return fmt.Errorf("removing obfuscation staging directory: %w", err)
 	}
-	return rejectReport(basePath)
+	return nil
 }
 
 func copyTree(src, dst string) error {
