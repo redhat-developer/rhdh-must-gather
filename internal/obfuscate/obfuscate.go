@@ -70,7 +70,7 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	if err != nil {
 		return fmt.Errorf("creating obfuscation work directory: %w", err)
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 
 	configPath := filepath.Join(work, "config.yaml")
 	outputPath := filepath.Join(work, "output")
