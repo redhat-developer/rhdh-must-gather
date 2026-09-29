@@ -15,6 +15,8 @@ HELM_SET ?= ## Additional Helm --set flags for deploy-k8s (e.g., "gather.logLeve
 OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
 HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
+# renovate: datasource=docker depName=quay.io/konflux-ci/hermeto
+HERMETO_IMAGE ?= quay.io/konflux-ci/hermeto:0.60.1
 BUILD_ARGS ?=
 LABELS ?=
 BASE_COLLECTION_PATH ?= ./out
@@ -89,7 +91,7 @@ image-build: ## Build the must-gather container image
 
 .PHONY: hermetic-build
 hermetic-build: ## Build must-gather image hermetically using Hermeto (matches Konflux/CI)
-	scripts/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
+	HERMETO_IMAGE="$(HERMETO_IMAGE)" scripts/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
 
 .PHONY: image-push
 image-push: image-build ## Build and push the image to registry

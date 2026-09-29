@@ -3,6 +3,9 @@
 # Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
 FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1790644709@sha256:290ba654458e9a269b1509d10e6ebbd3c2b2456570e73e73201adb3ee54fb244 AS go-builder
+# go-toolset defaults to a non-root user. Hermeto points the Go build cache at
+# the prefetched modules under /cachi2, which that user cannot create during
+# the offline build. This stage runs as root; the final image still uses UID 1001.
 # hadolint ignore=DL3002
 USER 0
 COPY go.mod go.sum /opt/app-root/src/

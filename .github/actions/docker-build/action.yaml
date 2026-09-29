@@ -66,8 +66,14 @@ runs:
     - name: Set up hermetic build variables
       shell: bash
       run: |
-        # renovate: datasource=docker depName=quay.io/konflux-ci/hermeto
-        echo "HERMETO_IMAGE=quay.io/konflux-ci/hermeto:0.60.1" >> "$GITHUB_ENV"
+        # Same pin as local hermetic builds: HERMETO_IMAGE in the Makefile.
+        HERMETO_IMAGE=$(sed -n 's/^HERMETO_IMAGE ?= //p' Makefile | head -1)
+        if [[ -z "${HERMETO_IMAGE}" ]]; then
+          echo "HERMETO_IMAGE is not set in the Makefile"
+          exit 1
+        fi
+        echo "Using ${HERMETO_IMAGE}"
+        echo "HERMETO_IMAGE=${HERMETO_IMAGE}" >> "$GITHUB_ENV"
         echo "LOCAL_CACHE_DIR=/tmp/hermeto-cache/rhdh-must-gather" >> "$GITHUB_ENV"
 
     - name: Restore hermeto dependency cache

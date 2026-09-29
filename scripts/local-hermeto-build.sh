@@ -18,8 +18,10 @@
 set -euo pipefail
 
 readonly LOCAL_CACHE_BASEDIR='/tmp/hermeto-cache'
-readonly HERMETO_IMAGE='quay.io/konflux-ci/hermeto:0.60.1'
 readonly HERMETIC_CONTAINERFILE='.rhdh/docker/Containerfile'
+
+# Image tag comes from HERMETO_IMAGE in the Makefile (also used by CI).
+HERMETO_IMAGE="${HERMETO_IMAGE:-}"
 
 TARGET_PLATFORM="${TARGET_PLATFORM:-}"
 
@@ -39,6 +41,7 @@ Options:
   -h, --help               Show this help message
 
 Environment variables:
+  HERMETO_IMAGE            Hermeto image (default: HERMETO_IMAGE from the Makefile)
   RHDH_MUST_GATHER_VERSION Same as --version when the flag is omitted
   TARGET_PLATFORM          Target platform for podman (e.g., linux/arm64, linux/amd64)
 
@@ -183,6 +186,14 @@ main() {
   local_cache_dir="${LOCAL_CACHE_BASEDIR}/rhdh-must-gather"
   mkdir -p "${LOCAL_CACHE_BASEDIR}"
 
+  if [[ -z "${HERMETO_IMAGE}" ]]; then
+    HERMETO_IMAGE=$(sed -n 's/^HERMETO_IMAGE ?= //p' "${resolved_component_dir}/Makefile" | head -1)
+  fi
+  if [[ -z "${HERMETO_IMAGE}" ]]; then
+    echo "Error: set HERMETO_IMAGE or define it in ${resolved_component_dir}/Makefile" >&2
+    exit 1
+  fi
+
   if [[ ! -f "${resolved_component_dir}/${HERMETIC_CONTAINERFILE}" ]]; then
     echo "Error: ${HERMETIC_CONTAINERFILE} not found under ${resolved_component_dir}" >&2
     exit 1
@@ -190,6 +201,7 @@ main() {
 
   echo "Component dir: ${resolved_component_dir}"
   echo "Local cache dir: ${local_cache_dir}"
+  echo "Hermeto image: ${HERMETO_IMAGE}"
 
   if [[ "${no_cache}" == false ]]; then
     echo "Building cache..."
