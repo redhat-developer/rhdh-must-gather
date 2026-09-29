@@ -138,7 +138,9 @@ func TestApplyObfuscatesWithoutDroppingResourcesOrReport(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "nodes", ip, "kubelet.log"),
 		"connected to "+ip+" from "+ip+" via 127.0.0.1 mac "+mac+" host logs.apps.example.com\n")
 
-	if err := Apply(dir, []string{"example.com"}, InProcess); err != nil {
+	if err := Apply(dir, []string{"example.com"}, func(config, input, output, report string) error {
+		return Clean(config, input, output, report, 2)
+	}); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
 

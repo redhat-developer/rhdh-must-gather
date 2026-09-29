@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -92,8 +91,8 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	return publish(outputPath, basePath)
 }
 
-// Clean runs must-gather-clean in process. The gather command uses a subprocess
-// wrapper so a klog.Exitf inside the library does not kill the collector.
+// Clean runs must-gather-clean in process. The gather command calls this from a
+// subprocess so a klog.Exitf inside the library does not kill the collector.
 func Clean(configPath, inputPath, outputPath, reportDir string, workers int) error {
 	if workers < 1 {
 		workers = 1
@@ -102,15 +101,6 @@ func Clean(configPath, inputPath, outputPath, reportDir string, workers int) err
 		return fmt.Errorf("must-gather-clean: %w", err)
 	}
 	return nil
-}
-
-// InProcess is a CleanFunc for tests and for the hidden obfuscate subcommand.
-func InProcess(configPath, inputPath, outputPath, reportDir string) error {
-	workers := runtime.GOMAXPROCS(0)
-	if workers < 1 {
-		workers = 1
-	}
-	return Clean(configPath, inputPath, outputPath, reportDir, workers)
 }
 
 // Discover returns domain names that should be obfuscated.
