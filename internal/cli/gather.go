@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,10 +20,11 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
+	"github.com/redhat-developer/rhdh-must-gather/internal/obfuscate"
 	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
 )
 
-func runGather(cmd *cobra.Command, opts *gatherOptions) error {
+func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 	log.Init()
 
 	basePath := os.Getenv("BASE_COLLECTION_PATH")
@@ -34,7 +36,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		logLevel = "info"
 	}
 
-	if err := os.MkdirAll(basePath, 0o755); err != nil {
+	if err = os.MkdirAll(basePath, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -43,10 +45,28 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 
 	var interrupted atomic.Bool
 	sanitizeStop := make(chan struct{})
+	var kubeClient *kube.Client
 
 	defer func() {
 		log.Info("done with data collection. Now sanitizing data...")
 		sanitize.Run(basePath, sanitizeStop)
+		if opts.noObfuscate {
+			log.Info("Obfuscation disabled; collected output keeps IP addresses, MAC addresses, and domain names")
+			return
+		}
+		select {
+		case <-sanitizeStop:
+			log.Error("Obfuscation aborted. Do not share this output.")
+			err = errors.Join(err, fmt.Errorf("obfuscation aborted"))
+			return
+		default:
+		}
+		log.Info("Obfuscating IP addresses, MAC addresses, and cluster domain names...")
+		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, runCleanSubprocess); oerr != nil {
+			log.Error("Obfuscation failed: %v", oerr)
+			log.Error("Collected output was not obfuscated. Do not share it.")
+			err = errors.Join(err, fmt.Errorf("obfuscating must-gather output: %w", oerr))
+		}
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -73,7 +93,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
-	kubeClient, err := kube.NewClient()
+	kubeClient, err = kube.NewClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}

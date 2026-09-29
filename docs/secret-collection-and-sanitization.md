@@ -50,4 +50,20 @@ When secrets are collected (`--with-secrets`), the tool includes automatic sanit
 - **Comprehensive coverage** - Processes all YAML, JSON, and text files in the collected data
 - **Detailed reporting** - Provides sanitization summary with file and item counts
 
-**Important**: While automatic sanitization catches common sensitive patterns, always review the sanitization report and manually check for any domain-specific sensitive information before sharing externally.
+### Automatic obfuscation
+
+After secret sanitization, the gather runs [must-gather-clean](https://github.com/openshift/must-gather-clean) on the collected tree. This step is on by default. It rewrites:
+
+- IP addresses, in file contents and in file paths, using one consistent placeholder per address (`127.0.0.1`, `0.0.0.0`, and `::1` are left as-is)
+- MAC addresses, the same way
+- Cluster domain names, when they can be discovered. The name in front of the domain is kept (`console.apps.example.com` becomes `console.apps.domain0000000001`) so the gather is still readable
+
+Domain discovery reads the OpenShift DNS `cluster` base domain, the default ingress controller domain, and the API server hostname. In-cluster names such as `cluster.local` and `kubernetes.default.svc` are not treated as customer domains. When none of those names can be read, IP and MAC obfuscation still run, and other hostnames are left unchanged. Set `RHDH_OBFUSCATE_DOMAINS` to a comma-separated list to add domains discovery missed.
+
+ConfigMaps and Secrets are not removed by this step. Secret values are still redacted by the sanitizer above, and secret names stay in the gather when `--with-secrets` was used.
+
+The reversible `report.yaml` map produced by must-gather-clean is not included in the output. Do not copy it into a gather you share. A `watermark.txt` file in the output records that obfuscation ran.
+
+Skip this step with `--no-obfuscate` when you need the original addresses to debug the cluster yourself. Secret sanitization still runs. Heap dumps collected with `--with-heap-dumps` are included in this pass, so use `--no-obfuscate` when the snapshot must keep raw addresses.
+
+**Important**: Obfuscation covers discovered domains, IPs, and MAC addresses. Review the gather before sharing it externally when the cluster uses additional names that discovery did not see.
