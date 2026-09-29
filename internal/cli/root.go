@@ -91,6 +91,9 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	}
 
 	cmd.SetVersionTemplate("rhdh-must-gather {{.Version}}\n")
+	// The hidden obfuscate command makes this a parent command. Without an
+	// explicit Args func, Cobra then rejects positional tokens as unknown commands.
+	cmd.Args = cobra.ArbitraryArgs
 	cmd.AddCommand(newObfuscateCmd())
 
 	return cmd

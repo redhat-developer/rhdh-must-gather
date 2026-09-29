@@ -182,6 +182,22 @@ const obfuscateConfig = `config:
       target: All
 `
 
+func TestPositionalArgsAllowed(t *testing.T) {
+	cmd := newRootCmd()
+	var got []string
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		got = args
+		return nil
+	}
+	cmd.SetArgs([]string{"some-collector-token"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("positional arg should be allowed, got: %v", err)
+	}
+	if len(got) != 1 || got[0] != "some-collector-token" {
+		t.Fatalf("args = %#v", got)
+	}
+}
+
 func TestUnknownFlagsAllowed(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
