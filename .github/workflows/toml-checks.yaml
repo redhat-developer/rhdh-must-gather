@@ -23,7 +23,7 @@ jobs:
         with:
           files: |
             **.toml
-      - uses: tombi-toml/setup-tombi@5752de665c9258ec1f869c3498d02ce94b70205c # v1.5.8
+      - uses: tombi-toml/setup-tombi@adc72e7b9a4c5fc8beac71a944c0cc52edbe06f5 # v1.6.1
         if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         with:
           version: 'v0.9.9'
