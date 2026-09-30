@@ -92,6 +92,7 @@ jobs:
         branch: 
           - main
           - release-1.10
+          - release-2.1
         method: [auto, inspector, sigusr2]
 
     steps:
