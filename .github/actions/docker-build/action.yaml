@@ -64,6 +64,7 @@ runs:
         podman --version
 
     - name: Set up hermetic build variables
+      id: hermeto-vars
       shell: bash
       run: |
         # Same pin as local hermetic builds: HERMETO_IMAGE in the Makefile.
@@ -75,13 +76,15 @@ runs:
         echo "Using ${HERMETO_IMAGE}"
         echo "HERMETO_IMAGE=${HERMETO_IMAGE}" >> "$GITHUB_ENV"
         echo "LOCAL_CACHE_DIR=/tmp/hermeto-cache/rhdh-must-gather" >> "$GITHUB_ENV"
+        # Invalidate the dependency cache when the Hermeto image tag changes.
+        echo "hermeto_key=${HERMETO_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
     - name: Restore hermeto dependency cache
       id: cache-deps
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/hermeto-cache/rhdh-must-gather
-        key: hermeto-deps-${{ inputs.platform }}-${{ hashFiles('go.mod', 'go.sum', 'rpms.lock.yaml') }}
+        key: hermeto-deps-${{ inputs.platform }}-${{ steps.hermeto-vars.outputs.hermeto_key }}-${{ hashFiles('go.mod', 'go.sum', 'rpms.lock.yaml') }}
 
     - name: Fetch dependencies with hermeto
       if: steps.cache-deps.outputs.cache-hit != 'true'

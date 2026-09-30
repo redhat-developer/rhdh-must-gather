@@ -93,6 +93,9 @@ build_cache() {
     -w /source \
     "${HERMETO_IMAGE}" \
     inject-files /cachi2/output
+
+  # Match Konflux/CI: any UID in the build container can read/write the cache.
+  chmod -R a+rwX "${local_cache_dir}"
 }
 
 build_image() {
