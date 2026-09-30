@@ -58,4 +58,3 @@ podman run --rm localhost/rhdh-must-gather:hermetic-test --help
 ```
 
 The root `Containerfile` remains for quick local iteration (`make image-build`); production and PR CI use the hermetic Containerfile.
-```
