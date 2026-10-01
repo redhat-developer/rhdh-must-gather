@@ -6,6 +6,11 @@ on:
     types:
       - completed
 
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
 env:
   IMAGE_NAME: rhdh-must-gather
 
@@ -108,6 +113,7 @@ jobs:
         id: meta
         env:
           EXPECTED_PR: ${{ steps.pr-number.outputs.number }}
+          TRUSTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
@@ -129,7 +135,7 @@ jobs:
             exit 1
           fi
           if [ "$EXPECTED_PR" != "$PR_NUM" ]; then
-            echo "Security Alert: Mismatched PR context. Possible artifact poisoning."
+            echo "::error::Security alert: mismatched PR context (expected ${EXPECTED_PR}, got ${PR_NUM}). Possible artifact poisoning."
             exit 1
           fi
 
@@ -137,21 +143,23 @@ jobs:
           # image_tag or unconstrained extra_tags (fork PRs can poison artifacts).
           # PR images may only occupy pr-<N> and pr-<N>-<shortsha>.
           IMAGE_TAG="pr-${EXPECTED_PR}"
+          TRUSTED_SHORT_SHA="${TRUSTED_HEAD_SHA:0:9}"
 
           ARTIFACT_TAG=$(jq -r '.image_tag // ""' metadata.json)
           if [[ -n "$ARTIFACT_TAG" && "$ARTIFACT_TAG" != "$IMAGE_TAG" ]]; then
             echo "::warning::Ignoring artifact image_tag '${ARTIFACT_TAG}'; using trusted tag '${IMAGE_TAG}'"
           fi
 
-          # Validate EXTRA_TAGS: only pr-<N>-<alphanumeric> is permitted
+          # Validate EXTRA_TAGS: must match pr-<N>-<shortsha> where shortsha
+          # is cross-validated against the trusted workflow_run head SHA.
           EXTRA_TAGS_RAW=$(jq -r '.extra_tags // ""' metadata.json)
           EXTRA_TAGS=""
-          EXTRA_TAG_PATTERN="^pr-${EXPECTED_PR}-[a-z0-9]{1,40}$"
+          TRUSTED_EXTRA_TAG="pr-${EXPECTED_PR}-${TRUSTED_SHORT_SHA}"
           for tag in $EXTRA_TAGS_RAW; do
-            if echo "$tag" | grep -qE "$EXTRA_TAG_PATTERN"; then
+            if [ "$tag" = "$TRUSTED_EXTRA_TAG" ]; then
               EXTRA_TAGS="${EXTRA_TAGS:+$EXTRA_TAGS }$tag"
             else
-              echo "::warning::Skipping untrusted extra tag: $tag"
+              echo "::warning::Skipping untrusted extra tag: $tag (expected ${TRUSTED_EXTRA_TAG})"
             fi
           done
 
@@ -167,7 +175,7 @@ jobs:
           echo "SAFE_IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
           echo "SAFE_EXTRA_TAGS=$EXTRA_TAGS" >> "$GITHUB_ENV"
           echo "SAFE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          
+
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
       - name: Load image from tarball

@@ -2,12 +2,13 @@
 # Validate heap dump collection in must-gather output
 #
 # Usage:
-#   ./tests/e2e/validate-heap-dumps.sh --validate --output-dir <dir> --namespace <ns> --deployment <name>
+#   ./tests/e2e/validate-heap-dumps.sh --validate --output-dir <dir> --namespace <ns> --deployment <name> [--instance <name>]
 #
 # Options:
 #   --output-dir <dir>   Path to must-gather output directory (required)
 #   --namespace <ns>     Namespace where deployment was created (required)
 #   --deployment <name>  Name of the RHDH deployment (required)
+#   --instance <name>    Helm instance name (used as folder name for standalone type; defaults to deployment name)
 #   --type <type>        Deployment type: "standalone" or "operator" (default: standalone)
 #   --cr <name>          Backstage CR name (required if type=operator)
 #   --require-success    Fail validation if heap dump collection failed (instead of just warning)
@@ -27,6 +28,7 @@ MODE=""
 NAMESPACE=""
 OUTPUT_DIR=""
 DEPLOYMENT_NAME=""
+INSTANCE_NAME=""
 DEPLOYMENT_TYPE="standalone"
 CR_NAME=""
 REQUIRE_SUCCESS=false
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --deployment)
             DEPLOYMENT_NAME="$2"
+            shift 2
+            ;;
+        --instance)
+            INSTANCE_NAME="$2"
             shift 2
             ;;
         --type)
@@ -90,6 +96,9 @@ if [ "$DEPLOYMENT_TYPE" = "operator" ] && [ -z "$CR_NAME" ]; then
     log_error "--cr is required when --type=operator"
     exit 1
 fi
+if [ -z "$INSTANCE_NAME" ]; then
+    INSTANCE_NAME="$DEPLOYMENT_NAME"
+fi
 
 log_info ""
 log_info "=========================================="
@@ -107,7 +116,7 @@ reset_errors
 
 # Determine the heap-dumps directory based on deployment type
 if [ "$DEPLOYMENT_TYPE" = "standalone" ]; then
-    HEAP_DUMPS_BASE="$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$DEPLOYMENT_NAME/deployment/heap-dumps"
+    HEAP_DUMPS_BASE="$OUTPUT_DIR/helm/standalone/ns=$NAMESPACE/$INSTANCE_NAME/deployment/heap-dumps"
 elif [ "$DEPLOYMENT_TYPE" = "operator" ]; then
     HEAP_DUMPS_BASE="$OUTPUT_DIR/operator/backstage-crs/ns=$NAMESPACE/$CR_NAME/deployment/heap-dumps"
 else

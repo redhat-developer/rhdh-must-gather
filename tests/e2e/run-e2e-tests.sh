@@ -12,7 +12,7 @@
 #   --local             Run in local mode using 'make clean-out run-local' (no image required)
 #   --target-branch <branch> Target branch (used for defaults, default: main)
 #   --operator-branch <branch> Override RHDH operator branch (default: derived from --target-branch)
-#   --helm-chart-version <version> Override Helm chart version (default: auto-detected from --target-branch)
+#   --chart-branch <branch> Override RHDH Helm chart branch (default: derived from --target-branch)
 #   --helm-values-file <file> Override Helm values file (default: auto-generated from --target-branch)
 #   --skip-helm         Skip Helm release test
 #   --skip-helm-standalone Skip standalone Helm deployment test
@@ -89,7 +89,7 @@ FULL_IMAGE_NAME=""
 LOCAL_MODE=false
 TARGET_BRANCH="main"
 OPERATOR_BRANCH=""
-HELM_CHART_VERSION=""
+CHART_BRANCH=""
 HELM_VALUES_FILE=""
 SKIP_HELM=false
 SKIP_HELM_STANDALONE=false
@@ -120,8 +120,12 @@ while [[ $# -gt 0 ]]; do
             OPERATOR_BRANCH="$2"
             shift 2
             ;;
+        --chart-branch)
+            CHART_BRANCH="$2"
+            shift 2
+            ;;
         --helm-chart-version)
-            HELM_CHART_VERSION="$2"
+            log_warn "--helm-chart-version is deprecated and ignored (chart is sourced from rhdh-chart repo)"
             shift 2
             ;;
         --helm-values-file)
@@ -214,8 +218,9 @@ cd "$PROJECT_ROOT"
 
 log_info "Working directory: $PROJECT_ROOT"
 
-# Use OPERATOR_BRANCH override if provided, otherwise use TARGET_BRANCH
+# Use override branches if provided, otherwise use TARGET_BRANCH
 EFFECTIVE_OPERATOR_BRANCH="${OPERATOR_BRANCH:-$TARGET_BRANCH}"
+EFFECTIVE_CHART_BRANCH="${CHART_BRANCH:-$TARGET_BRANCH}"
 
 # Generate timestamp for namespace naming
 TIMESTAMP=$(date +%s)
@@ -231,24 +236,19 @@ log_info "=========================================="
 log_info "Setting up RHDH instances for testing"
 log_info "=========================================="
 
-HELM_VERSION_ARGS=()
+# Clone the RHDH Helm chart repo to use the chart source directly.
+# This avoids downstream OCI chart quirks (digest-based image refs,
+# lightspeed enabled by default, etc.).
+RHDH_CHART_PATH=""
 if [ "$SKIP_HELM" = false ] || [ "$SKIP_HELM_STANDALONE" = false ]; then
-    if [ -n "$HELM_CHART_VERSION" ]; then
-        log_info "Using provided Helm chart version: $HELM_CHART_VERSION"
-        RESOLVED_CHART_VERSION="$HELM_CHART_VERSION"
-    else
-        CHART_MAJOR=$(chart_major_version_for_target_branch "$TARGET_BRANCH") || exit 1
-        log_info "Looking for Helm chart version matching ${CHART_MAJOR}-*-CI on ${HELM_CHART_OCI_REF}..."
-        RESOLVED_CHART_VERSION=$(latest_ci_chart_version_for_major "$CHART_MAJOR")
-        if [ -z "$RESOLVED_CHART_VERSION" ]; then
-            log_error "No CI chart version found for ${CHART_MAJOR} on ${HELM_CHART_OCI_REF}"
-            exit 1
-        fi
-        log_info "Using Helm chart version: $RESOLVED_CHART_VERSION"
-    fi
-    HELM_VERSION_ARGS=(--version "$RESOLVED_CHART_VERSION")
-    CHART_MAJOR=$(chart_major_from_version "$RESOLVED_CHART_VERSION")
-    log_info "Chart major version for E2E values: $CHART_MAJOR"
+    RHDH_CHART_DIR="$(mktemp -d)"
+    CLEANUP_TASKS+=("rm -rf $RHDH_CHART_DIR")
+    log_info "Cloning redhat-developer/rhdh-chart (branch: $EFFECTIVE_CHART_BRANCH)..."
+    git clone --depth 1 --branch "$EFFECTIVE_CHART_BRANCH" \
+        https://github.com/redhat-developer/rhdh-chart.git "$RHDH_CHART_DIR"
+    RHDH_CHART_PATH="$RHDH_CHART_DIR/charts/rhdh"
+    helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+    helm dependency build "$RHDH_CHART_PATH"
 fi
 
 # --- Helm Release Setup ---
@@ -272,15 +272,37 @@ if [ "$SKIP_HELM" = false ]; then
         TEMP_VALUES_FILE="$HELM_VALUES_FILE"
     else
         TEMP_VALUES_FILE="$(mktemp)"
-        write_helm_e2e_values "$CHART_MAJOR" "$TEMP_VALUES_FILE" misconfigured || exit 1
+        cat > "$TEMP_VALUES_FILE" <<EOF
+replicaCount: 2
+host: rhdh-helm.127.0.0.1.sslip.io
+resources: null
+intelligentAssistant:
+  plugins: []
+dynamicPlugins:
+  initContainer:
+    resources: null
+openshift:
+  route:
+    enabled: false
+ingress:
+  enabled: true
+extraEnv:
+  - name: RHDH_MISCONFIG_TRIGGER
+    valueFrom:
+      secretKeyRef:
+        name: nonexistent-secret
+        key: dummy
+EOF
         if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-            append_heap_dump_sigusr2_values "$TEMP_VALUES_FILE"
+            cat >> "$TEMP_VALUES_FILE" <<'EOF'
+  - name: NODE_OPTIONS
+    value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
         fi
     fi
 
     HELM_RELEASE="my-helm"
-    helm -n "$NS_HELM" install "$HELM_RELEASE" "$HELM_CHART_OCI_REF" \
-        --values "$TEMP_VALUES_FILE" "${HELM_VERSION_ARGS[@]}"
+    helm -n "$NS_HELM" install "$HELM_RELEASE" "$RHDH_CHART_PATH" --values "$TEMP_VALUES_FILE"
 
     log_info "Waiting for 2 Helm-deployed pods: init complete, then backstage-backend -> CreateContainerConfigError (expected misconfig)..."
     if ! wait_for_helm_misconfigured_backstage_pods "$NS_HELM" "$HELM_RELEASE" 2 "$RHDH_READY_TIMEOUT"; then
@@ -305,17 +327,30 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
-    write_helm_e2e_values "$CHART_MAJOR" "$STANDALONE_VALUES_FILE" standalone || exit 1
+    cat > "$STANDALONE_VALUES_FILE" <<EOF
+host: rhdh-standalone.127.0.0.1.sslip.io
+dynamicPlugins:
+  includes:
+    - dynamic-plugins.default.yaml
+openshift:
+  route:
+    enabled: false
+ingress:
+  enabled: true
+EOF
     if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        append_heap_dump_sigusr2_values "$STANDALONE_VALUES_FILE"
+        cat >> "$STANDALONE_VALUES_FILE" <<'EOF'
+extraEnv:
+  - name: NODE_OPTIONS
+    value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"
+EOF
     fi
 
     # Render the Helm chart and apply directly (no Helm release tracking)
     log_info "Rendering Helm chart with 'helm template' and applying with kubectl..."
-    helm_template_yaml "$STANDALONE_RELEASE" "$HELM_CHART_OCI_REF" \
+    helm template "$STANDALONE_RELEASE" "$RHDH_CHART_PATH" \
         --namespace "$NS_STANDALONE" \
-        --values "$STANDALONE_VALUES_FILE" \
-        "${HELM_VERSION_ARGS[@]}" | kubectl apply -n "$NS_STANDALONE" -f -
+        --values "$STANDALONE_VALUES_FILE" | kubectl apply -n "$NS_STANDALONE" -f -
 
     # Wait for the standalone-deployed RHDH pod to be running (not necessarily Ready)
     log_info "Waiting for standalone-deployed RHDH pod to be running..."
@@ -452,17 +487,11 @@ EOF
 
     log_info "Deploying Backstage CR (kind: Deployment in v1alpha4)..."
     BACKSTAGE_CR="my-op"
-    BACKSTAGE_CR_EXTRA_ENVS='
+    BACKSTAGE_CR_EXTRA_ENVS=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_EXTRA_ENVS='
     extraEnvs:
       envs:
-        - name: NODE_TLS_REJECT_UNAUTHORIZED
-          value: "0"
-        # - name: CATALOG_INDEX_IMAGE
-        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-        #   containers:
-        #     - install-dynamic-plugins'
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_EXTRA_ENVS="$BACKSTAGE_CR_EXTRA_ENVS"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi
@@ -479,17 +508,11 @@ EOF
 
     log_info "Deploying Backstage CR (kind: StatefulSet in v1alpha5)..."
     BACKSTAGE_CR_STATEFULSET="my-op-statefulset"
-    BACKSTAGE_CR_STS_EXTRA='
+    BACKSTAGE_CR_STS_EXTRA=""
+    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
+        BACKSTAGE_CR_STS_EXTRA='
     extraEnvs:
       envs:
-        - name: NODE_TLS_REJECT_UNAUTHORIZED
-          value: "0"
-        # - name: CATALOG_INDEX_IMAGE
-        #   value: "quay.io/rhdh/plugin-catalog-index:1.10-51"
-        #   containers:
-        #     - install-dynamic-plugins'
-    if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
-        BACKSTAGE_CR_STS_EXTRA="$BACKSTAGE_CR_STS_EXTRA"'
         - name: NODE_OPTIONS
           value: "--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp"'
     fi
@@ -563,34 +586,48 @@ if [ ! -f "$RHDHSUPP308_MANIFEST" ]; then
 fi
 kubectl apply -n "$NS_RHDHSUPP308" -f "$RHDHSUPP308_MANIFEST"
 
-# Wait for PostgreSQL to be ready first
-log_info "Waiting for PostgreSQL pod to be ready..."
-kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
-    -n "$NS_RHDHSUPP308" --timeout=${RHDH_READY_TIMEOUT}s 2>/dev/null || log_warn "PostgreSQL pod not ready, continuing..."
-
-# Wait for backstage pod to be running
-log_info "Waiting for RHDHSUPP-308 backstage pod to be running..."
-RHDHSUPP308_POD=""
+# Wait for PostgreSQL to be ready first (backstage needs a running DB).
+# kubectl wait fails immediately if no pods match, so poll until the pod exists.
+log_info "Waiting for RHDHSUPP-308 PostgreSQL pod to appear..."
 TIMEOUT=$RHDH_READY_TIMEOUT
-until RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && [ -n "$RHDHSUPP308_POD" ]; do
+until kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o name 2>/dev/null | grep -q .; do
     sleep 2
     TIMEOUT=$((TIMEOUT - 2))
     if [ $TIMEOUT -le 0 ]; then
-        log_error "Timed out waiting for RHDHSUPP-308 backstage pod."
+        log_error "RHDHSUPP-308 PostgreSQL pod never appeared."
         kubectl get pods -n "$NS_RHDHSUPP308"
         exit 1
     fi
 done
-log_info "Found RHDHSUPP-308 pod: $RHDHSUPP308_POD"
-if ! kubectl -n "$NS_RHDHSUPP308" wait --for=jsonpath='{.status.phase}'=Running pod/"$RHDHSUPP308_POD" --timeout=${RHDH_READY_TIMEOUT}s; then
-    log_error "RHDHSUPP-308 pod $RHDHSUPP308_POD did not reach Running state."
+log_info "Waiting for RHDHSUPP-308 PostgreSQL pod to be ready..."
+if ! kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
+    -n "$NS_RHDHSUPP308" --timeout=${TIMEOUT}s; then
+    log_error "RHDHSUPP-308 PostgreSQL pod did not become ready."
+    kubectl get pods -n "$NS_RHDHSUPP308"
     exit 1
 fi
-log_info "RHDHSUPP-308 pod $RHDHSUPP308_POD is running."
 
-# Wait a bit for Node.js to fully start (needed for heap dump collection)
-log_info "Waiting for Node.js process to start..."
-sleep 10
+# Wait for backstage pod to be ready (not just Running).
+log_info "Waiting for RHDHSUPP-308 backstage pod to appear..."
+TIMEOUT=$RHDH_READY_TIMEOUT
+until kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o name 2>/dev/null | grep -q .; do
+    sleep 2
+    TIMEOUT=$((TIMEOUT - 2))
+    if [ $TIMEOUT -le 0 ]; then
+        log_error "RHDHSUPP-308 backstage pod never appeared."
+        kubectl get pods -n "$NS_RHDHSUPP308"
+        exit 1
+    fi
+done
+log_info "Waiting for RHDHSUPP-308 backstage pod to be ready..."
+if ! kubectl wait --for=condition=Ready pod -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" \
+    -n "$NS_RHDHSUPP308" --timeout=${TIMEOUT}s; then
+    log_error "RHDHSUPP-308 backstage pod did not become ready."
+    kubectl get pods -n "$NS_RHDHSUPP308"
+    exit 1
+fi
+RHDHSUPP308_POD=$(kubectl -n "$NS_RHDHSUPP308" get pods -l "app.kubernetes.io/name=backstage,app.kubernetes.io/instance=$RHDHSUPP308_INSTANCE" -o jsonpath='{.items[0].metadata.name}')
+log_info "RHDHSUPP-308 pod $RHDHSUPP308_POD is ready."
 
 # ============================================================================
 # RUN MUST-GATHER
@@ -716,7 +753,7 @@ fi
 if [ "$SKIP_HELM_STANDALONE" = false ] && [ -n "$NS_STANDALONE" ]; then
     log_info ""
     log_info "Running standalone Helm validation..."
-    STANDALONE_VALIDATE_ARGS=(--validate --output-dir "$OUTPUT_DIR" --namespace "$NS_STANDALONE" --deployment "$STANDALONE_DEPLOY")
+    STANDALONE_VALIDATE_ARGS=(--validate --output-dir "$OUTPUT_DIR" --namespace "$NS_STANDALONE" --instance "$STANDALONE_RELEASE" --deployment "$STANDALONE_DEPLOY")
     if [ -n "$STANDALONE_POSTGRES" ]; then
         STANDALONE_VALIDATE_ARGS+=(--postgres "$STANDALONE_POSTGRES")
     fi
@@ -745,6 +782,7 @@ RHDHSUPP308_POSTGRES="rhdhsupp-308-postgresql"
 if ! "$SCRIPT_DIR/validate-helm-standalone.sh" --validate \
     --output-dir "$OUTPUT_DIR" \
     --namespace "$NS_RHDHSUPP308" \
+    --instance "$RHDHSUPP308_INSTANCE" \
     --deployment "$RHDHSUPP308_DEPLOY" \
     --postgres "$RHDHSUPP308_POSTGRES"; then
     log_error "RHDHSUPP-308 standalone validation failed!"
@@ -757,6 +795,7 @@ log_info "Running heap dump validation for RHDHSUPP-308 instance..."
 if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
     --output-dir "$OUTPUT_DIR" \
     --namespace "$NS_RHDHSUPP308" \
+    --instance "$RHDHSUPP308_INSTANCE" \
     --deployment "$RHDHSUPP308_DEPLOY" \
     --type standalone \
     --require-success; then
@@ -773,6 +812,7 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
         if ! "$SCRIPT_DIR/validate-heap-dumps.sh" --validate \
             --output-dir "$OUTPUT_DIR" \
             --namespace "$NS_STANDALONE" \
+            --instance "$STANDALONE_RELEASE" \
             --deployment "$STANDALONE_DEPLOY" \
             --type standalone \
             --require-success; then

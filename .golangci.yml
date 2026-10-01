@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+run:
+  modules-download-mode: mod

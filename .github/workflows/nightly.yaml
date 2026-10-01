@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '38 21 * * *'
   workflow_dispatch:
+    inputs:
+      target-branch:
+        description: 'Target branch for E2E tests (must exist in rhdh-chart and rhdh-operator repos)'
+        required: false
 
 permissions:
   contents: read
@@ -40,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq skopeo
+          sudo apt-get install -y jq
           # Install yq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
@@ -52,11 +56,10 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests
-        run: >
-          make test-e2e
-            LOCAL=false
-            TARGET_BRANCH=${{ env.TARGET_BRANCH }}
-            IMAGE_TAG=${{ env.IMAGE_TAG }}
+        run: |
+          make test-e2e LOCAL=false \
+            TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+            IMAGE_TAG="${{ env.IMAGE_TAG }}" \
             HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
 
       - name: Display must-gather process logs
@@ -73,7 +76,7 @@ jobs:
           retention-days: 7
 
       - name: Upload must-gather output
-        if: ${{ success() || failure() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: must-gather-output-nightly-${{ matrix.branch }}
@@ -115,7 +118,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq skopeo
+          sudo apt-get install -y jq
           # Install yq
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
@@ -129,15 +132,15 @@ jobs:
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
-              TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
-              IMAGE_TAG=${{ env.IMAGE_TAG }} \
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \ 
+              TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+              IMAGE_TAG="${{ env.IMAGE_TAG }}" \
               HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
-              HEAP_DUMP_METHOD=${{ matrix.method }} \
-              TARGET_BRANCH=${{ env.TARGET_BRANCH }} \
-              IMAGE_TAG=${{ env.IMAGE_TAG }} \
+              HEAP_DUMP_METHOD="${{ matrix.method }}" \
+              TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+              IMAGE_TAG="${{ env.IMAGE_TAG }}" \
               HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           fi
 
@@ -155,7 +158,7 @@ jobs:
           retention-days: 7
 
       - name: Upload must-gather output
-        if: ${{ success() || failure() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: must-gather-output-heap-dumps-${{ matrix.branch }}-${{ matrix.method }}-nightly

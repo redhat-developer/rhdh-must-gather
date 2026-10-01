@@ -338,6 +338,20 @@ Usage: ./must_gather [params...]
 │   │           │       ├── pods.txt
 │   │           │       ├── pods.yaml
 │   │           │       └── pods.describe.txt
+│   │           ├── okp-deployment/      # Intelligent Assistant OKP workload, when enabled
+│   │           │   ├── deployment.yaml
+│   │           │   ├── deployment.describe.txt
+│   │           │   ├── logs/
+│   │           │   ├── pods/
+│   │           │   ├── processes/
+│   │           │   └── rollout-history/
+│   │           ├── dependencies/        # Additional non-OKP Helm Deployments, if present
+│   │           │   └── [deployment-name]/
+│   │           │       ├── deployment.yaml
+│   │           │       ├── deployment.describe.txt
+│   │           │       ├── logs/        # Per-pod, per-container current and previous logs
+│   │           │       ├── pods/        # Pod listing and descriptions
+│   │           │       └── rollout-history/
 │   │           └── db-statefulset/     # Database StatefulSet info (if database enabled)
 │   │               ├── db-statefulset.yaml
 │   │               ├── db-statefulset.describe.txt
@@ -365,6 +379,8 @@ Usage: ./must_gather [params...]
 │               │   ├── pods/
 │               │   ├── processes/
 │               │   └── rollout-history/
+│               ├── okp-deployment/      # Intelligent Assistant OKP workload, when enabled
+│               │   └── [same workload structure as above, without app data or heap dumps]
 │               └── dependencies/         # Dependent services (e.g., PostgreSQL from subchart)
 │                   └── [dep-name]/       # Per-dependency directory
 │                       ├── statefulset.yaml    # Dependency workload YAML
@@ -506,6 +522,8 @@ Usage: ./must_gather [params...]
                 │       └── pods.describe.txt
                 ├── rhdh-statefulset/   # Only if dual workload detected (see warning-dual-workload.txt)
                 │   └── [same structure as deployment/ above, with statefulset.yaml]
+                ├── okp-deployment/     # Operator-managed OKP workload, when the add-on is enabled
+                │   └── [same workload structure as deployment/ above, without app data or heap dumps]
                 └── db-statefulset/     # Database StatefulSet (if database enabled)
                     ├── db-statefulset.yaml
                     ├── db-statefulset.describe.txt
