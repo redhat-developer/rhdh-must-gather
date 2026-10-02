@@ -211,25 +211,26 @@ func TestSelectPrimaryDeployment(t *testing.T) {
 
 func TestIsSecretDocument(t *testing.T) {
 	tests := []struct {
+		name string
 		yaml string
 		want bool
 	}{
-		{"kind: Secret\napiVersion: v1\nmetadata:\n  name: s", true},
-		{"kind: ConfigMap\napiVersion: v1\nmetadata:\n  name: c", false},
-		{"kind: Deployment\napiVersion: apps/v1\nmetadata:\n  name: d", false},
+		{"secret", "kind: Secret\napiVersion: v1\nmetadata:\n  name: s", true},
+		{"configmap", "kind: ConfigMap\napiVersion: v1\nmetadata:\n  name: c", false},
+		{"deployment", "kind: Deployment\napiVersion: apps/v1\nmetadata:\n  name: d", false},
 	}
 
 	for _, tt := range tests {
-		// We need to simulate what the YAML decoder produces
-		// Testing the filterSecretsFromYAML function indirectly instead
-		result := filterSecretsFromYAML(tt.yaml)
-		hasContent := strings.TrimSpace(result) != ""
-		if tt.want && hasContent {
-			t.Errorf("expected Secret to be filtered from: %s", tt.yaml)
-		}
-		if !tt.want && !hasContent {
-			t.Errorf("expected non-Secret to be preserved: %s", tt.yaml)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterSecretsFromYAML(tt.yaml)
+			hasContent := strings.TrimSpace(result) != ""
+			if tt.want && hasContent {
+				t.Errorf("expected Secret to be filtered from: %s", tt.yaml)
+			}
+			if !tt.want && !hasContent {
+				t.Errorf("expected non-Secret to be preserved: %s", tt.yaml)
+			}
+		})
 	}
 }
 

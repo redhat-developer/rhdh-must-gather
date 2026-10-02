@@ -17,20 +17,23 @@ func TestMatchesAnyPattern(t *testing.T) {
 	patterns := []string{"backstage", "rhdh", "developer-hub"}
 
 	tests := []struct {
+		name  string
 		value string
 		want  bool
 	}{
-		{"backstage-chart-1.0", true},
-		{"RHDH-Helm", true},
-		{"developer-hub-app", true},
-		{"postgres", false},
-		{"", false},
-		{"Backstage", true},
+		{"backstage prefix", "backstage-chart-1.0", true},
+		{"rhdh case insensitive", "RHDH-Helm", true},
+		{"developer-hub prefix", "developer-hub-app", true},
+		{"unrelated", "postgres", false},
+		{"empty string", "", false},
+		{"capitalized", "Backstage", true},
 	}
 	for _, tt := range tests {
-		if got := matchesAnyPattern(tt.value, patterns); got != tt.want {
-			t.Errorf("matchesAnyPattern(%q) = %v, want %v", tt.value, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesAnyPattern(tt.value, patterns); got != tt.want {
+				t.Errorf("matchesAnyPattern(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -79,17 +79,20 @@ func TestFilterPodsByOwner_Empty(t *testing.T) {
 
 func TestOwnerRefKind(t *testing.T) {
 	tests := []struct {
+		name string
 		kind WorkloadKind
 		want string
 	}{
-		{KindDeployment, "ReplicaSet"},
-		{KindStatefulSet, "StatefulSet"},
-		{"unknown", ""},
+		{"deployment", KindDeployment, "ReplicaSet"},
+		{"statefulset", KindStatefulSet, "StatefulSet"},
+		{"unknown", "unknown", ""},
 	}
 	for _, tt := range tests {
-		got := ownerRefKind(tt.kind)
-		if got != tt.want {
-			t.Errorf("ownerRefKind(%q) = %q, want %q", tt.kind, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := ownerRefKind(tt.kind)
+			if got != tt.want {
+				t.Errorf("ownerRefKind(%q) = %q, want %q", tt.kind, got, tt.want)
+			}
+		})
 	}
 }

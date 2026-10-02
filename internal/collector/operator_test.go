@@ -84,24 +84,27 @@ func TestOwnedOKPDeployments_IAOnly(t *testing.T) {
 
 func TestIsRHDHRelated(t *testing.T) {
 	tests := []struct {
-		name string
-		want bool
+		label string
+		name  string
+		want  bool
 	}{
-		{"rhdh-operator.v1.5.0", true},
-		{"backstage-operator.v1.0.0", true},
-		{"developer-hub-operator.v1.0.0", true},
-		{"RHDH-Operator", true},
-		{"my-Backstage-app", true},
-		{"some-other-operator", false},
-		{"cert-manager.v1.0.0", false},
-		{"", false},
+		{"rhdh operator", "rhdh-operator.v1.5.0", true},
+		{"backstage operator", "backstage-operator.v1.0.0", true},
+		{"developer hub operator", "developer-hub-operator.v1.0.0", true},
+		{"case insensitive", "RHDH-Operator", true},
+		{"backstage in name", "my-Backstage-app", true},
+		{"unrelated operator", "some-other-operator", false},
+		{"cert manager", "cert-manager.v1.0.0", false},
+		{"empty string", "", false},
 	}
 
 	for _, tt := range tests {
-		got := isRHDHRelated(tt.name)
-		if got != tt.want {
-			t.Errorf("isRHDHRelated(%q) = %v, want %v", tt.name, got, tt.want)
-		}
+		t.Run(tt.label, func(t *testing.T) {
+			got := isRHDHRelated(tt.name)
+			if got != tt.want {
+				t.Errorf("isRHDHRelated(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
 	}
 }
 
