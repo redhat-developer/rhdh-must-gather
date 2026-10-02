@@ -147,7 +147,7 @@ func TestListResourceNames(t *testing.T) {
 
 func TestResolveCRDType(t *testing.T) {
 	cfg := newTestConfig(t, "",
-		withAPIGroups("rhdh.redhat.com/v1alpha3", "sonataflow.org/v1alpha08"),
+		withAPIGroups("rhdh.redhat.com/v1alpha5", "sonataflow.org/v1alpha08"),
 	)
 
 	t.Run("fully qualified", func(t *testing.T) {
@@ -157,6 +157,9 @@ func TestResolveCRDType(t *testing.T) {
 		}
 		if gvr.Group != "sonataflow.org" {
 			t.Errorf("Group = %q, want sonataflow.org", gvr.Group)
+		}
+		if gvr.Version != "v1alpha08" {
+			t.Errorf("Version = %q, want v1alpha08", gvr.Version)
 		}
 		if gvr.Resource != "sonataflows" {
 			t.Errorf("Resource = %q, want sonataflows", gvr.Resource)
@@ -170,6 +173,9 @@ func TestResolveCRDType(t *testing.T) {
 		}
 		if gvr.Group != "rhdh.redhat.com" {
 			t.Errorf("Group = %q, want rhdh.redhat.com", gvr.Group)
+		}
+		if gvr.Version != "v1alpha5" {
+			t.Errorf("Version = %q, want v1alpha5", gvr.Version)
 		}
 		if gvr.Resource != "backstages" {
 			t.Errorf("Resource = %q, want backstages", gvr.Resource)
