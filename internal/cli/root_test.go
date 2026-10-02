@@ -84,23 +84,26 @@ func TestBuildScriptList_ExcludeAll(t *testing.T) {
 
 func TestHeapDumpMethodValidation(t *testing.T) {
 	tests := []struct {
+		name    string
 		method  string
 		wantErr bool
 	}{
-		{"inspector", false},
-		{"sigusr2", false},
-		{"invalid", true},
-		{"", true},
+		{"inspector", "inspector", false},
+		{"sigusr2", "sigusr2", false},
+		{"invalid", "invalid", true},
+		{"empty", "", true},
 	}
 
 	for _, tt := range tests {
-		cmd := newRootCmd()
-		cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-		cmd.SetArgs([]string{"--heap-dump-method", tt.method})
-		err := cmd.Execute()
-		if (err != nil) != tt.wantErr {
-			t.Errorf("method=%q: got err=%v, wantErr=%v", tt.method, err, tt.wantErr)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newRootCmd()
+			cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
+			cmd.SetArgs([]string{"--heap-dump-method", tt.method})
+			err := cmd.Execute()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("method=%q: got err=%v, wantErr=%v", tt.method, err, tt.wantErr)
+			}
+		})
 	}
 }
 

@@ -6,20 +6,23 @@ import (
 
 func TestMatchesInstance(t *testing.T) {
 	tests := []struct {
+		label   string
 		name    string
 		pattern string
 		want    bool
 	}{
-		{"rhdhsupp-308-backstage", "rhdhsupp-308", true},
-		{"rhdhsupp-308", "rhdhsupp-308", true},
-		{"my-backstage", "rhdhsupp-308", false},
-		{"", "rhdhsupp-308", false},
-		{"rhdhsupp-308-backstage", "", false},
+		{"prefix match", "rhdhsupp-308-backstage", "rhdhsupp-308", true},
+		{"exact match", "rhdhsupp-308", "rhdhsupp-308", true},
+		{"no match", "my-backstage", "rhdhsupp-308", false},
+		{"empty name", "", "rhdhsupp-308", false},
+		{"empty pattern", "rhdhsupp-308-backstage", "", false},
 	}
 	for _, tt := range tests {
-		if got := matchesInstance(tt.name, tt.pattern); got != tt.want {
-			t.Errorf("matchesInstance(%q, %q) = %v, want %v", tt.name, tt.pattern, got, tt.want)
-		}
+		t.Run(tt.label, func(t *testing.T) {
+			if got := matchesInstance(tt.name, tt.pattern); got != tt.want {
+				t.Errorf("matchesInstance(%q, %q) = %v, want %v", tt.name, tt.pattern, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -75,19 +78,22 @@ func TestHeapDumpTimeout(t *testing.T) {
 
 func TestHumanSize(t *testing.T) {
 	tests := []struct {
+		name  string
 		bytes int64
 		want  string
 	}{
-		{0, "0B"},
-		{512, "512B"},
-		{1024, "1KB"},
-		{1536, "1KB"},
-		{1048576, "1MB"},
-		{104857600, "100MB"},
+		{"zero", 0, "0B"},
+		{"bytes", 512, "512B"},
+		{"1KB", 1024, "1KB"},
+		{"rounds down", 1536, "1KB"},
+		{"1MB", 1048576, "1MB"},
+		{"100MB", 104857600, "100MB"},
 	}
 	for _, tt := range tests {
-		if got := humanSize(tt.bytes); got != tt.want {
-			t.Errorf("humanSize(%d) = %q, want %q", tt.bytes, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if got := humanSize(tt.bytes); got != tt.want {
+				t.Errorf("humanSize(%d) = %q, want %q", tt.bytes, got, tt.want)
+			}
+		})
 	}
 }
