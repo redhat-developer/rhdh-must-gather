@@ -4,10 +4,6 @@ on:
   schedule:
     - cron: '38 21 * * *'
   workflow_dispatch:
-    inputs:
-      target-branch:
-        description: 'Target branch for E2E tests (must exist in rhdh-chart and rhdh-operator repos)'
-        required: false
 
 permissions:
   contents: read
@@ -32,10 +28,10 @@ jobs:
           fetch-depth: 0
       
       - name: Set branch test variables
-        run: | 
+        run: |
           branch="${{ matrix.branch }}"
           echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
-          if [ "$branch" = "main" ]; then 
+          if [ "$branch" = "main" ]; then
             echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
           else
             echo "IMAGE_TAG=latest-${branch#release-}" >> "$GITHUB_ENV"
@@ -132,10 +128,11 @@ jobs:
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \ 
-              TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
-              IMAGE_TAG="${{ env.IMAGE_TAG }}" \
-              HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+              # Auto: let the tool use its built in default method (inspector)
+              make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
+                TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+                IMAGE_TAG="${{ env.IMAGE_TAG }}" \
+                HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
             make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
               HEAP_DUMP_METHOD="${{ matrix.method }}" \
