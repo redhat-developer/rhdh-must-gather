@@ -4,22 +4,10 @@
   "baseBranchPatterns": ["main", "/^release-.*/"],
   "packageRules": [
     {
-      "description": "Disable all updates on release branches by default",
+      "description": "Disable major updates on release branches",
       "matchBaseBranches": ["/^release-.*/"],
+      "matchUpdateTypes": ["major"],
       "enabled": false
-    },
-    {
-      "description": "Re-enable minor and patch updates on release branches",
-      "matchBaseBranches": ["/^release-.*/"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "enabled": true
-    },
-    {
-      "description": "Re-enable digest updates for container images on release branches",
-      "matchBaseBranches": ["/^release-.*/"],
-      "matchManagers": ["dockerfile"],
-      "matchUpdateTypes": ["digest"],
-      "enabled": true
     }
   ],
   "customManagers": [
