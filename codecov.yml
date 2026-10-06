@@ -21,6 +21,11 @@ flags:
       - cmd/
       - internal/
     carryforward: true
+  nightly:
+    paths:
+      - cmd/
+      - internal/
+    carryforward: true
 
 ignore:
   - tests/
