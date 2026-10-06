@@ -1,0 +1,29 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+    patch:
+      default:
+        target: auto
+        threshold: 5%
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+
+flags:
+  unittests:
+    paths:
+      - cmd/
+      - internal/
+    carryforward: true
+
+ignore:
+  - tests/
+  - hack/
+  - scripts/
+  - cmd/gather/main.go

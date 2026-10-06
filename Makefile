@@ -75,7 +75,7 @@ endif
 
 .PHONY: test
 test: ## Run unit tests
-	$(GO) test -mod=mod ./... -v -count=1
+	$(GO) test -mod=mod ./... -v -count=1 -coverprofile=cover.out
 
 .PHONY: lint
 lint: ## Run linter (golangci-lint)
