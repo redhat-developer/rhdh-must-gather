@@ -41,18 +41,15 @@ func newObfuscateCmd() *cobra.Command {
 }
 
 // runCleanSubprocess re-executes this binary so must-gather-clean's klog.Exitf
-// cannot terminate the collector. The parent keeps the original tree when the
-// child fails.
+// cannot terminate the collector. That Exitf runs on the library's own error
+// goroutine, so a BehaviorOnFatal hook in this process does not catch it.
+// The parent keeps the original tree when the child fails.
 func runCleanSubprocess(configPath, inputPath, outputPath, reportDir string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("finding gather executable: %w", err)
 	}
-	workers := runtime.GOMAXPROCS(0)
-	if workers < 1 {
-		workers = 1
-	}
-	cmd := exec.Command(exe, obfuscateCommandArgs(configPath, inputPath, outputPath, reportDir, workers)...)
+	cmd := exec.Command(exe, obfuscateCommandArgs(configPath, inputPath, outputPath, reportDir, runtime.GOMAXPROCS(0))...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

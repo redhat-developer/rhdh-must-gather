@@ -43,13 +43,13 @@ type CleanFunc func(configPath, inputPath, outputPath, reportDir string) error
 
 // Run discovers cluster domains and obfuscates basePath in place.
 // On failure the original tree is left unchanged.
-func Run(ctx context.Context, client *kube.Client, basePath string, clean CleanFunc) error {
+func Run(ctx context.Context, client *kube.Client, basePath string, namespaces []string, clean CleanFunc) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	discoverCtx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
-	return Apply(basePath, Discover(discoverCtx, client), clean)
+	return Apply(basePath, Discover(discoverCtx, client, namespaces), clean)
 }
 
 // Apply obfuscates basePath using the supplied domain names.
@@ -108,28 +108,24 @@ func Clean(configPath, inputPath, outputPath, reportDir string, workers int) err
 }
 
 // Discover returns domain names that should be obfuscated.
-// OpenShift base and ingress domains and the API server hostname are included
-// when the API is reachable. In-cluster service names and IP addresses are
-// dropped because IP obfuscation already covers addresses, and cluster.local
-// names are not customer domains.
+// On OpenShift it uses the cluster base domain and the default ingress
+// controller domain. On Kubernetes, and when those OpenShift names cannot be
+// read, it uses host names from Ingress resources and Routes in namespaces.
+// The API server hostname is included on every cluster. In-cluster service
+// names and IP addresses are dropped because IP obfuscation already covers
+// addresses, and cluster.local names are not customer domains.
 //
 // When discovery finds nothing, IP and MAC obfuscation still run. Set
 // EnvDomains to supply names that discovery cannot see.
-func Discover(ctx context.Context, client *kube.Client) []string {
+func Discover(ctx context.Context, client *kube.Client, namespaces []string) []string {
 	var found []string
 	if client != nil {
-		if d, err := openShiftBaseDomain(ctx, client); err != nil {
-			log.Warn("Could not read the OpenShift base domain: %v", err)
-		} else if d != "" {
-			found = append(found, d)
-		}
-		if d, err := openShiftIngressDomain(ctx, client); err != nil {
-			log.Warn("Could not read the OpenShift ingress domain: %v", err)
-		} else if d != "" {
-			found = append(found, d)
+		found = append(found, openShiftDomains(ctx, client)...)
+		if len(found) == 0 {
+			found = append(found, workloadHosts(ctx, client, namespaces)...)
 		}
 		if client.Config != nil {
-			if h := APIServerHost(client.Config.Host); h != "" {
+			if h := apiServerHost(client.Config.Host); h != "" {
 				found = append(found, h)
 			}
 		}
@@ -144,44 +140,134 @@ func Discover(ctx context.Context, client *kube.Client) []string {
 	return merged
 }
 
-func openShiftBaseDomain(ctx context.Context, client *kube.Client) (string, error) {
+type clusterField struct {
+	label     string
+	gvr       schema.GroupVersionResource
+	namespace string
+	name      string
+	path      []string
+}
+
+func openShiftDomains(ctx context.Context, client *kube.Client) []string {
+	fields := []clusterField{
+		{
+			label: "OpenShift base domain",
+			gvr:   schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "dnses"},
+			name:  "cluster",
+			path:  []string{"spec", "baseDomain"},
+		},
+		{
+			label:     "OpenShift ingress domain",
+			gvr:       schema.GroupVersionResource{Group: "operator.openshift.io", Version: "v1", Resource: "ingresscontrollers"},
+			namespace: "openshift-ingress-operator",
+			name:      "default",
+			path:      []string{"status", "domain"},
+		},
+	}
+	var found []string
+	for _, field := range fields {
+		d, err := readClusterField(ctx, client, field)
+		if err != nil {
+			log.Warn("Could not read the %s: %v", field.label, err)
+			continue
+		}
+		if d != "" {
+			found = append(found, d)
+		}
+	}
+	return found
+}
+
+func readClusterField(ctx context.Context, client *kube.Client, field clusterField) (string, error) {
 	if client.Dynamic == nil {
 		return "", nil
 	}
-	present, err := apiGroupPresent(client, "config.openshift.io")
+	present, err := apiGroupPresent(client, field.gvr.Group)
 	if err != nil || !present {
 		return "", err
 	}
-	gvr := schema.GroupVersionResource{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}
-	obj, err := client.Dynamic.Resource(gvr).Get(ctx, "cluster", metav1.GetOptions{})
+	resource := client.Dynamic.Resource(field.gvr)
+	var obj *unstructured.Unstructured
+	if field.namespace == "" {
+		obj, err = resource.Get(ctx, field.name, metav1.GetOptions{})
+	} else {
+		obj, err = resource.Namespace(field.namespace).Get(ctx, field.name, metav1.GetOptions{})
+	}
 	if err != nil {
 		return "", err
 	}
-	d, found, err := unstructured.NestedString(obj.Object, "spec", "baseDomain")
+	d, found, err := unstructured.NestedString(obj.Object, field.path...)
 	if err != nil || !found {
 		return "", err
 	}
 	return d, nil
 }
 
-func openShiftIngressDomain(ctx context.Context, client *kube.Client) (string, error) {
+// workloadHosts reads Ingress and Route hosts from the namespaces being
+// collected. An empty namespace list reads every namespace the client can see.
+// Host names are not logged.
+func workloadHosts(ctx context.Context, client *kube.Client, namespaces []string) []string {
+	var hosts []string
 	if client.Dynamic == nil {
-		return "", nil
+		return nil
 	}
-	present, err := apiGroupPresent(client, "operator.openshift.io")
+	ingressGVR := schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}
+	for _, obj := range listNamespaced(ctx, client, ingressGVR, namespaces, "Ingress") {
+		hosts = append(hosts, ingressHosts(obj)...)
+	}
+	present, err := apiGroupPresent(client, "route.openshift.io")
 	if err != nil || !present {
-		return "", err
+		return hosts
 	}
-	gvr := schema.GroupVersionResource{Group: "operator.openshift.io", Version: "v1", Resource: "ingresscontrollers"}
-	obj, err := client.Dynamic.Resource(gvr).Namespace("openshift-ingress-operator").Get(ctx, "default", metav1.GetOptions{})
-	if err != nil {
-		return "", err
+	routeGVR := schema.GroupVersionResource{Group: "route.openshift.io", Version: "v1", Resource: "routes"}
+	for _, obj := range listNamespaced(ctx, client, routeGVR, namespaces, "Route") {
+		if host, ok, _ := unstructured.NestedString(obj.Object, "spec", "host"); ok {
+			hosts = append(hosts, host)
+		}
 	}
-	d, found, err := unstructured.NestedString(obj.Object, "status", "domain")
-	if err != nil || !found {
-		return "", err
+	return hosts
+}
+
+func ingressHosts(obj unstructured.Unstructured) []string {
+	var hosts []string
+	rules, _, _ := unstructured.NestedSlice(obj.Object, "spec", "rules")
+	for _, rule := range rules {
+		if host, ok, _ := unstructured.NestedString(asMap(rule), "host"); ok {
+			hosts = append(hosts, host)
+		}
 	}
-	return d, nil
+	tlsList, _, _ := unstructured.NestedSlice(obj.Object, "spec", "tls")
+	for _, tls := range tlsList {
+		more, _, _ := unstructured.NestedStringSlice(asMap(tls), "hosts")
+		hosts = append(hosts, more...)
+	}
+	return hosts
+}
+
+func asMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+func listNamespaced(ctx context.Context, client *kube.Client, gvr schema.GroupVersionResource, namespaces []string, kind string) []unstructured.Unstructured {
+	scopes := namespaces
+	if len(scopes) == 0 {
+		scopes = []string{metav1.NamespaceAll}
+	}
+	var all []unstructured.Unstructured
+	for _, ns := range scopes {
+		list, err := client.Dynamic.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			if ns == metav1.NamespaceAll {
+				log.Warn("Could not list %s hosts: %v", kind, err)
+			} else {
+				log.Warn("Could not list %s hosts in namespace %s: %v", kind, ns, err)
+			}
+			continue
+		}
+		all = append(all, list.Items...)
+	}
+	return all
 }
 
 // apiGroupPresent reports whether group exists. A nil discovery client means
@@ -193,9 +279,9 @@ func apiGroupPresent(client *kube.Client, group string) (bool, error) {
 	return client.HasAPIGroup(group)
 }
 
-// APIServerHost returns the hostname from a Kubernetes API server URL.
+// apiServerHost returns the hostname from a Kubernetes API server URL.
 // IP addresses and empty values return an empty string.
-func APIServerHost(raw string) string {
+func apiServerHost(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -271,26 +357,24 @@ func usableDomain(d string) bool {
 // are the diagnostic payload, and secret values are already redacted.
 func configYAML(domains []string) string {
 	var b strings.Builder
-	b.WriteString("config:\n")
-	b.WriteString("  obfuscate:\n")
-	b.WriteString("    - type: IP\n")
-	b.WriteString("      replacementType: Consistent\n")
-	b.WriteString("      target: All\n")
-	b.WriteString("    - type: MAC\n")
-	b.WriteString("      replacementType: Consistent\n")
-	b.WriteString("      target: All\n")
-	if len(domains) > 0 {
-		b.WriteString("    - type: Domain\n")
-		b.WriteString("      replacementType: Consistent\n")
-		b.WriteString("      target: All\n")
-		b.WriteString("      domainNames:\n")
-		for _, d := range domains {
-			b.WriteString("        - ")
-			b.WriteString(strconv.Quote(d))
-			b.WriteString("\n")
-		}
+	b.WriteString("config:\n  obfuscate:\n")
+	writeObfuscation(&b, "IP")
+	writeObfuscation(&b, "MAC")
+	if len(domains) == 0 {
+		return b.String()
+	}
+	writeObfuscation(&b, "Domain")
+	b.WriteString("      domainNames:\n")
+	for _, d := range domains {
+		b.WriteString("        - ")
+		b.WriteString(strconv.Quote(d))
+		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func writeObfuscation(b *strings.Builder, kind string) {
+	fmt.Fprintf(b, "    - type: %s\n      replacementType: Consistent\n      target: All\n", kind)
 }
 
 // reportStaysOutside rejects a report directory that would be copied into the

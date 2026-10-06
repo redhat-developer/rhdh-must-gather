@@ -102,7 +102,7 @@ For running in airgapped environments (partially or fully disconnected), see [di
 | `HEAP_DUMP_TIMEOUT`      | `600`           | Timeout for heap dump collection in seconds            |
 | `HEAP_DUMP_BUFFER_SIZE`  | `16777216`      | WebSocket buffer size in bytes (16MB) for inspector method |
 | `HEAP_DUMP_REMOTE_DIR`   | `/tmp`          | Directory in container for heap dumps (SIGUSR2 method) |
-| `RHDH_OBFUSCATE_DOMAINS` | -               | Extra comma-separated domain names to obfuscate        |
+| `RHDH_OBFUSCATE_DOMAINS` | -               | Extra comma-separated domain names to obfuscate when discovery misses them |
 
 ### Command-line options
 

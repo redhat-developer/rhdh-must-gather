@@ -57,8 +57,8 @@ func TestAPIServerHost(t *testing.T) {
 		{"://bad", ""},
 	}
 	for _, tt := range tests {
-		if got := APIServerHost(tt.raw); got != tt.want {
-			t.Errorf("APIServerHost(%q) = %q, want %q", tt.raw, got, tt.want)
+		if got := apiServerHost(tt.raw); got != tt.want {
+			t.Errorf("apiServerHost(%q) = %q, want %q", tt.raw, got, tt.want)
 		}
 	}
 }
@@ -106,7 +106,7 @@ func TestDiscoverFromClusterAndEnv(t *testing.T) {
 	}
 	t.Setenv(EnvDomains, "extra.example.com, kubernetes.default.svc.cluster.local")
 
-	got := Discover(context.Background(), client)
+	got := Discover(context.Background(), client, []string{"rhdh"})
 	want := []string{
 		"cluster.example.com",
 		"apps.cluster.example.com",
@@ -120,8 +120,88 @@ func TestDiscoverFromClusterAndEnv(t *testing.T) {
 
 func TestDiscoverEnvOnlyWhenClientMissing(t *testing.T) {
 	t.Setenv(EnvDomains, "customer.example.com, 127.0.0.1")
-	got := Discover(context.Background(), nil)
+	got := Discover(context.Background(), nil, nil)
 	if len(got) != 1 || got[0] != "customer.example.com" {
+		t.Fatalf("Discover() = %#v", got)
+	}
+}
+
+func TestDiscoverUsesIngressAndRouteHostsWithoutOpenShiftDomains(t *testing.T) {
+	ingress := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "Ingress",
+		"metadata":   map[string]any{"name": "console", "namespace": "rhdh"},
+		"spec": map[string]any{
+			"rules": []any{map[string]any{"host": "console.example.com"}},
+			"tls":   []any{map[string]any{"hosts": []any{"api.example.com"}}},
+		},
+	}}
+	other := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "Ingress",
+		"metadata":   map[string]any{"name": "other", "namespace": "kube-system"},
+		"spec":       map[string]any{"rules": []any{map[string]any{"host": "other.example.net"}}},
+	}}
+	route := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "route.openshift.io/v1",
+		"kind":       "Route",
+		"metadata":   map[string]any{"name": "backstage", "namespace": "rhdh"},
+		"spec":       map[string]any{"host": "backstage.example.com"},
+	}}
+	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}: "IngressList",
+		{Group: "route.openshift.io", Version: "v1", Resource: "routes"}:   "RouteList",
+	}
+	client := &kube.Client{
+		Dynamic: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, ingress, other, route),
+		Config:  &rest.Config{Host: "https://k8s.example.com:6443"},
+	}
+	t.Setenv(EnvDomains, "")
+
+	got := Discover(context.Background(), client, []string{"rhdh"})
+	want := []string{
+		"console.example.com",
+		"api.example.com",
+		"backstage.example.com",
+		"k8s.example.com",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Discover() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDiscoverKeepsOpenShiftDomainsAheadOfIngressHosts(t *testing.T) {
+	dns := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "config.openshift.io/v1",
+		"kind":       "DNS",
+		"metadata":   map[string]any{"name": "cluster"},
+		"spec":       map[string]any{"baseDomain": "cluster.example.com"},
+	}}
+	ingress := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "networking.k8s.io/v1",
+		"kind":       "Ingress",
+		"metadata":   map[string]any{"name": "console", "namespace": "rhdh"},
+		"spec":       map[string]any{"rules": []any{map[string]any{"host": "other.example.net"}}},
+	}}
+	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}:   "DNSList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}: "IngressList",
+	}
+	client := &kube.Client{
+		Dynamic: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, dns, ingress),
+		Config:  &rest.Config{Host: "https://api.cluster.example.com:6443"},
+	}
+	t.Setenv(EnvDomains, "")
+
+	got := Discover(context.Background(), client, []string{"rhdh"})
+	for _, name := range got {
+		if name == "other.example.net" {
+			t.Fatalf("OpenShift discovery should not add individual Ingress hosts: %#v", got)
+		}
+	}
+	if strings.Join(got, ",") != "cluster.example.com,api.cluster.example.com" {
 		t.Fatalf("Discover() = %#v", got)
 	}
 }

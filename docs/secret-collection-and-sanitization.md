@@ -58,7 +58,7 @@ After secret sanitization, the gather runs [must-gather-clean](https://github.co
 - MAC addresses, the same way
 - Cluster domain names, when they can be discovered. The name in front of the domain is kept (`console.apps.example.com` becomes `console.apps.domain0000000001`) so the gather is still readable
 
-Domain discovery reads the OpenShift DNS `cluster` base domain, the default ingress controller domain, and the API server hostname. In-cluster names such as `cluster.local` and `kubernetes.default.svc` are not treated as customer domains. When none of those names can be read, IP and MAC obfuscation still run, and other hostnames are left unchanged. Set `RHDH_OBFUSCATE_DOMAINS` to a comma-separated list to add domains discovery missed.
+On OpenShift, domain discovery reads the DNS `cluster` base domain, the default ingress controller domain, and the API server hostname. On Kubernetes, and whenever those OpenShift domains cannot be read, discovery uses host names from Ingress resources and OpenShift Routes in the namespaces being collected, plus the API server hostname. In-cluster names such as `cluster.local` and `kubernetes.default.svc` are not treated as customer domains. When none of those names can be read, IP and MAC obfuscation still run, and other hostnames are left unchanged. Set `RHDH_OBFUSCATE_DOMAINS` to a comma-separated list to add domains discovery missed.
 
 ConfigMaps and Secrets are not removed by this step. Secret values are still redacted by the sanitizer above, and secret names stay in the gather when `--with-secrets` was used.
 
@@ -66,4 +66,4 @@ The reversible `report.yaml` map produced by must-gather-clean is not included i
 
 Skip this step with `--no-obfuscate` when you need the original addresses to debug the cluster yourself. Secret sanitization still runs. Heap dumps collected with `--with-heap-dumps` are included in this pass, so use `--no-obfuscate` when the snapshot must keep raw addresses.
 
-**Important**: Obfuscation covers discovered domains, IPs, and MAC addresses. Review the gather before sharing it externally when the cluster uses additional names that discovery did not see.
+**Important**: While automatic sanitization and obfuscation catch common sensitive patterns and cover discovered domains, IPs, and MAC addresses, always review the must-gather output and check for any domain-specific sensitive information before sharing externally.

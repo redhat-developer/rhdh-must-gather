@@ -62,7 +62,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		default:
 		}
 		log.Info("Obfuscating IP addresses, MAC addresses, and cluster domain names...")
-		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, runCleanSubprocess); oerr != nil {
+		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
 			log.Error("Obfuscation failed: %v", oerr)
 			log.Error("Collected output was not obfuscated. Do not share it.")
 			err = errors.Join(err, fmt.Errorf("obfuscating must-gather output: %w", oerr))
