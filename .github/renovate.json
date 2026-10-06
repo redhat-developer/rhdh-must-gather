@@ -9,9 +9,9 @@
       "enabled": false
     },
     {
-      "description": "Re-enable only patch updates on release branches",
+      "description": "Re-enable minor and patch updates on release branches",
       "matchBaseBranches": ["/^release-.*/"],
-      "matchUpdateTypes": ["patch"],
+      "matchUpdateTypes": ["minor", "patch"],
       "enabled": true
     },
     {
