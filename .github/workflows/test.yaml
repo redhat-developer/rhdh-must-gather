@@ -49,6 +49,17 @@ jobs:
         if: steps.changed-files.outputs.any_changed == 'true'
         run: make test
 
+      - name: Upload coverage to Codecov
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cover.out
+          flags: unittests
+          fail_ci_if_error: false
+          override_commit: ${{ github.event.pull_request.head.sha }}
+          override_pr: ${{ github.event.number }}
+
       - name: Run lint
         if: steps.changed-files.outputs.any_changed == 'true'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
