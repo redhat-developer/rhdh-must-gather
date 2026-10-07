@@ -1,10 +1,103 @@
 package collector
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestIngress_Name(t *testing.T) {
+	i := &Ingress{}
+	if got := i.Name(); got != "ingress" {
+		t.Errorf("Name() = %q, want %q", got, "ingress")
+	}
+}
+
+func TestIngress_Run_AllNamespaces(t *testing.T) {
+	dir := t.TempDir()
+
+	ing := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-ingress", Namespace: "default"},
+		Spec: networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{{Host: "example.com"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(ing))
+
+	i := &Ingress{}
+	if err := i.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "all-ingresses.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "my-ingress") {
+		t.Error("expected ingress name in output")
+	}
+	if !strings.Contains(content, "example.com") {
+		t.Error("expected host in output")
+	}
+}
+
+func TestIngress_Run_NamespaceFiltered(t *testing.T) {
+	dir := t.TempDir()
+
+	ing1 := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "ing-1", Namespace: "ns1"},
+		Spec: networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{{Host: "a.example.com"}},
+		},
+	}
+	ing2 := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "ing-2", Namespace: "ns2"},
+		Spec: networkingv1.IngressSpec{
+			Rules: []networkingv1.IngressRule{{Host: "b.example.com"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(ing1, ing2))
+	cfg.TargetNamespaces = []string{"ns1"}
+
+	i := &Ingress{}
+	if err := i.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "all-ingresses.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ing-1") {
+		t.Error("expected ing-1 in output")
+	}
+}
+
+func TestIngress_Run_NoIngresses(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	i := &Ingress{}
+	if err := i.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "all-ingresses.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "No resources found") {
+		t.Error("expected 'No resources found' for empty ingress list")
+	}
+}
 
 func TestIngressClass(t *testing.T) {
 	className := "nginx"

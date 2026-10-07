@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -414,5 +415,354 @@ func TestWriteReleasesJSON_Empty(t *testing.T) {
 	}
 	if len(items) != 0 {
 		t.Errorf("got %d items, want 0", len(items))
+	}
+}
+
+func TestWorkloadKey(t *testing.T) {
+	tests := []struct {
+		kind WorkloadKind
+		ns   string
+		name string
+		want string
+	}{
+		{KindDeployment, "ns1", "my-deploy", "deployment/ns1/my-deploy"},
+		{KindStatefulSet, "ns2", "my-sts", "statefulset/ns2/my-sts"},
+	}
+	for _, tt := range tests {
+		got := workloadKey(tt.kind, tt.ns, tt.name)
+		if got != tt.want {
+			t.Errorf("workloadKey(%q, %q, %q) = %q, want %q", tt.kind, tt.ns, tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestIsRHDHHelmWorkload_ImageMatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		podSpec corev1.PodSpec
+		want    bool
+	}{
+		{
+			name: "quay.io rhdh image",
+			podSpec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "backstage", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "registry.redhat.io rhdh image",
+			podSpec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "backstage", Image: "registry.redhat.io/rhdh/rhdh-rhel9-operator:1.5"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "ghcr.io backstage image",
+			podSpec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "backstage", Image: "ghcr.io/backstage/backstage:latest"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "rhdh init container image",
+			podSpec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "init", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "unrelated image",
+			podSpec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "app", Image: "postgres:15"},
+				},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRHDHHelmWorkload(map[string]string{}, tt.podSpec)
+			if got != tt.want {
+				t.Errorf("isRHDHHelmWorkload() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWriteReleasesTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "releases.txt")
+
+	rel := makeTestRelease("rhdh", "rhdh-ns", 3, "backstage", "1.5.0", "1.4.0", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	h := &Helm{}
+	h.writeReleasesTable(path, []release.Accessor{acc})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "NAME") || !strings.Contains(content, "NAMESPACE") {
+		t.Error("expected table header")
+	}
+	if !strings.Contains(content, "rhdh") {
+		t.Error("expected release name")
+	}
+	if !strings.Contains(content, "rhdh-ns") {
+		t.Error("expected namespace")
+	}
+	if !strings.Contains(content, "backstage-1.5.0") {
+		t.Error("expected chart label")
+	}
+}
+
+func TestWriteReleasesTable_Empty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "releases.txt")
+
+	h := &Helm{}
+	h.writeReleasesTable(path, nil)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "No RHDH-related Helm releases found") {
+		t.Error("expected no-releases message")
+	}
+}
+
+func TestWriteHistoryText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.txt")
+
+	releases := []release.Releaser{
+		makeTestRelease("rhdh", "ns", 1, "backstage", "1.0.0", "1.0.0", "Install complete"),
+		makeTestRelease("rhdh", "ns", 2, "backstage", "1.1.0", "1.1.0", "Upgrade complete"),
+	}
+
+	h := &Helm{}
+	h.writeHistoryText(path, releases)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "REVISION") {
+		t.Error("expected header")
+	}
+	if !strings.Contains(content, "Install complete") {
+		t.Error("expected first description")
+	}
+	if !strings.Contains(content, "Upgrade complete") {
+		t.Error("expected second description")
+	}
+}
+
+func TestHistoryToMap(t *testing.T) {
+	releases := []release.Releaser{
+		makeTestRelease("rhdh", "ns", 1, "backstage", "1.0.0", "1.0.0", "Install complete"),
+		makeTestRelease("rhdh", "ns", 2, "backstage", "1.1.0", "1.1.0", "Upgrade"),
+	}
+
+	h := &Helm{}
+	result := h.historyToMap(releases)
+
+	if len(result) != 2 {
+		t.Fatalf("got %d items, want 2", len(result))
+	}
+	if result[0]["revision"] != 1 {
+		t.Errorf("revision = %v, want 1", result[0]["revision"])
+	}
+	if result[0]["description"] != "Install complete" {
+		t.Errorf("description = %v, want Install complete", result[0]["description"])
+	}
+	if result[1]["chart"] != "backstage-1.1.0" {
+		t.Errorf("chart = %v, want backstage-1.1.0", result[1]["chart"])
+	}
+}
+
+func TestHistoryToMap_Empty(t *testing.T) {
+	h := &Helm{}
+	result := h.historyToMap(nil)
+	if len(result) != 0 {
+		t.Errorf("got %d items, want 0", len(result))
+	}
+}
+
+func TestFormatReleaseStatus(t *testing.T) {
+	rel := makeTestRelease("rhdh", "rhdh-ns", 5, "backstage", "1.5.0", "1.4.0", "Upgrade complete")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	output := formatReleaseStatus(acc, rel)
+	if !strings.Contains(output, "NAME: rhdh") {
+		t.Error("expected NAME")
+	}
+	if !strings.Contains(output, "NAMESPACE: rhdh-ns") {
+		t.Error("expected NAMESPACE")
+	}
+	if !strings.Contains(output, "REVISION: 5") {
+		t.Error("expected REVISION")
+	}
+	if !strings.Contains(output, "DESCRIPTION: Upgrade complete") {
+		t.Error("expected DESCRIPTION")
+	}
+	if !strings.Contains(output, "STATUS: deployed") {
+		t.Error("expected STATUS")
+	}
+}
+
+func TestWriteStandaloneNote(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "standalone-note.txt")
+
+	h := &Helm{}
+	h.writeStandaloneNote(path, "my-namespace", "my-instance")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Standalone RHDH Helm Deployment") {
+		t.Error("expected header")
+	}
+	if !strings.Contains(content, "Namespace: my-namespace") {
+		t.Error("expected namespace")
+	}
+	if !strings.Contains(content, "Workload: my-instance") {
+		t.Error("expected workload name")
+	}
+}
+
+func TestWriteHelmMetadata_Deployment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "helm-metadata.txt")
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh",
+			Labels: map[string]string{
+				"helm.sh/chart":                "backstage-1.5.0",
+				"app.kubernetes.io/name":       "backstage",
+				"app.kubernetes.io/instance":   "rhdh",
+				"app.kubernetes.io/version":    "1.4.0",
+				"app.kubernetes.io/managed-by": "Helm",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	h := &Helm{}
+	h.writeHelmMetadata(context.Background(), cfg, "rhdh", "backstage-rhdh", KindDeployment, path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Helm Chart: backstage-1.5.0") {
+		t.Error("expected chart label")
+	}
+	if !strings.Contains(content, "App Instance: rhdh") {
+		t.Error("expected instance label")
+	}
+}
+
+func TestWriteHelmMetadata_StatefulSet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "helm-metadata.txt")
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-sts",
+			Namespace: "rhdh",
+			Labels: map[string]string{
+				"helm.sh/chart":                "backstage-1.5.0",
+				"app.kubernetes.io/name":       "backstage",
+				"app.kubernetes.io/managed-by": "Helm",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(sts))
+	h := &Helm{}
+	h.writeHelmMetadata(context.Background(), cfg, "rhdh", "backstage-sts", KindStatefulSet, path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Helm Chart: backstage-1.5.0") {
+		t.Error("expected chart label")
+	}
+	if !strings.Contains(content, "App Version: N/A") {
+		t.Error("expected N/A for missing label")
+	}
+}
+
+func TestWriteHelmMetadata_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "helm-metadata.txt")
+
+	cfg := newTestConfig(t, dir)
+	h := &Helm{}
+	h.writeHelmMetadata(context.Background(), cfg, "rhdh", "nonexistent", KindDeployment, path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "Could not extract metadata") {
+		t.Error("expected fallback message")
+	}
+}
+
+func TestChartNameFromAccessor(t *testing.T) {
+	rel := makeTestRelease("rhdh", "ns", 1, "backstage", "1.0.0", "", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+	got := chartNameFromAccessor(acc)
+	if got != "backstage" {
+		t.Errorf("chartNameFromAccessor() = %q, want backstage", got)
+	}
+}
+
+func TestExtractWorkloadNames_OnlyFirstSTS(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: first-sts
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: second-sts
+`
+	_, stsName := extractWorkloadNames(manifest)
+	if stsName != "first-sts" {
+		t.Errorf("stsName = %q, want first-sts (should only keep first)", stsName)
 	}
 }

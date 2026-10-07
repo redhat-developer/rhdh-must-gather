@@ -1,7 +1,10 @@
 package collector
 
 import (
+	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,6 +123,94 @@ func TestWritePluginPackageJSON(t *testing.T) {
 func TestWritePluginPackageJSON_Empty(t *testing.T) {
 	dir := t.TempDir()
 	writePluginPackageJSON(dir, "")
+}
+
+func TestWritePluginFile(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("with prefix", func(t *testing.T) {
+		writePluginFile(dir, "/opt/app-root/src/dynamic-plugins-root/my-plugin/package.json", `{"name":"my-plugin"}`)
+		assertFileContains(t, filepath.Join(dir, "my-plugin", "package.json"), "my-plugin")
+	})
+
+	t.Run("without prefix", func(t *testing.T) {
+		writePluginFile(dir, "/some/other/path/file.json", `{"name":"other"}`)
+		assertFileContains(t, filepath.Join(dir, "file.json"), "other")
+	})
+}
+
+func TestParseSections_MultipleValues(t *testing.T) {
+	input := `===ID===
+root
+===ENV===
+KEY1=val1
+KEY2=val2
+KEY3=val3`
+
+	sections := parseSections(input)
+	if sections["ID"] != "root" {
+		t.Errorf("ID = %q, want root", sections["ID"])
+	}
+	env := sections["ENV"]
+	if !strings.Contains(env, "KEY1=val1") || !strings.Contains(env, "KEY3=val3") {
+		t.Errorf("ENV = %q, expected all key-value pairs", env)
+	}
+}
+
+func TestParseKeyValues_Empty(t *testing.T) {
+	kv := parseKeyValues("")
+	if len(kv) != 0 {
+		t.Errorf("expected empty map, got %v", kv)
+	}
+}
+
+func TestWriteBackstageJSON_WithVersion(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	writeBackstageJSON(context.Background(), cfg, "rhdh", "pod-1", dir, "1.35.1")
+
+	data, err := os.ReadFile(filepath.Join(dir, "backstage.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var result map[string]string
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if result["version"] != "1.35.1" {
+		t.Errorf("version = %q, want 1.35.1", result["version"])
+	}
+	if result["source"] != "BACKSTAGE_VERSION env var" {
+		t.Errorf("source = %q, want 'BACKSTAGE_VERSION env var'", result["source"])
+	}
+}
+
+func TestWriteBuildMetadata_WithVersions(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	versions := map[string]string{
+		"RHDH_VERSION":  "1.5.0",
+		"UPSTREAM_REPO": "https://github.com/backstage/backstage",
+		"MIDSTREAM_REPO": "https://example.com/rhdh",
+	}
+	writeBuildMetadata(context.Background(), cfg, "rhdh", "pod-1", dir, versions)
+
+	data, err := os.ReadFile(filepath.Join(dir, "build-metadata.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var result map[string]string
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if result["rhdh_version"] != "1.5.0" {
+		t.Errorf("rhdh_version = %q, want 1.5.0", result["rhdh_version"])
+	}
+	if result["source"] != "environment variables" {
+		t.Errorf("source = %q, want 'environment variables'", result["source"])
+	}
 }
 
 func assertFileContains(t *testing.T, path, substr string) {

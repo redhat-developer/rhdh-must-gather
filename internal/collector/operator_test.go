@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,8 +12,130 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+func TestOperator_Name(t *testing.T) {
+	o := &Operator{}
+	if got := o.Name(); got != "operator" {
+		t.Errorf("Name() = %q, want %q", got, "operator")
+	}
+}
+
+func TestDeploymentControlledByBackstageCR(t *testing.T) {
+	controller := true
+	crUID := types.UID("test-uid")
+
+	tests := []struct {
+		name   string
+		dep    *appsv1.Deployment
+		crName string
+		crUID  types.UID
+		want   bool
+	}{
+		{
+			name: "matching owner",
+			dep: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "rhdh.redhat.com/v1alpha5",
+						Kind:       "Backstage",
+						Name:       "my-backstage",
+						UID:        crUID,
+						Controller: &controller,
+					}},
+				},
+			},
+			crName: "my-backstage",
+			crUID:  crUID,
+			want:   true,
+		},
+		{
+			name: "empty UID matches any",
+			dep: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "rhdh.redhat.com/v1alpha5",
+						Kind:       "Backstage",
+						Name:       "my-backstage",
+						UID:        crUID,
+						Controller: &controller,
+					}},
+				},
+			},
+			crName: "my-backstage",
+			crUID:  "",
+			want:   true,
+		},
+		{
+			name: "wrong kind",
+			dep: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "rhdh.redhat.com/v1alpha5",
+						Kind:       "OtherKind",
+						Name:       "my-backstage",
+						UID:        crUID,
+						Controller: &controller,
+					}},
+				},
+			},
+			crName: "my-backstage",
+			crUID:  crUID,
+			want:   false,
+		},
+		{
+			name: "wrong API group",
+			dep: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "other.group/v1",
+						Kind:       "Backstage",
+						Name:       "my-backstage",
+						UID:        crUID,
+						Controller: &controller,
+					}},
+				},
+			},
+			crName: "my-backstage",
+			crUID:  crUID,
+			want:   false,
+		},
+		{
+			name: "not a controller",
+			dep: &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "rhdh.redhat.com/v1alpha5",
+						Kind:       "Backstage",
+						Name:       "my-backstage",
+						UID:        crUID,
+					}},
+				},
+			},
+			crName: "my-backstage",
+			crUID:  crUID,
+			want:   false,
+		},
+		{
+			name:   "no owner refs",
+			dep:    &appsv1.Deployment{},
+			crName: "my-backstage",
+			crUID:  crUID,
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deploymentControlledByBackstageCR(tt.dep, tt.crName, tt.crUID)
+			if got != tt.want {
+				t.Errorf("deploymentControlledByBackstageCR() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestOwnedOKPDeployments(t *testing.T) {
 	controller := true
@@ -342,5 +465,197 @@ func TestWriteDeploymentSummaryTable_Empty(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "No resources found") {
 		t.Error("expected 'No resources found'")
+	}
+}
+
+func TestOperator_GatherOLM_NoOLM(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir, withAPIGroups("apps/v1"))
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherOLM(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "olm", "rhdh-csv-all.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "not available") {
+		t.Error("expected OLM not available message")
+	}
+}
+
+func TestOperator_GatherOLM_WithOLM(t *testing.T) {
+	dir := t.TempDir()
+
+	csv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "rhdh-operator.v1.5.0",
+				"namespace": "rhdh-operator",
+			},
+			"spec": map[string]any{
+				"displayName": "RHDH Operator",
+				"version":     "1.5.0",
+			},
+			"status": map[string]any{
+				"phase": "Succeeded",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("operators.coreos.com/v1alpha1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				csvGVR:            "ClusterServiceVersionList",
+				subscriptionGVR:   "SubscriptionList",
+				installPlanGVR:    "InstallPlanList",
+				operatorGroupGVR:  "OperatorGroupList",
+				catalogSourceGVR:  "CatalogSourceList",
+			},
+			csv,
+		),
+	)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherOLM(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "olm", "rhdh-csv-all.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "rhdh-operator.v1.5.0") {
+		t.Error("expected CSV name in output")
+	}
+}
+
+func TestOperator_GatherCRDs(t *testing.T) {
+	dir := t.TempDir()
+
+	crd := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind":       "CustomResourceDefinition",
+			"metadata":   map[string]any{"name": "backstages.rhdh.redhat.com"},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
+			crd,
+		),
+	)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherCRDs(context.Background(), cfg, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "crds", "all-crds.txt")); err != nil {
+		t.Error("all-crds.txt not created")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "crds", "backstages.rhdh.redhat.com.yaml")); err != nil {
+		t.Error("backstage CRD YAML not created")
+	}
+}
+
+func TestOperator_GatherCRDs_NoCRDs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
+		),
+	)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherCRDs(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "crds", "backstages.rhdh.redhat.com--not-found.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "not found") {
+		t.Error("expected not found message")
+	}
+}
+
+func TestOperator_GatherNamespaceResources(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-pod", Namespace: "rhdh-operator"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "manager"}}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-svc", Namespace: "rhdh-operator"},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "10.0.0.1",
+		},
+	}
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-dep", Namespace: "rhdh-operator"},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status:     appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(pod, svc, dep))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns-resources")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherNamespaceResources(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	data, err := os.ReadFile(filepath.Join(nsDir, "all-resources.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "rhdh-pod") {
+		t.Error("expected pod name in output")
+	}
+	if !strings.Contains(content, "rhdh-svc") {
+		t.Error("expected service name in output")
+	}
+	if !strings.Contains(content, "rhdh-dep") {
+		t.Error("expected deployment name in output")
+	}
+}
+
+func TestOperator_GatherOperatorConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-default-config", Namespace: "rhdh-operator"},
+		Data:       map[string]string{"key": "value"},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(cm))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorConfig(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	configsDir := filepath.Join(nsDir, "configs")
+	if _, err := os.Stat(filepath.Join(configsDir, "all-configmaps.txt")); err != nil {
+		t.Error("all-configmaps.txt not created")
+	}
+	if _, err := os.Stat(filepath.Join(configsDir, "rhdh-default-config.yaml")); err != nil {
+		t.Error("rhdh-default-config.yaml not created")
+	}
+	if _, err := os.Stat(filepath.Join(configsDir, "rhdh-plugin-deps--not-found.txt")); err != nil {
+		t.Error("rhdh-plugin-deps--not-found.txt not created")
 	}
 }

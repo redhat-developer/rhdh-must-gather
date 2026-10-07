@@ -133,6 +133,171 @@ func TestPlatform_OCP(t *testing.T) {
 	}
 }
 
+func TestPlatform_AKS(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "azure:///subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0", map[string]string{
+			"agentpool": "default",
+		})),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "AKS" {
+		t.Errorf("platform = %q, want AKS", info.Platform)
+	}
+	if info.Underlying != "Azure" {
+		t.Errorf("underlying = %q, want Azure", info.Underlying)
+	}
+}
+
+func TestPlatform_ROSA(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{
+					"version": "4.16.0",
+				},
+			},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{
+					"type": "AWS",
+					"aws": map[string]any{
+						"resourceTags": []any{
+							map[string]any{"key": "rosa.openshift.io/cluster-id"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "ROSA" {
+		t.Errorf("platform = %q, want ROSA", info.Platform)
+	}
+}
+
+func TestPlatform_ROKS(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status":     map[string]any{"desired": map[string]any{"version": "4.16.0"}},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{
+					"type": "IBMCloud",
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "ROKS" {
+		t.Errorf("platform = %q, want ROKS", info.Platform)
+	}
+	if info.Underlying != "IBMCloud" {
+		t.Errorf("underlying = %q, want IBMCloud", info.Underlying)
+	}
+}
+
+func TestPlatform_vSphere(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "vsphere://vm-123", nil)),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Underlying != "vSphere" {
+		t.Errorf("underlying = %q, want vSphere", info.Underlying)
+	}
+}
+
+func TestPlatform_IBMCloud(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "ibm://instance-1", nil)),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Underlying != "IBMCloud" {
+		t.Errorf("underlying = %q, want IBMCloud", info.Underlying)
+	}
+}
+
 func TestPlatform_OutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newTestConfig(t, dir,

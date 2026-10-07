@@ -11,6 +11,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
@@ -47,6 +48,7 @@ func newTestConfig(t *testing.T, basePath string, opts ...testConfigOption) *Con
 			Clientset: fakeClient,
 			Discovery: fd,
 			Dynamic:   dynClient,
+			Config:    &rest.Config{Host: "https://fake-server:6443"},
 		},
 	}
 }

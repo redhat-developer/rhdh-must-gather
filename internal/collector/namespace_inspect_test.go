@@ -1,9 +1,18 @@
 package collector
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestNamespaceInspectName(t *testing.T) {
@@ -75,6 +84,215 @@ func TestContainsImagePattern(t *testing.T) {
 				t.Errorf("containsImagePattern() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRemoveSecrets(t *testing.T) {
+	t.Run("removes secrets dir and files", func(t *testing.T) {
+		dir := t.TempDir()
+		secretsDir := filepath.Join(dir, "ns1", "secrets")
+		_ = os.MkdirAll(secretsDir, 0o755)
+		_ = os.WriteFile(filepath.Join(secretsDir, "db-creds.yaml"), []byte("secret data"), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "ns1", "secrets.yaml"), []byte("secret list"), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "ns1", "configmaps.yaml"), []byte("config data"), 0o644)
+
+		n := &NamespaceInspect{}
+		cfg := &Config{WithSecrets: false}
+		n.removeSecrets(cfg, dir)
+
+		if _, err := os.Stat(secretsDir); !os.IsNotExist(err) {
+			t.Error("expected secrets dir to be removed")
+		}
+		if _, err := os.Stat(filepath.Join(dir, "ns1", "secrets.yaml")); !os.IsNotExist(err) {
+			t.Error("expected secrets.yaml to be removed")
+		}
+		if _, err := os.Stat(filepath.Join(dir, "ns1", "configmaps.yaml")); err != nil {
+			t.Error("expected configmaps.yaml to be preserved")
+		}
+	})
+
+	t.Run("skips when withSecrets is true", func(t *testing.T) {
+		dir := t.TempDir()
+		secretsDir := filepath.Join(dir, "secrets")
+		_ = os.MkdirAll(secretsDir, 0o755)
+		_ = os.WriteFile(filepath.Join(secretsDir, "data.yaml"), []byte("secret"), 0o644)
+
+		n := &NamespaceInspect{}
+		cfg := &Config{WithSecrets: true}
+		n.removeSecrets(cfg, dir)
+
+		if _, err := os.Stat(secretsDir); err != nil {
+			t.Error("expected secrets dir to remain when withSecrets=true")
+		}
+	})
+}
+
+func TestWriteSummary(t *testing.T) {
+	dir := t.TempDir()
+	n := &NamespaceInspect{}
+	cfg := &Config{Since: 5 * time.Minute}
+	n.writeSummary(cfg, dir, []string{"ns1", "ns2"})
+
+	data, err := os.ReadFile(filepath.Join(dir, "inspection-summary.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Number of namespaces inspected: 2") {
+		t.Error("expected namespace count")
+	}
+	if !strings.Contains(content, "ns1") || !strings.Contains(content, "ns2") {
+		t.Error("expected namespace names")
+	}
+	if !strings.Contains(content, "Secrets (excluded") {
+		t.Error("expected secrets excluded note")
+	}
+}
+
+func TestWriteSummary_WithSecrets(t *testing.T) {
+	dir := t.TempDir()
+	n := &NamespaceInspect{}
+	cfg := &Config{WithSecrets: true, SinceTime: "2024-01-01T00:00:00Z"}
+	n.writeSummary(cfg, dir, []string{"ns1"})
+
+	data, err := os.ReadFile(filepath.Join(dir, "inspection-summary.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Secrets (included") {
+		t.Error("expected secrets included note")
+	}
+	if !strings.Contains(content, "since-time: 2024-01-01T00:00:00Z") {
+		t.Error("expected since-time value")
+	}
+}
+
+func TestDetectStandaloneNamespaces(t *testing.T) {
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "backstage",
+			},
+		},
+	}
+	unrelatedDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx",
+			Namespace: "other-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "nginx",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, t.TempDir(), withTypedObjs(dep, unrelatedDep))
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectStandaloneNamespaces(context.Background(), cfg, nsSet)
+
+	if _, ok := nsSet["rhdh-ns"]; !ok {
+		t.Error("expected rhdh-ns to be detected")
+	}
+	if _, ok := nsSet["other-ns"]; ok {
+		t.Error("expected other-ns to not be detected")
+	}
+}
+
+func TestDetectOperatorNamespaces(t *testing.T) {
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-controller",
+			Namespace: "rhdh-operator",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+	}
+
+	cfg := newTestConfig(t, t.TempDir(), withTypedObjs(dep))
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectOperatorNamespaces(context.Background(), cfg, nsSet)
+
+	if _, ok := nsSet["rhdh-operator"]; !ok {
+		t.Error("expected rhdh-operator namespace to be detected")
+	}
+}
+
+func TestDetectCRNamespaces(t *testing.T) {
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+	cr := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "rhdh.redhat.com/v1alpha5",
+			"kind":       "Backstage",
+			"metadata": map[string]any{
+				"name":      "my-backstage",
+				"namespace": "backstage-ns",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, t.TempDir(),
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+			cr,
+		),
+	)
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectCRNamespaces(context.Background(), cfg, nsSet)
+
+	if _, ok := nsSet["backstage-ns"]; !ok {
+		t.Error("expected backstage-ns to be detected from CR")
+	}
+}
+
+func TestAddOrchestratorNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	orchDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(orchDir, 0o755)
+	_ = os.WriteFile(filepath.Join(orchDir, "detected-namespaces.txt"),
+		[]byte("orch-ns1\norch-ns2\n"), 0o644)
+
+	cfg := &Config{BasePath: dir}
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.addOrchestratorNamespaces(cfg, nsSet)
+
+	if _, ok := nsSet["orch-ns1"]; !ok {
+		t.Error("expected orch-ns1")
+	}
+	if _, ok := nsSet["orch-ns2"]; !ok {
+		t.Error("expected orch-ns2")
+	}
+}
+
+func TestAddOrchestratorNamespaces_NoFile(t *testing.T) {
+	cfg := &Config{BasePath: t.TempDir()}
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.addOrchestratorNamespaces(cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected empty set when file doesn't exist, got %v", nsSet)
+	}
+}
+
+func TestResolveNamespaces_Targeted(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	cfg.TargetNamespaces = []string{"ns1", "ns2"}
+
+	n := &NamespaceInspect{}
+	namespaces := n.resolveNamespaces(context.Background(), cfg)
+
+	if len(namespaces) != 2 || namespaces[0] != "ns1" || namespaces[1] != "ns2" {
+		t.Errorf("got %v, want [ns1 ns2]", namespaces)
 	}
 }
 

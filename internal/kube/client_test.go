@@ -1,11 +1,14 @@
 package kube
 
 import (
+	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func newTestClient(groupVersions ...string) *Client {
@@ -84,4 +87,32 @@ func TestPreferredVersion(t *testing.T) {
 			t.Error("expected error for missing group")
 		}
 	})
+}
+
+func newTestClientWithDiscoveryError() *Client {
+	fakeClient := fakeclientset.NewSimpleClientset()
+	fakeDiscovery := fakeClient.Discovery().(*fake.FakeDiscovery)
+	fakeDiscovery.PrependReactor("*", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("discovery unavailable")
+	})
+	return &Client{
+		Clientset: fakeClient,
+		Discovery: fakeDiscovery,
+	}
+}
+
+func TestHasAPIGroup_DiscoveryError(t *testing.T) {
+	c := newTestClientWithDiscoveryError()
+	_, err := c.HasAPIGroup("anything")
+	if err == nil {
+		t.Error("expected error when discovery fails")
+	}
+}
+
+func TestPreferredVersion_DiscoveryError(t *testing.T) {
+	c := newTestClientWithDiscoveryError()
+	_, err := c.PreferredVersion("anything")
+	if err == nil {
+		t.Error("expected error when discovery fails")
+	}
 }

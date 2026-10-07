@@ -116,6 +116,46 @@ func TestRoute_Run_WithRoutes(t *testing.T) {
 	}
 }
 
+func TestRoute_Run_WithNamespaceFilter(t *testing.T) {
+	dir := t.TempDir()
+
+	route := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "route.openshift.io/v1",
+			"kind":       "Route",
+			"metadata": map[string]any{
+				"name":      "backstage",
+				"namespace": "rhdh",
+			},
+			"spec": map[string]any{
+				"host": "backstage.apps.example.com",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("route.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{routeGVR: "RouteList"},
+			route,
+		),
+	)
+	cfg.TargetNamespaces = []string{"rhdh"}
+
+	r := &Route{}
+	if err := r.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "all-routes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "backstage") {
+		t.Error("expected route name in output")
+	}
+}
+
 func TestRoute_Run_NoRoutes(t *testing.T) {
 	dir := t.TempDir()
 
