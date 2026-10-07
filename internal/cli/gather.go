@@ -48,23 +48,23 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 	var kubeClient *kube.Client
 
 	defer func() {
-		log.Info("done with data collection. Now sanitizing secrets and credentials...")
+		log.Info("done with data collection. Now sanitizing data...")
 		sanitize.Run(basePath, sanitizeStop)
 
 		select {
 		case <-sanitizeStop:
-			log.Error("Secret sanitization aborted by interrupt. Skipping obfuscation. Do not share this output.")
+			log.Error("Data sanitization aborted by interrupt. Skipping obfuscation. Do not share this output.")
 			err = errors.Join(err, fmt.Errorf("sanitization aborted"))
 			return
 		default:
 		}
 
-		log.Info("Obfuscating IP addresses, MAC addresses, and cluster domain names...")
+		log.Info("Obfuscating data...")
 		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
-			log.Warn("Obfuscation failed: %v", oerr)
-			log.Warn("IP/MAC/domain obfuscation did not run. Review carefully before sharing with support.")
+			log.Warn("Data obfuscation failed: %v", oerr)
+			log.Warn("Data obfuscation did not run. Review carefully before sharing with support.")
 		} else {
-			log.Info("Data sanitization complete: secrets redacted, IPs/MACs/domains obfuscated")
+			log.Info("Data sanitization and obfuscation complete")
 		}
 	}()
 
