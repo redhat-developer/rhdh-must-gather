@@ -50,20 +50,29 @@ When secrets are collected (`--with-secrets`), the tool includes automatic sanit
 - **Comprehensive coverage** - Processes all YAML, JSON, and text files in the collected data
 - **Detailed reporting** - Provides sanitization summary with file and item counts
 
-### Automatic obfuscation
+### Automatic Obfuscation
 
-After secret sanitization, the gather runs [must-gather-clean](https://github.com/openshift/must-gather-clean) on the collected tree. This step is on by default. It rewrites:
+After secret sanitization, the tool automatically runs [must-gather-clean](https://github.com/openshift/must-gather-clean) to obfuscate network identifiers in the collected output.
 
-- IP addresses, in file contents and in file paths, using one consistent placeholder per address (`127.0.0.1`, `0.0.0.0`, and `::1` are left as-is)
-- MAC addresses, the same way
-- Cluster domain names, when they can be discovered. The name in front of the domain is kept (`console.apps.example.com` becomes `console.apps.domain0000000001`) so the gather is still readable
+**What gets obfuscated:**
+- **IP addresses** - Replaced with consistent tokens like `x-ipv4-00000001-x` (loopback addresses `127.0.0.1`, `0.0.0.0`, `::1` are preserved)
+- **MAC addresses** - Replaced with consistent tokens like `x-mac-00000001-x`
+- **Cluster domain names** - Rewritten to `domain0000001`, preserving subdomain structure (e.g., `console.apps.example.com` → `console.apps.domain0000001`)
 
-On OpenShift, domain discovery reads the DNS `cluster` base domain, the default ingress controller domain, and the API server hostname. On Kubernetes, and whenever those OpenShift domains cannot be read, discovery uses host names from Ingress resources and OpenShift Routes in the namespaces being collected, plus the API server hostname. In-cluster names such as `cluster.local` and `kubernetes.default.svc` are not treated as customer domains. When none of those names can be read, IP and MAC obfuscation still run, and other hostnames are left unchanged. Set `RHDH_OBFUSCATE_DOMAINS` to a comma-separated list to add domains discovery missed.
+Each unique address gets the same placeholder throughout the gather, so patterns and relationships remain visible for troubleshooting.
 
-ConfigMaps and Secrets are not removed by this step. Secret values are still redacted by the sanitizer above, and secret names stay in the gather when `--with-secrets` was used.
+**When it runs:**
+Obfuscation always runs automatically after collection completes. If obfuscation fails, the command logs a warning and continues with the un-obfuscated data, ensuring must-gather never loses collected diagnostics.
 
-The reversible `report.yaml` map produced by must-gather-clean is not included in the output. Do not copy it into a gather you share. A `watermark.txt` file in the output records that obfuscation ran.
+**How domain discovery works:**
+- **OpenShift**: Reads DNS cluster config, ingress controller domains, and API server hostname
+- **Kubernetes**: Uses Ingress/Route hostnames from collected namespaces plus API server hostname
+- **Internal names excluded**: `cluster.local`, `kubernetes.default.svc`, and similar in-cluster names are not obfuscated
+- **Manual additions**: Set `RHDH_OBFUSCATE_DOMAINS=example.com,corp.internal` to add domains that auto-discovery missed
 
-Obfuscation always runs as part of the must-gather workflow. If obfuscation fails for any reason, the command will log a warning and continue, returning the collected data with a notice to review it carefully before sharing with support. This ensures that must-gather can always complete successfully even if obfuscation encounters issues.
+**What's preserved:**
+- ConfigMaps and Secrets stay in the output (Secret values are still `[REDACTED]` by the sanitizer)
+- The reversible `report.yaml` map is NOT included (do not manually add it if you find it elsewhere)
+- A `watermark.txt` file records that obfuscation ran
 
-**Important**: While automatic sanitization and obfuscation catch common sensitive patterns and cover discovered domains, IPs, and MAC addresses, always review the must-gather output and check for any domain-specific sensitive information before sharing externally.
+**Important**: Always review the output before sharing. While obfuscation handles common cases, domain-specific sensitive information may remain.
