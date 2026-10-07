@@ -1,0 +1,65 @@
+name: Codecov Config Checks
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-[0-9]+.[0-9]+'
+    paths:
+      - codecov.yml
+      - .github/workflows/codecov-checks.yaml
+  pull_request:
+    branches:
+      - main
+      - 'release-[0-9]+.[0-9]+'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Codecov Config
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            codecov.yml
+            .github/workflows/codecov-checks.yaml
+
+      - name: Validate codecov.yml
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          response=$(curl -s -w "\n%{http_code}" --retry 3 --retry-delay 5 \
+            -X POST \
+            --data-binary @codecov.yml \
+            https://codecov.io/validate)
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "HTTP Status: ${http_code}"
+          echo "Response: ${body}"
+
+          if [ "$http_code" -eq 400 ]; then
+            echo "::error::Invalid codecov.yml configuration"
+            exit 1
+          elif [ "$http_code" -ne 200 ]; then
+            echo "::warning::Could not validate codecov.yml (HTTP ${http_code}). Transient issue?"
+            exit 1
+          fi
+
+          echo "codecov.yml is valid"
