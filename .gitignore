@@ -46,5 +46,4 @@ rhdh-must-gather-output.tar.gz
 # Go
 *.test
 cover.out
-coverage.out
 

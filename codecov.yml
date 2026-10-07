@@ -15,17 +15,12 @@ comment:
   layout: "reach, diff, flags, files"
   behavior: default
 
-flags:
-  unittests:
-    paths:
-      - cmd/
-      - internal/
-    carryforward: true
-  nightly:
-    paths:
-      - cmd/
-      - internal/
-    carryforward: true
+flag_management:
+  individual_flags:
+    - name: unittests
+      carryforward: true
+    - name: nightly
+      carryforward: true
 
 ignore:
   - tests/

@@ -77,7 +77,7 @@ jobs:
           override_branch: ${{ matrix.branch }}
 
   e2e-tests:
-    name: Nightly E2E Tests (${{ matrix.branch }})
+    name: E2E Tests (${{ matrix.branch }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -149,7 +149,7 @@ jobs:
           retention-days: 7
 
   e2e-tests-heap-dumps:
-    name: Nightly E2E Tests Heap Dumps (${{ matrix.branch }} - ${{ matrix.method }})
+    name: E2E Tests Heap Dumps (${{ matrix.branch }} - ${{ matrix.method }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
