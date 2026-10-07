@@ -56,7 +56,9 @@ jobs:
       - name: Capture commit SHA
         run: echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
+      # release-1.10 is bash-based and has no go.mod
       - name: Set up Go
+        if: matrix.branch != 'release-1.10'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
