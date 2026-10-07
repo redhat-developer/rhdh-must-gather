@@ -64,6 +64,6 @@ ConfigMaps and Secrets are not removed by this step. Secret values are still red
 
 The reversible `report.yaml` map produced by must-gather-clean is not included in the output. Do not copy it into a gather you share. A `watermark.txt` file in the output records that obfuscation ran.
 
-Skip this step with `--no-obfuscate` when you need the original addresses to debug the cluster yourself. Secret sanitization still runs. Heap dumps collected with `--with-heap-dumps` are included in this pass, so use `--no-obfuscate` when the snapshot must keep raw addresses.
+Obfuscation always runs as part of the must-gather workflow. If obfuscation fails for any reason, the command will log a warning and continue, returning the collected data with a notice to review it carefully before sharing with support. This ensures that must-gather can always complete successfully even if obfuscation encounters issues.
 
 **Important**: While automatic sanitization and obfuscation catch common sensitive patterns and cover discovered domains, IPs, and MAC addresses, always review the must-gather output and check for any domain-specific sensitive information before sharing externally.

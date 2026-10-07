@@ -123,22 +123,6 @@ func TestGetVersion_Compiled(t *testing.T) {
 	}
 }
 
-func TestNoObfuscateFlag(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-	cmd.SetArgs([]string{"--no-obfuscate"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	got, err := cmd.Flags().GetBool("no-obfuscate")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got {
-		t.Fatal("no-obfuscate = false, want true")
-	}
-}
-
 func TestObfuscateSubcommandCleansTree(t *testing.T) {
 	input := t.TempDir()
 	output := t.TempDir()

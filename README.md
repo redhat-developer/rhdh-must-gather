@@ -145,10 +145,10 @@ Usage: ./must_gather [params...]
   --with-secrets                Include Kubernetes Secrets in collection (opt-in, disabled by default)
                                 When disabled, secret resources are excluded from all collectors
                                 When enabled, secrets are collected but automatically sanitized
-
-  --no-obfuscate                Skip IP, MAC, and domain obfuscation
-                                Secret sanitization still runs. By default, collected output is
-                                obfuscated before the command exits. See
+                                
+                                After secret sanitization, obfuscation runs automatically to rewrite
+                                IP addresses, MAC addresses, and cluster domain names. If obfuscation
+                                fails, the command continues with a warning. See
                                 docs/secret-collection-and-sanitization.md.
 
   > Diagnostic and Troubleshooting Options:
@@ -233,7 +233,6 @@ Usage: ./must_gather [params...]
 | `--cluster-info` | Collect cluster-wide diagnostic information | For comprehensive cluster analysis |
 | `--with-secrets` | Include Kubernetes Secrets (sanitized) | For detailed troubleshooting requiring secret metadata |
 | `--with-heap-dumps` | Collect heap dumps from backstage-backend containers | For memory leak investigation and performance analysis |
-| `--no-obfuscate` | Skip IP, MAC, and domain obfuscation | When you need the original addresses for local debugging |
 
 **Examples:**
 - `--with-heap-dumps` - Collect heap dumps for all backstage-backend pods

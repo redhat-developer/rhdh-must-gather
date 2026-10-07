@@ -50,10 +50,6 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 	defer func() {
 		log.Info("done with data collection. Now sanitizing data...")
 		sanitize.Run(basePath, sanitizeStop)
-		if opts.noObfuscate {
-			log.Info("Obfuscation disabled; collected output keeps IP addresses, MAC addresses, and domain names")
-			return
-		}
 		select {
 		case <-sanitizeStop:
 			log.Error("Obfuscation aborted. Do not share this output.")
@@ -63,9 +59,9 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		}
 		log.Info("Obfuscating IP addresses, MAC addresses, and cluster domain names...")
 		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
-			log.Error("Obfuscation failed: %v", oerr)
-			log.Error("Collected output was not obfuscated. Do not share it.")
-			err = errors.Join(err, fmt.Errorf("obfuscating must-gather output: %w", oerr))
+			log.Warn("Obfuscation failed: %v", oerr)
+			log.Warn("Collected output was not obfuscated. Review carefully before sharing with support.")
+			// Do not fail the command - return what was collected
 		}
 	}()
 
