@@ -1,29 +1,109 @@
-name: Nightly E2E Tests
+name: Nightly Tests
 
 on:
   schedule:
     - cron: '38 21 * * *'
   workflow_dispatch:
-    inputs:
-      target-branch:
-        description: 'Target branch for E2E tests (must exist in rhdh-chart and rhdh-operator repos)'
-        required: false
 
 permissions:
   contents: read
 
 jobs:
-  e2e-tests:
-    name: Nightly E2E Tests
+  lint:
+    name: Lint (${{ matrix.branch }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - main
+          # release-1.10 is bash-based and has no golangci-lint config
+          - release-2.1
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ matrix.branch }}
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.14.0
+
+  unit-tests:
+    name: Unit Tests (${{ matrix.branch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - main
+          - release-1.10
+          - release-2.1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+
+      - name: Capture commit SHA
+        run: echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: make test
+
+      # release-1.10 is bash-based; its Makefile does not produce cover.out
+      - name: Upload coverage to Codecov
+        if: matrix.branch != 'release-1.10'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cover.out
+          flags: unittests,nightly
+          fail_ci_if_error: false
+          override_commit: ${{ env.COMMIT_SHA }}
+          override_branch: ${{ matrix.branch }}
+
+  e2e-tests:
+    name: E2E Tests (${{ matrix.branch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - main
+          - release-1.10
+          - release-2.1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+      
+      - name: Set branch test variables
+        run: |
+          branch="${{ matrix.branch }}"
+          echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
+          if [ "$branch" = "main" ]; then
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=latest-${branch#release-}" >> "$GITHUB_ENV"
+          fi
+        
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -33,13 +113,17 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
 
       - name: Create Kind cluster
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           cluster_name: rhdh-must-gather-e2e
           wait: 120s
 
       - name: Run E2E tests
-        run: make test-e2e LOCAL=false TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+        run: |
+          make test-e2e LOCAL=false \
+            TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+            IMAGE_TAG="${{ env.IMAGE_TAG }}" \
+            HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
 
       - name: Display must-gather process logs
         if: ${{ success() || failure() }}
@@ -48,36 +132,51 @@ jobs:
 
       - name: Upload E2E must-gather output in case of failure
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: e2e-must-gather-output-nightly
+          name: e2e-must-gather-output-nightly-${{ matrix.branch }}
           path: e2e-cluster.mustgather.tar.gz
           retention-days: 7
 
       - name: Upload must-gather output
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: must-gather-output-nightly
+          name: must-gather-output-nightly-${{ matrix.branch }}
           path: |
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/
           retention-days: 7
 
   e2e-tests-heap-dumps:
-    name: Nightly E2E Tests (Heap Dumps - ${{ matrix.method }})
+    name: E2E Tests Heap Dumps (${{ matrix.branch }} - ${{ matrix.method }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        branch: 
+          - main
+          - release-1.10
+          - release-2.1
         method: [auto, inspector, sigusr2]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ matrix.branch }}
           fetch-depth: 0
+
+      - name: Set branch test variables
+        run: |
+          branch="${{ matrix.branch }}"
+          echo "TARGET_BRANCH=${branch}" >> "$GITHUB_ENV"
+          if [ "$branch" = "main" ]; then
+            echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_TAG=latest-${branch#release-}" >> "$GITHUB_ENV"
+          fi
 
       - name: Install dependencies
         run: |
@@ -88,7 +187,7 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
 
       - name: Create Kind cluster
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           cluster_name: rhdh-must-gather-e2e-heap-${{ matrix.method }}
           wait: 120s
@@ -96,10 +195,17 @@ jobs:
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
-            # Auto: let the tool use its built-in default method (inspector)
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+              # Auto: let the tool use its built in default method (inspector)
+              make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
+                TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+                IMAGE_TAG="${{ env.IMAGE_TAG }}" \
+                HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           else
-            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true HEAP_DUMP_METHOD=${{ matrix.method }} TARGET_BRANCH="${{ inputs.target-branch || github.ref_name }}" HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
+            make test-e2e LOCAL=false WITH_HEAP_DUMPS=true \
+              HEAP_DUMP_METHOD="${{ matrix.method }}" \
+              TARGET_BRANCH="${{ env.TARGET_BRANCH }}" \
+              IMAGE_TAG="${{ env.IMAGE_TAG }}" \
+              HELM_TIMEOUT=${{ vars.E2E_HELM_TIMEOUT || '25m' }}
           fi
 
       - name: Display must-gather process logs
@@ -109,17 +215,17 @@ jobs:
 
       - name: Upload E2E must-gather output in case of failure
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: e2e-must-gather-output-heap-dumps-${{ matrix.method }}-nightly
+          name: e2e-must-gather-output-heap-dumps-${{ matrix.method }}-${{ matrix.branch }}-nightly
           path: e2e-cluster.mustgather.tar.gz
           retention-days: 7
 
       - name: Upload must-gather output
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: must-gather-output-heap-dumps-${{ matrix.method }}-nightly
+          name: must-gather-output-heap-dumps-${{ matrix.branch }}-${{ matrix.method }}-nightly
           path: |
             rhdh-must-gather-output.k8s.*.tar.gz
             rhdh-must-gather-output.k8s.*/

@@ -28,7 +28,7 @@ GO_BUILD_FLAGS ?= -trimpath -mod=mod
 GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)'
 
 
-default: run-local
+default: build
 
 ##@ Development
 
@@ -73,9 +73,13 @@ endif
 
 ##@ Go
 
+.PHONY: build
+build: ## Build the Go gather binary
+	$(GO) build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o gather ./cmd/gather
+
 .PHONY: test
 test: ## Run unit tests
-	$(GO) test -mod=mod ./... -v -count=1
+	$(GO) test -mod=mod ./... -v -count=1 -coverprofile=cover.out
 
 .PHONY: lint
 lint: ## Run linter (golangci-lint)
@@ -134,8 +138,9 @@ clean-out: ## Remove the local output directory
 	@echo "Local output directory cleaned"
 
 .PHONY: clean
-clean: clean-out ## Remove built images and test output
+clean: clean-out ## Remove built images, binary, and test output
 	@echo "Cleaning up..."
+	-rm -f gather
 	-podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
 	-rm -rf "$(TEST_RESULTS_DIR)"
