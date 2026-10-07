@@ -53,17 +53,15 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 
 		select {
 		case <-sanitizeStop:
-			log.Error("Data sanitization aborted by interrupt. Skipping obfuscation. Do not share this output.")
+			log.Error("Sanitization aborted by interrupt. Do not share this output.")
 			err = errors.Join(err, fmt.Errorf("sanitization aborted"))
-			return
 		default:
-		}
-
-		log.Info("Obfuscating data...")
-		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
-			log.Warn("Data obfuscation failed: %v. Review carefully before sharing with support.", oerr)
-		} else {
-			log.Info("Data sanitization and obfuscation complete")
+			log.Info("Obfuscating data...")
+			if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
+				log.Warn("Obfuscation failed: %v. Review carefully before sharing with support.", oerr)
+			} else {
+				log.Info("Post-processing complete")
+			}
 		}
 	}()
 
