@@ -61,8 +61,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 
 		log.Info("Obfuscating data...")
 		if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
-			log.Warn("Data obfuscation failed: %v", oerr)
-			log.Warn("Data obfuscation did not run. Review carefully before sharing with support.")
+			log.Warn("Data obfuscation failed: %v. Review carefully before sharing with support.", oerr)
 		} else {
 			log.Info("Data sanitization and obfuscation complete")
 		}
@@ -88,7 +87,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 
 	ver := getVersion()
 	versionFile := filepath.Join(basePath, "version")
-	if err := os.WriteFile(versionFile, []byte("rhdh-must-gather\n"+ver+"\n"), 0o644); err != nil {
+	if err = os.WriteFile(versionFile, []byte("rhdh-must-gather\n"+ver+"\n"), 0o644); err != nil {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
