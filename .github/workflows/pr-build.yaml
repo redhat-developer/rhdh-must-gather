@@ -122,7 +122,7 @@ jobs:
 
       - name: Upload image artifact
         if: steps.changed-files.outputs.any_changed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pr-image
           path: |
@@ -223,7 +223,7 @@ jobs:
 
       - name: Upload E2E must-gather output in case of failure
         if: needs.pr-build.outputs.image-built == 'true' && failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-must-gather-output-pr-${{ github.event.pull_request.number }}
           path: e2e-cluster.mustgather.tar.gz
@@ -231,7 +231,7 @@ jobs:
 
       - name: Upload must-gather output
         if: needs.pr-build.outputs.image-built == 'true' && failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: must-gather-output-e2e-image
           path: |
