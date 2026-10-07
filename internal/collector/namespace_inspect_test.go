@@ -2,17 +2,26 @@ package collector
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
+
+	"helm.sh/helm/v4/pkg/action"
+	kubefake "helm.sh/helm/v4/pkg/kube/fake"
+	"helm.sh/helm/v4/pkg/storage"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 func TestNamespaceInspectName(t *testing.T) {
@@ -293,6 +302,108 @@ func TestResolveNamespaces_Targeted(t *testing.T) {
 
 	if len(namespaces) != 2 || namespaces[0] != "ns1" || namespaces[1] != "ns2" {
 		t.Errorf("got %v, want [ns1 ns2]", namespaces)
+	}
+}
+
+func TestRedirectKlog(t *testing.T) {
+	dir := t.TempDir()
+	_, cleanup := redirectKlog(dir)
+	defer cleanup()
+
+	logPath := filepath.Join(dir, "inspect.log")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Error("expected inspect.log to be created")
+	}
+}
+
+func TestRunInspectCmd_Success(t *testing.T) {
+	cmd := &cobra.Command{
+		Use: "test",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return nil
+		},
+	}
+	if err := runInspectCmd(cmd); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestRunInspectCmd_FatalRecovery(t *testing.T) {
+	cmd := &cobra.Command{
+		Use: "test",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			kcmdutil.CheckErr(fmt.Errorf("simulated fatal"))
+			return nil
+		},
+	}
+	err := runInspectCmd(cmd)
+	if err == nil {
+		t.Fatal("expected error from fatal recovery")
+	}
+	if !strings.Contains(err.Error(), "simulated fatal") {
+		t.Errorf("error = %q, expected to contain 'simulated fatal'", err.Error())
+	}
+}
+
+func TestInspectFatalError(t *testing.T) {
+	e := inspectFatalError("test error message")
+	if e.Error() != "test error message" {
+		t.Errorf("Error() = %q, want 'test error message'", e.Error())
+	}
+}
+
+func TestDetectHelmNamespaces_NoConfig(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+
+	// With a fake rest.Config, newHelmActionConfig fails gracefully
+	n.detectHelmNamespaces(context.Background(), cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected empty nsSet, got %v", nsSet)
+	}
+}
+
+func TestDetectHelmNamespaces_WithRHDHRelease(t *testing.T) {
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+
+	store := storage.Init(driver.NewMemory())
+	_ = store.Create(rel)
+	actionCfg := &action.Configuration{Releases: store, KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard}}
+
+	cfg := newTestConfig(t, t.TempDir())
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return actionCfg, nil
+	}
+
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectHelmNamespaces(context.Background(), cfg, nsSet)
+
+	if _, ok := nsSet["rhdh-ns"]; !ok {
+		t.Error("expected rhdh-ns to be detected from RHDH Helm release")
+	}
+}
+
+func TestDetectHelmNamespaces_NonRHDHRelease(t *testing.T) {
+	rel := makeTestRelease("nginx", "default", 1, "nginx", "1.0.0", "1.0.0", "")
+
+	store := storage.Init(driver.NewMemory())
+	_ = store.Create(rel)
+	actionCfg := &action.Configuration{Releases: store, KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard}}
+
+	cfg := newTestConfig(t, t.TempDir())
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return actionCfg, nil
+	}
+
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectHelmNamespaces(context.Background(), cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected empty nsSet for non-RHDH release, got %v", nsSet)
 	}
 }
 

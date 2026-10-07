@@ -19,6 +19,23 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+type kubePodOps struct {
+	config *rest.Config
+	client kubernetes.Interface
+}
+
+func (k *kubePodOps) Exec(ctx context.Context, ns, podName, container, script string) (string, error) {
+	return execInPod(ctx, k.config, k.client, ns, podName, container, script)
+}
+
+func (k *kubePodOps) ExecToFile(ctx context.Context, ns, podName, container, script, destPath string) error {
+	return execInPodToFile(ctx, k.config, k.client, ns, podName, container, script, destPath)
+}
+
+func (k *kubePodOps) GetLogStream(ctx context.Context, ns, podName string, opts *corev1.PodLogOptions) (io.ReadCloser, error) {
+	return k.client.CoreV1().Pods(ns).GetLogs(podName, opts).Stream(ctx)
+}
+
 // CollectPodData collects app data from a running pod's backstage-backend container.
 // Optimized: batches 8+ separate exec calls from the bash version into 2.
 func CollectPodData(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod, outDir string) {
@@ -43,7 +60,7 @@ echo "===NODE_VERSION==="
 node --version 2>/dev/null || echo "unknown"
 `
 	log.Info("\tCollecting: app data from %s (batched)", pod.Name)
-	envOut, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod.Name, "backstage-backend", envScript)
+	envOut, err := cfg.podOps().Exec(ctx, ns, pod.Name, "backstage-backend", envScript)
 	if err != nil {
 		log.Warn("Failed to collect app data from %s: %v", pod.Name, err)
 		_ = os.WriteFile(filepath.Join(outDir, "collection-error.txt"),
@@ -74,7 +91,7 @@ cat /opt/app-root/src/dynamic-plugins-root/app-config.dynamic-plugins.yaml 2>/de
 echo "===PACKAGES==="
 find /opt/app-root/src/dynamic-plugins-root -maxdepth 2 -name package.json -exec sh -c 'echo "===FILE:{}==="; cat "{}"' \; 2>/dev/null || true
 `
-	pluginsOut, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod.Name, "backstage-backend", pluginsScript)
+	pluginsOut, err := cfg.podOps().Exec(ctx, ns, pod.Name, "backstage-backend", pluginsScript)
 	if err != nil {
 		log.Warn("Failed to collect dynamic plugins from %s: %v", pod.Name, err)
 		return
@@ -128,7 +145,7 @@ done
 echo ""
 echo "Total processes: $count"
 `, c.Name, pod.Name, ns)
-		out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod.Name, c.Name, script)
+		out, err := cfg.podOps().Exec(ctx, ns, pod.Name, c.Name, script)
 		if err != nil {
 			_ = os.WriteFile(filepath.Join(outDir, "container="+c.Name+".txt"),
 				[]byte(fmt.Sprintf("Failed to collect processes: %v\n", err)), 0o644)
@@ -165,9 +182,7 @@ func streamAndSaveLogs(ctx context.Context, cfg *Config, ns, podName, container 
 		Previous:  previous,
 	}
 	cfg.ApplyLogSince(opts)
-	client := cfg.Client.Clientset
-	req := client.CoreV1().Pods(ns).GetLogs(podName, opts)
-	stream, err := req.Stream(ctx)
+	stream, err := cfg.podOps().GetLogStream(ctx, ns, podName, opts)
 	if err != nil {
 		_ = os.WriteFile(outPath, []byte(fmt.Sprintf("Failed to get logs: %v\n", err)), 0o644)
 		return
@@ -308,7 +323,7 @@ func writeBackstageJSON(ctx context.Context, cfg *Config, ns, podName, outDir, b
 
 	// Fallback: try to read backstage.json from the container
 	log.Debug("BACKSTAGE_VERSION not set in %s, trying file fallback", podName)
-	out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, podName, "backstage-backend",
+	out, err := cfg.podOps().Exec(ctx, ns, podName, "backstage-backend",
 		"cat /opt/app-root/src/backstage.json 2>/dev/null || echo '{}'")
 	if err == nil {
 		_ = os.WriteFile(outPath, []byte(out), 0o644)
@@ -334,7 +349,7 @@ func writeBuildMetadata(ctx context.Context, cfg *Config, ns, podName, outDir st
 	}
 
 	log.Debug("Build metadata env vars not set in %s, trying file fallback", podName)
-	out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, podName, "backstage-backend",
+	out, err := cfg.podOps().Exec(ctx, ns, podName, "backstage-backend",
 		"cat /opt/app-root/src/packages/app/src/build-metadata.json 2>/dev/null || echo '{}'")
 	if err == nil {
 		_ = os.WriteFile(outPath, []byte(out), 0o644)

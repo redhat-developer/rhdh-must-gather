@@ -3,6 +3,8 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,10 +16,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"helm.sh/helm/v4/pkg/action"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
+	kubefake "helm.sh/helm/v4/pkg/kube/fake"
 	"helm.sh/helm/v4/pkg/release"
 	"helm.sh/helm/v4/pkg/release/common"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 func TestFilterSecretsFromYAML(t *testing.T) {
@@ -750,6 +756,500 @@ func TestChartNameFromAccessor(t *testing.T) {
 	}
 }
 
+func rhdhDeployment(name, ns string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "backstage",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestGatherStandaloneDeployments_RHDHDeployment(t *testing.T) {
+	dir := t.TempDir()
+	dep := rhdhDeployment("backstage-rhdh", "rhdh-ns")
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	noteFile := filepath.Join(helmDir, "standalone", "ns=rhdh-ns", "rhdh", "standalone-note.txt")
+	if _, err := os.Stat(noteFile); err != nil {
+		t.Error("expected standalone-note.txt to be created")
+	}
+}
+
+func TestGatherStandaloneDeployments_UnrelatedDeployment(t *testing.T) {
+	dir := t.TempDir()
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx",
+			Namespace: "default",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "nginx",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "nginx"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "nginx", Image: "nginx:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for unrelated deployment", count)
+	}
+}
+
+func TestGatherStandaloneDeployments_AlreadyProcessed(t *testing.T) {
+	dir := t.TempDir()
+	dep := rhdhDeployment("backstage-rhdh", "rhdh-ns")
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	processed := map[string]bool{
+		workloadKey(KindDeployment, "rhdh-ns", "backstage-rhdh"): true,
+	}
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), processed)
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for already-processed workload", count)
+	}
+}
+
+func TestGatherStandaloneDeployments_NoDeployments(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+}
+
+func TestGatherStandaloneDeployments_TargetNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	dep := rhdhDeployment("backstage-rhdh", "other-ns")
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	cfg.TargetNamespaces = []string{"rhdh-ns"}
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for filtered namespace", count)
+	}
+}
+
+func TestGatherStandaloneDeployments_StatefulSet(t *testing.T) {
+	dir := t.TempDir()
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-sts",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "backstage",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(sts))
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 1 {
+		t.Fatalf("count = %d, want 1 for StatefulSet", count)
+	}
+
+	stsDir := filepath.Join(helmDir, "standalone", "ns=rhdh-ns", "rhdh", "statefulset")
+	if _, err := os.Stat(stsDir); err != nil {
+		t.Error("expected statefulset directory to be created")
+	}
+}
+
+func TestGatherStandaloneDeployments_MustGatherExcluded(t *testing.T) {
+	dir := t.TempDir()
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-must-gather",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "rhdh-must-gather",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherStandaloneDeployments(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for must-gather deployment", count)
+	}
+}
+
+func TestCollectDependentServices_WithDependentDeployment(t *testing.T) {
+	dir := t.TempDir()
+
+	mainDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+		},
+	}
+
+	depDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-postgresql",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(mainDep, depDep))
+	h := &Helm{}
+
+	wlDir := filepath.Join(dir, "workload")
+	_ = os.MkdirAll(wlDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectDependentServices(context.Background(), cfg, "rhdh-ns", "backstage-rhdh", KindDeployment, wlDir, processedWorkloads)
+
+	depYAML := filepath.Join(wlDir, "dependencies", "rhdh-postgresql", "deployment.yaml")
+	if _, err := os.Stat(depYAML); err != nil {
+		t.Error("expected dependent deployment YAML to be created")
+	}
+
+	if !processedWorkloads[workloadKey(KindDeployment, "rhdh-ns", "rhdh-postgresql")] {
+		t.Error("expected dependent to be marked as processed")
+	}
+}
+
+func TestCollectDependentServices_OKPDeployment(t *testing.T) {
+	dir := t.TempDir()
+
+	mainDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+		},
+	}
+
+	okpDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-okp",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "okp"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "okp"}},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(mainDep, okpDep))
+	h := &Helm{}
+
+	wlDir := filepath.Join(dir, "workload")
+	_ = os.MkdirAll(wlDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectDependentServices(context.Background(), cfg, "rhdh-ns", "backstage-rhdh", KindDeployment, wlDir, processedWorkloads)
+
+	okpDir := filepath.Join(wlDir, "okp-deployment")
+	if _, err := os.Stat(okpDir); err != nil {
+		t.Error("expected okp-deployment directory to be created")
+	}
+
+	if !processedWorkloads[workloadKey(KindDeployment, "rhdh-ns", "rhdh-okp")] {
+		t.Error("expected OKP deployment to be marked as processed")
+	}
+}
+
+func TestCollectDependentServices_NoInstanceLabel(t *testing.T) {
+	dir := t.TempDir()
+
+	mainDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels:    map[string]string{},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(mainDep))
+	h := &Helm{}
+
+	wlDir := filepath.Join(dir, "workload")
+	_ = os.MkdirAll(wlDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectDependentServices(context.Background(), cfg, "rhdh-ns", "backstage-rhdh", KindDeployment, wlDir, processedWorkloads)
+
+	depsDir := filepath.Join(wlDir, "dependencies")
+	if _, err := os.Stat(depsDir); !os.IsNotExist(err) {
+		t.Error("expected no dependencies dir when no instance label")
+	}
+}
+
+func TestCollectDependentServices_AlreadyProcessed(t *testing.T) {
+	dir := t.TempDir()
+
+	mainDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+		},
+	}
+
+	depDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-postgresql",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(mainDep, depDep))
+	h := &Helm{}
+
+	wlDir := filepath.Join(dir, "workload")
+	_ = os.MkdirAll(wlDir, 0o755)
+
+	processedWorkloads := map[string]bool{
+		workloadKey(KindDeployment, "rhdh-ns", "rhdh-postgresql"): true,
+	}
+	h.collectDependentServices(context.Background(), cfg, "rhdh-ns", "backstage-rhdh", KindDeployment, wlDir, processedWorkloads)
+
+	depYAML := filepath.Join(wlDir, "dependencies", "rhdh-postgresql", "deployment.yaml")
+	if _, err := os.Stat(depYAML); !os.IsNotExist(err) {
+		t.Error("expected no deployment YAML for already-processed dependent")
+	}
+}
+
+func TestCollectDependentServices_StatefulSet(t *testing.T) {
+	dir := t.TempDir()
+
+	mainSTS := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+		},
+	}
+
+	depSTS := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-postgresql",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/instance":   "rhdh",
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "postgresql"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(mainSTS, depSTS))
+	h := &Helm{}
+
+	wlDir := filepath.Join(dir, "workload")
+	_ = os.MkdirAll(wlDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectDependentServices(context.Background(), cfg, "rhdh-ns", "backstage-rhdh", KindStatefulSet, wlDir, processedWorkloads)
+
+	depYAML := filepath.Join(wlDir, "dependencies", "rhdh-postgresql", "statefulset.yaml")
+	if _, err := os.Stat(depYAML); err != nil {
+		t.Error("expected dependent statefulset YAML to be created")
+	}
+
+	if !processedWorkloads[workloadKey(KindStatefulSet, "rhdh-ns", "rhdh-postgresql")] {
+		t.Error("expected dependent STS to be marked as processed")
+	}
+}
+
+func TestCollectDependentLogs_NoPods(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	h := &Helm{}
+
+	depDir := filepath.Join(dir, "dep")
+	_ = os.MkdirAll(depDir, 0o755)
+
+	matchLabels := map[string]string{"app": "postgresql"}
+	h.collectDependentLogs(context.Background(), cfg, "rhdh-ns", "postgresql", "rhdh", &matchLabels, depDir)
+
+	entries, err := os.ReadDir(depDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "logs-") {
+			t.Error("expected no log files when no pods exist")
+		}
+	}
+}
+
+func TestCollectDependentLogs_WithPods(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "postgresql-0",
+			Namespace: "rhdh-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/instance": "rhdh",
+				"app.kubernetes.io/name":     "postgresql",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "postgresql"}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(pod))
+	h := &Helm{}
+
+	depDir := filepath.Join(dir, "dep")
+	_ = os.MkdirAll(depDir, 0o755)
+
+	matchLabels := map[string]string{"app.kubernetes.io/instance": "rhdh", "app.kubernetes.io/name": "postgresql"}
+	h.collectDependentLogs(context.Background(), cfg, "rhdh-ns", "postgresql", "rhdh", &matchLabels, depDir)
+
+	logFile := filepath.Join(depDir, "logs-postgresql-0.txt")
+	if _, err := os.Stat(logFile); err != nil {
+		t.Error("expected log file to be created for pod")
+	}
+}
+
 func TestExtractWorkloadNames_OnlyFirstSTS(t *testing.T) {
 	manifest := `apiVersion: apps/v1
 kind: StatefulSet
@@ -764,5 +1264,402 @@ metadata:
 	_, stsName := extractWorkloadNames(manifest)
 	if stsName != "first-sts" {
 		t.Errorf("stsName = %q, want first-sts (should only keep first)", stsName)
+	}
+}
+
+func fakeHelmConfig(releases ...*releasev1.Release) func(string) (*action.Configuration, error) {
+	store := storage.Init(driver.NewMemory())
+	for _, rel := range releases {
+		_ = store.Create(rel)
+	}
+	return func(_ string) (*action.Configuration, error) {
+		return &action.Configuration{
+			Releases:   store,
+			KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard},
+		}, nil
+	}
+}
+
+func TestGatherNativeReleases_ConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return nil, fmt.Errorf("helm init failed")
+	}
+
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherNativeReleases(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0", count)
+	}
+
+	data, err := os.ReadFile(filepath.Join(helmDir, "all-rhdh-releases.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "helm init failed") {
+		t.Error("expected error message in output file")
+	}
+}
+
+func TestGatherNativeReleases_NoRHDHReleases(t *testing.T) {
+	dir := t.TempDir()
+	rel := makeTestRelease("nginx-release", "default", 1, "nginx", "1.0.0", "1.0.0", "")
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherNativeReleases(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for non-RHDH release", count)
+	}
+}
+
+func TestGatherNativeReleases_MustGatherExcluded(t *testing.T) {
+	dir := t.TempDir()
+	rel := makeTestRelease("rhdh-must-gather", "rhdh-ns", 1, "rhdh-must-gather", "1.0.0", "1.0.0", "")
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherNativeReleases(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for must-gather release", count)
+	}
+}
+
+func TestGatherNativeReleases_WithRHDHRelease(t *testing.T) {
+	dir := t.TempDir()
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backstage-rhdh\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "Install complete")
+	rel.Manifest = manifest
+	rel.Config = map[string]any{"global": map[string]any{"host": "rhdh.example.com"}}
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherNativeReleases(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	data, err := os.ReadFile(filepath.Join(helmDir, "all-rhdh-releases.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "rhdh") {
+		t.Error("expected release name in table")
+	}
+
+	releaseDir := filepath.Join(helmDir, "releases", "ns=rhdh-ns", "rhdh")
+	if _, err := os.Stat(releaseDir); err != nil {
+		t.Error("expected release directory to be created")
+	}
+}
+
+func TestGatherNativeReleases_TargetNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	rel := makeTestRelease("rhdh", "other-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+	cfg.TargetNamespaces = []string{"rhdh-ns"}
+
+	h := &Helm{}
+	helmDir := filepath.Join(dir, "helm")
+	_ = os.MkdirAll(helmDir, 0o755)
+
+	count := h.gatherNativeReleases(context.Background(), cfg, helmDir, make(map[string]bool), make(map[string]bool))
+	if count != 0 {
+		t.Errorf("count = %d, want 0 for filtered namespace", count)
+	}
+}
+
+func TestCollectReleaseData_WritesValuesAndManifest(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rhdh-config\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "Install complete")
+	rel.Manifest = manifest
+	rel.Config = map[string]any{"upstream": map[string]any{"backstage": map[string]any{"title": "My RHDH"}}}
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	valuesData, err := os.ReadFile(filepath.Join(releaseDir, "values.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile values.yaml: %v", err)
+	}
+	if !strings.Contains(string(valuesData), "My RHDH") {
+		t.Error("expected user values in values.yaml")
+	}
+
+	manifestData, err := os.ReadFile(filepath.Join(releaseDir, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile manifest.yaml: %v", err)
+	}
+	if !strings.Contains(string(manifestData), "rhdh-config") {
+		t.Error("expected manifest content")
+	}
+
+	notesData, err := os.ReadFile(filepath.Join(releaseDir, "notes.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile notes.txt: %v", err)
+	}
+	_ = notesData
+
+	if _, err := os.Stat(filepath.Join(releaseDir, "history.txt")); err != nil {
+		t.Error("expected history.txt to be created")
+	}
+	if _, err := os.Stat(filepath.Join(releaseDir, "status.txt")); err != nil {
+		t.Error("expected status.txt to be created")
+	}
+}
+
+func TestCollectReleaseData_FilterSecrets(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db-creds\ndata:\n  password: cGFzcw==\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rhdh-config\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+	cfg.WithSecrets = false
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	data, err := os.ReadFile(filepath.Join(releaseDir, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "Secret") {
+		t.Error("expected secrets to be filtered from manifest")
+	}
+	if !strings.Contains(content, "ConfigMap") {
+		t.Error("expected non-secret content to remain in manifest")
+	}
+}
+
+func TestCollectReleaseData_WithSecrets(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db-creds\ndata:\n  password: cGFzcw==\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+	cfg.WithSecrets = true
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	data, err := os.ReadFile(filepath.Join(releaseDir, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "Secret") {
+		t.Error("expected secrets to remain when WithSecrets=true")
+	}
+}
+
+func TestCollectReleaseData_ConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return nil, fmt.Errorf("config init failed")
+	}
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	data, err := os.ReadFile(filepath.Join(releaseDir, "error.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "config init failed") {
+		t.Error("expected error message in error.txt")
+	}
+}
+
+func TestCollectReleaseData_ExtractsWorkloads(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backstage-rhdh\n---\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: backstage-psql\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend"},
+					},
+				},
+			},
+		},
+	}
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-psql",
+			Namespace: "rhdh-ns",
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "psql"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep, sts))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, processedWorkloads)
+
+	if _, err := os.Stat(filepath.Join(releaseDir, "deployment")); err != nil {
+		t.Error("expected deployment directory for primary workload")
+	}
+
+	if !processedWorkloads[workloadKey(KindDeployment, "rhdh-ns", "backstage-rhdh")] {
+		t.Error("expected deployment to be marked as processed")
+	}
+	if !processedWorkloads[workloadKey(KindStatefulSet, "rhdh-ns", "backstage-psql")] {
+		t.Error("expected statefulset to be marked as processed")
+	}
+}
+
+func TestHelmRun_NoReleases(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig()
+
+	h := &Helm{}
+	err := h.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "helm", "no-releases.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "No RHDH-related Helm releases") {
+		t.Error("expected no-releases message")
+	}
+}
+
+func TestHelmRun_WithRelease(t *testing.T) {
+	dir := t.TempDir()
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backstage-rhdh\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "Install complete")
+	rel.Manifest = manifest
+	rel.Config = map[string]any{"key": "value"}
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh-ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "backstage-backend", Image: "quay.io/rhdh/rhdh-hub-rhel9:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	err := h.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	helmDir := filepath.Join(dir, "helm")
+	if _, err := os.Stat(filepath.Join(helmDir, "all-rhdh-releases.txt")); err != nil {
+		t.Error("expected releases table file")
+	}
+	if _, err := os.Stat(filepath.Join(helmDir, "all-rhdh-releases.json")); err != nil {
+		t.Error("expected releases JSON file")
+	}
+
+	releaseDir := filepath.Join(helmDir, "releases", "ns=rhdh-ns", "rhdh")
+	if _, err := os.Stat(filepath.Join(releaseDir, "values.yaml")); err != nil {
+		t.Error("expected values.yaml in release dir")
+	}
+	if _, err := os.Stat(filepath.Join(releaseDir, "manifest.yaml")); err != nil {
+		t.Error("expected manifest.yaml in release dir")
 	}
 }

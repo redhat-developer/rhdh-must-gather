@@ -363,3 +363,320 @@ func TestOwnerRefKind(t *testing.T) {
 		})
 	}
 }
+
+func TestCollectWorkload_Deployment(t *testing.T) {
+	dir := t.TempDir()
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh-abc-123",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "rhdh"},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "ReplicaSet", Name: "backstage-rhdh-abc"},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "backstage-backend"}},
+		},
+		// Use Succeeded phase so exec-based goroutines (CollectProcesses,
+		// CollectPodData) are not spawned — they require a real REST client.
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep, pod))
+	ref := WorkloadRef{Namespace: "rhdh", Name: "backstage-rhdh", Kind: KindDeployment, InstanceName: "rhdh"}
+	outDir := filepath.Join(dir, "workload")
+
+	err := CollectWorkload(context.Background(), cfg, ref, outDir)
+	if err != nil {
+		t.Fatalf("CollectWorkload: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "deployment.yaml")); err != nil {
+		t.Error("expected deployment.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "pods")); err != nil {
+		t.Error("expected pods directory")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "pods", "pods.yaml")); err != nil {
+		t.Error("expected pods/pods.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "pods", "pods.txt")); err != nil {
+		t.Error("expected pods/pods.txt")
+	}
+}
+
+func TestCollectWorkload_StatefulSet(t *testing.T) {
+	dir := t.TempDir()
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-sts",
+			Namespace: "rhdh",
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-sts-0",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "rhdh"},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "StatefulSet", Name: "backstage-sts"},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "backstage-backend"}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(sts, pod))
+	ref := WorkloadRef{Namespace: "rhdh", Name: "backstage-sts", Kind: KindStatefulSet, InstanceName: "rhdh"}
+	outDir := filepath.Join(dir, "workload")
+
+	err := CollectWorkload(context.Background(), cfg, ref, outDir)
+	if err != nil {
+		t.Fatalf("CollectWorkload: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "statefulset.yaml")); err != nil {
+		t.Error("expected statefulset.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "pods", "pods.yaml")); err != nil {
+		t.Error("expected pods/pods.yaml")
+	}
+}
+
+func TestCollectWorkload_RunningPodsWithPodOps(t *testing.T) {
+	dir := t.TempDir()
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh-abc-123",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "rhdh"},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "ReplicaSet", Name: "backstage-rhdh-abc"},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "backstage-backend"}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	ops := &fakePodOps{
+		execOutput: "mock exec output\n",
+		logOutput:  "mock log line\n",
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(dep, pod), withPodOps(ops))
+	ref := WorkloadRef{Namespace: "rhdh", Name: "backstage-rhdh", Kind: KindDeployment, InstanceName: "rhdh"}
+	outDir := filepath.Join(dir, "workload")
+
+	err := CollectWorkload(context.Background(), cfg, ref, outDir)
+	if err != nil {
+		t.Fatalf("CollectWorkload: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "logs")); err != nil {
+		t.Error("expected logs directory for Running pod")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "processes")); err != nil {
+		t.Error("expected processes directory for Running pod")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "data")); err != nil {
+		t.Error("expected data directory for Running pod")
+	}
+}
+
+func TestWriteAggregatedStatefulSetLogs_WithPodOps(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "db-0",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "db"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "postgres"}},
+		},
+	}
+
+	ops := &fakePodOps{logOutput: "postgres log entry\n"}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(ops))
+
+	stsDir := filepath.Join(dir, "sts")
+	_ = os.MkdirAll(stsDir, 0o755)
+	writeAggregatedStatefulSetLogs(context.Background(), cfg, "rhdh", "app=db", stsDir)
+
+	data, err := os.ReadFile(filepath.Join(stsDir, "logs-db.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "postgres log entry") {
+		t.Errorf("expected log content, got: %s", content)
+	}
+	if !strings.Contains(content, "[pod/db-0/postgres]") {
+		t.Errorf("expected pod prefix, got: %s", content)
+	}
+}
+
+func TestCollectWorkload_NoPods(t *testing.T) {
+	dir := t.TempDir()
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	ref := WorkloadRef{Namespace: "rhdh", Name: "backstage-rhdh", Kind: KindDeployment, InstanceName: "rhdh"}
+	outDir := filepath.Join(dir, "workload")
+
+	err := CollectWorkload(context.Background(), cfg, ref, outDir)
+	if err != nil {
+		t.Fatalf("CollectWorkload: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "pods", "pods.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "No pods found") {
+		t.Error("expected 'No pods found' message")
+	}
+}
+
+func TestCollectWorkload_NotFound(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	ref := WorkloadRef{Namespace: "rhdh", Name: "nonexistent", Kind: KindDeployment}
+
+	err := CollectWorkload(context.Background(), cfg, ref, t.TempDir())
+	if err == nil {
+		t.Error("expected error for nonexistent deployment")
+	}
+}
+
+func TestCollectWorkload_Interrupted(t *testing.T) {
+	dir := t.TempDir()
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "rhdh",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh"},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh-abc-123",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "rhdh"},
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "ReplicaSet", Name: "backstage-rhdh-abc"},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "backstage-backend"}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep, pod), withInterrupted())
+	ref := WorkloadRef{Namespace: "rhdh", Name: "backstage-rhdh", Kind: KindDeployment, InstanceName: "rhdh"}
+	outDir := filepath.Join(dir, "workload")
+
+	err := CollectWorkload(context.Background(), cfg, ref, outDir)
+	if err != nil {
+		t.Fatalf("CollectWorkload: %v", err)
+	}
+
+	// With interrupted flag, log streaming goroutines return early
+	if _, err := os.Stat(filepath.Join(outDir, "logs")); !os.IsNotExist(err) {
+		t.Error("expected no logs dir when interrupted")
+	}
+}
+
+func TestWriteAggregatedStatefulSetLogs_WithPods(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "db-0",
+			Namespace: "rhdh",
+			Labels:    map[string]string{"app": "db"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "postgres"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(pod))
+
+	stsDir := filepath.Join(dir, "sts")
+	_ = os.MkdirAll(stsDir, 0o755)
+	writeAggregatedStatefulSetLogs(context.Background(), cfg, "rhdh", "app=db", stsDir)
+
+	// Files are created even though log streaming fails with fake client
+	if _, err := os.Stat(filepath.Join(stsDir, "logs-db.txt")); err != nil {
+		t.Error("expected logs-db.txt")
+	}
+	if _, err := os.Stat(filepath.Join(stsDir, "logs-db-previous.txt")); err != nil {
+		t.Error("expected logs-db-previous.txt")
+	}
+}
+
+func TestWriteAggregatedStatefulSetLogs_NoPods(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := newTestConfig(t, dir)
+
+	stsDir := filepath.Join(dir, "sts")
+	_ = os.MkdirAll(stsDir, 0o755)
+	writeAggregatedStatefulSetLogs(context.Background(), cfg, "rhdh", "app=db", stsDir)
+
+	if _, err := os.Stat(filepath.Join(stsDir, "logs-db.txt")); !os.IsNotExist(err) {
+		t.Error("expected no logs-db.txt when no pods found")
+	}
+}

@@ -659,3 +659,636 @@ func TestOperator_GatherOperatorConfig(t *testing.T) {
 		t.Error("rhdh-plugin-deps--not-found.txt not created")
 	}
 }
+
+func TestOperator_GatherOperatorConfig_BothCMs(t *testing.T) {
+	dir := t.TempDir()
+
+	cm1 := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-default-config", Namespace: "rhdh-operator"},
+		Data:       map[string]string{"key": "value"},
+	}
+	cm2 := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-plugin-deps", Namespace: "rhdh-operator"},
+		Data:       map[string]string{"plugin": "data"},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(cm1, cm2))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorConfig(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	configsDir := filepath.Join(nsDir, "configs")
+
+	data, err := os.ReadFile(filepath.Join(configsDir, "all-configmaps.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "rhdh-default-config") {
+		t.Error("expected rhdh-default-config in listing")
+	}
+	if !strings.Contains(content, "rhdh-plugin-deps") {
+		t.Error("expected rhdh-plugin-deps in listing")
+	}
+
+	if _, err := os.Stat(filepath.Join(configsDir, "rhdh-default-config.yaml")); err != nil {
+		t.Error("rhdh-default-config.yaml not created")
+	}
+	if _, err := os.Stat(filepath.Join(configsDir, "rhdh-plugin-deps.yaml")); err != nil {
+		t.Error("rhdh-plugin-deps.yaml not created")
+	}
+}
+
+func TestOperator_GatherNamespaceResources_Empty(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns-resources")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherNamespaceResources(context.Background(), cfg, "empty-ns", nsDir)
+
+	data, err := os.ReadFile(filepath.Join(nsDir, "all-resources.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "No resources found") {
+		t.Error("expected 'No resources found' for empty namespace")
+	}
+}
+
+func TestOperator_GatherOperatorDeployments(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-controller",
+			Namespace: "rhdh-operator",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh-operator"},
+			},
+		},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorDeployments(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	depsDir := filepath.Join(nsDir, "deployments")
+	data, err := os.ReadFile(filepath.Join(depsDir, "all-deployments.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "rhdh-operator-controller") {
+		t.Error("expected operator deployment in all-deployments.txt")
+	}
+	if _, err := os.Stat(filepath.Join(depsDir, "app=rhdh-operator.yaml")); err != nil {
+		t.Error("expected operator deployment YAML file")
+	}
+}
+
+func TestOperator_GatherOperatorDeployments_NoOperator(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "other-deploy",
+			Namespace: "rhdh-operator",
+			Labels:    map[string]string{"app": "other"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "other"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorDeployments(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	depsDir := filepath.Join(nsDir, "deployments")
+	if _, err := os.Stat(filepath.Join(depsDir, "app=rhdh-operator.yaml")); !os.IsNotExist(err) {
+		t.Error("expected no operator YAML when no operator deployments exist")
+	}
+}
+
+func TestOperator_GatherOperatorLogs_NoPods(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorLogs(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	if _, err := os.Stat(filepath.Join(nsDir, "logs.txt")); !os.IsNotExist(err) {
+		t.Error("expected no logs.txt when no pods found")
+	}
+}
+
+func TestOperator_GatherOperatorLogs_WithPods(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-abc",
+			Namespace: "rhdh-operator",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "manager"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(pod))
+
+	o := &Operator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.gatherOperatorLogs(context.Background(), cfg, "rhdh-operator", nsDir)
+
+	if _, err := os.Stat(filepath.Join(nsDir, "logs.txt")); err != nil {
+		t.Error("expected logs.txt to be created when pods exist")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "logs-previous.txt")); err != nil {
+		t.Error("expected logs-previous.txt to be created when pods exist")
+	}
+}
+
+func TestOperator_GatherOperatorNamespaces_Found(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-controller",
+			Namespace: "rhdh-operator",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh-operator"},
+			},
+		},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherOperatorNamespaces(context.Background(), cfg, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "all-deployments.txt")); err != nil {
+		t.Error("expected all-deployments.txt")
+	}
+	nsDir := filepath.Join(outDir, "ns=rhdh-operator")
+	if _, err := os.Stat(nsDir); err != nil {
+		t.Error("expected ns=rhdh-operator directory")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "all-resources.txt")); err != nil {
+		t.Error("expected all-resources.txt in namespace dir")
+	}
+}
+
+func TestOperator_GatherOperatorNamespaces_NoDeployments(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherOperatorNamespaces(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "all-deployments.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "No resources found") {
+		t.Error("expected 'No resources found' when no operator deployments")
+	}
+}
+
+func TestOperator_GatherOperatorNamespaces_Targeted(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep1 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-1",
+			Namespace: "ns1",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh-operator"},
+			},
+		},
+	}
+	dep2 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-2",
+			Namespace: "ns2",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "rhdh-operator"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep1, dep2))
+	cfg.TargetNamespaces = []string{"ns1"}
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherOperatorNamespaces(context.Background(), cfg, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "ns=ns1")); err != nil {
+		t.Error("expected ns=ns1 directory for targeted namespace")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "ns=ns2")); !os.IsNotExist(err) {
+		t.Error("expected ns=ns2 to be skipped (not in target list)")
+	}
+}
+
+func TestOperator_GatherBackstageCRs_NoAPI(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir, withAPIGroups("apps/v1"))
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherBackstageCRs(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "backstage-crs", "no-crs.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "not available") {
+		t.Error("expected CRD not available message")
+	}
+}
+
+func TestOperator_GatherBackstageCRs_NoCRs(t *testing.T) {
+	dir := t.TempDir()
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+		),
+	)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherBackstageCRs(context.Background(), cfg, outDir)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "backstage-crs", "no-crs.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "No Backstage CR found") {
+		t.Error("expected no CR found message")
+	}
+}
+
+func TestOperator_GatherBackstageCRs_WithCRs(t *testing.T) {
+	dir := t.TempDir()
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+	cr := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "rhdh.redhat.com/v1alpha5",
+			"kind":       "Backstage",
+			"metadata": map[string]any{
+				"name":      "my-backstage",
+				"namespace": "backstage-ns",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+			cr,
+		),
+	)
+
+	o := &Operator{}
+	outDir := filepath.Join(dir, "operator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.gatherBackstageCRs(context.Background(), cfg, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "backstage-crs", "all-backstage-crs.txt")); err != nil {
+		t.Error("expected all-backstage-crs.txt")
+	}
+	crDir := filepath.Join(outDir, "backstage-crs", "ns=backstage-ns", "my-backstage")
+	if _, err := os.Stat(filepath.Join(crDir, "my-backstage.yaml")); err != nil {
+		t.Error("expected CR YAML file")
+	}
+}
+
+func TestOperator_CollectCRWorkloads_DeploymentOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-my-backstage",
+			Namespace: "backstage-ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "backstage"},
+			},
+		},
+	}
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(dep),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+		),
+	)
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.collectCRWorkloads(context.Background(), cfg, "backstage-ns", "my-backstage", "uid-1", crDir, backstageGVR)
+
+	if _, err := os.Stat(filepath.Join(crDir, "deployment")); err != nil {
+		t.Error("expected deployment directory")
+	}
+}
+
+func TestOperator_CollectCRWorkloads_NeitherExists(t *testing.T) {
+	dir := t.TempDir()
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+
+	cfg := newTestConfig(t, dir,
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+		),
+	)
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.collectCRWorkloads(context.Background(), cfg, "ns", "missing", "", crDir, backstageGVR)
+
+	if _, err := os.Stat(filepath.Join(crDir, "deployment")); err != nil {
+		t.Error("expected deployment directory even when deployment doesn't exist (error is logged)")
+	}
+}
+
+func TestOperator_CollectOKPWorkload_NoOKP(t *testing.T) {
+	dir := t.TempDir()
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-my-cr",
+			Namespace: "ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "backstage-backend"}},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.collectOKPWorkload(context.Background(), cfg, "ns", "my-cr", "uid-1", "backstage-my-cr", crDir)
+
+	if _, err := os.Stat(filepath.Join(crDir, "okp-deployment")); !os.IsNotExist(err) {
+		t.Error("expected no okp-deployment directory when no OKP deployments")
+	}
+}
+
+func TestOperator_CollectOKPWorkload_WithOKP(t *testing.T) {
+	dir := t.TempDir()
+
+	controller := true
+	replicas := int32(1)
+	okpDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-cr-okp",
+			Namespace: "ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "rhdh.redhat.com/v1alpha5",
+				Kind:       "Backstage",
+				Name:       "my-cr",
+				UID:        "uid-1",
+				Controller: &controller,
+			}},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "okp"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "okp"}},
+				},
+			},
+		},
+	}
+	primaryDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-my-cr",
+			Namespace: "ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "backstage"},
+			},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "backstage-backend"}},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(okpDep, primaryDep))
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.collectOKPWorkload(context.Background(), cfg, "ns", "my-cr", "uid-1", "backstage-my-cr", crDir)
+
+	if _, err := os.Stat(filepath.Join(crDir, "okp-deployment")); err != nil {
+		t.Error("expected okp-deployment directory when OKP deployment exists")
+	}
+}
+
+func TestOperator_HandleDualWorkload(t *testing.T) {
+	dir := t.TempDir()
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+	cr := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "rhdh.redhat.com/v1alpha5",
+			"kind":       "Backstage",
+			"metadata": map[string]any{
+				"name":      "my-cr",
+				"namespace": "ns",
+			},
+			"spec": map[string]any{
+				"deployment": map[string]any{
+					"kind": "StatefulSet",
+				},
+			},
+		},
+	}
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "backstage-my-cr", Namespace: "ns"},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "backstage"},
+			},
+		},
+	}
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "backstage-my-cr", Namespace: "ns"},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "backstage"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(dep, sts),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+			cr,
+		),
+	)
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.handleDualWorkload(context.Background(), cfg, "ns", "my-cr", "backstage-my-cr", crDir, backstageGVR)
+
+	data, err := os.ReadFile(filepath.Join(crDir, "warning-dual-workload.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "WARNING: Duplicate RHDH workloads detected") {
+		t.Error("expected warning header")
+	}
+	if !strings.Contains(content, "StatefulSet") {
+		t.Error("expected StatefulSet mentioned in warning")
+	}
+	if _, err := os.Stat(filepath.Join(crDir, "deployment")); err != nil {
+		t.Error("expected deployment directory")
+	}
+	if _, err := os.Stat(filepath.Join(crDir, "rhdh-statefulset")); err != nil {
+		t.Error("expected rhdh-statefulset directory")
+	}
+}
+
+func TestOperator_Run(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList"},
+		),
+	)
+
+	o := &Operator{}
+	err := o.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	outDir := filepath.Join(dir, "operator")
+	if _, err := os.Stat(outDir); err != nil {
+		t.Error("expected operator directory")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "olm")); err != nil {
+		t.Error("expected olm subdirectory")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "crds")); err != nil {
+		t.Error("expected crds subdirectory")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "backstage-crs")); err != nil {
+		t.Error("expected backstage-crs subdirectory")
+	}
+}
+
+func TestOperator_WriteAggregatedLogs(t *testing.T) {
+	dir := t.TempDir()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-pod", Namespace: "ns"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "manager"}},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(pod))
+
+	outPath := filepath.Join(dir, "logs.txt")
+	writeAggregatedLogs(context.Background(), cfg, "ns", []corev1.Pod{*pod}, false, outPath)
+
+	if _, err := os.Stat(outPath); err != nil {
+		t.Error("expected logs file to be created")
+	}
+}

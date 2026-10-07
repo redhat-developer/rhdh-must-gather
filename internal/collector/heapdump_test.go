@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -354,6 +356,219 @@ func TestFindRunningPods(t *testing.T) {
 			t.Errorf("got %v, want empty", names)
 		}
 	})
+}
+
+func TestFindNodePID(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execOutput: "  42  \n"}))
+		pid, err := findNodePID(context.Background(), cfg, "rhdh", "pod-1", backstageContainer)
+		if err != nil {
+			t.Fatalf("findNodePID: %v", err)
+		}
+		if pid != "42" {
+			t.Errorf("pid = %q, want 42", pid)
+		}
+	})
+
+	t.Run("no node process", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execOutput: ""}))
+		pid, err := findNodePID(context.Background(), cfg, "rhdh", "pod-1", backstageContainer)
+		if err != nil {
+			t.Fatalf("findNodePID: %v", err)
+		}
+		if pid != "" {
+			t.Errorf("pid = %q, want empty", pid)
+		}
+	})
+
+	t.Run("exec error", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execErr: fmt.Errorf("exec failed")}))
+		_, err := findNodePID(context.Background(), cfg, "rhdh", "pod-1", backstageContainer)
+		if err == nil {
+			t.Error("expected error")
+		}
+	})
+}
+
+func TestCollectProcessMetadata(t *testing.T) {
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+
+	t.Run("success", func(t *testing.T) {
+		cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{execOutput: "=== Process Information ===\nPID: 42\n"}))
+		collectProcessMetadata(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42", containerDir)
+
+		data, err := os.ReadFile(filepath.Join(containerDir, "process-info.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "PID: 42") {
+			t.Error("expected process info")
+		}
+	})
+
+	t.Run("exec error writes error message", func(t *testing.T) {
+		cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{execErr: fmt.Errorf("no access")}))
+		collectProcessMetadata(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42", containerDir)
+
+		data, err := os.ReadFile(filepath.Join(containerDir, "process-info.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "Failed to collect process metadata") {
+			t.Error("expected error message")
+		}
+	})
+}
+
+func TestSendSignal(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{}))
+		err := sendSignal(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42", "USR1")
+		if err != nil {
+			t.Errorf("sendSignal: %v", err)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execErr: fmt.Errorf("signal failed")}))
+		err := sendSignal(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42", "USR1")
+		if err == nil {
+			t.Error("expected error")
+		}
+	})
+}
+
+func TestDetectInspectorPort(t *testing.T) {
+	t.Run("custom port", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execOutput: "9999\n"}))
+		port := detectInspectorPort(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42")
+		if port != 9999 {
+			t.Errorf("port = %d, want 9999", port)
+		}
+	})
+
+	t.Run("default port on empty output", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execOutput: ""}))
+		port := detectInspectorPort(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42")
+		if port != 9229 {
+			t.Errorf("port = %d, want 9229", port)
+		}
+	})
+
+	t.Run("default port on exec error", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execErr: fmt.Errorf("fail")}))
+		port := detectInspectorPort(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, "42")
+		if port != 9229 {
+			t.Errorf("port = %d, want 9229", port)
+		}
+	})
+}
+
+func TestIsInspectorActive(t *testing.T) {
+	t.Run("active", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{}))
+		if !isInspectorActive(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, 9229) {
+			t.Error("expected active")
+		}
+	})
+
+	t.Run("inactive", func(t *testing.T) {
+		cfg := newTestConfig(t, t.TempDir(), withPodOps(&fakePodOps{execErr: fmt.Errorf("not listening")}))
+		if isInspectorActive(context.Background(), cfg, "rhdh", "pod-1", backstageContainer, 9229) {
+			t.Error("expected inactive")
+		}
+	})
+}
+
+func TestProcessHeapDumpPod_NoBackstageContainer(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "rhdh"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "nginx"}},
+		},
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(&fakePodOps{}))
+
+	heapDir := filepath.Join(dir, "heap")
+	processHeapDumpPod(cfg, "rhdh", "my-pod", heapDir, 30*time.Second, "inspector")
+
+	podDir := filepath.Join(heapDir, "pod=my-pod")
+	if _, err := os.Stat(filepath.Join(podDir, "pod-spec.yaml")); err != nil {
+		t.Error("expected pod-spec.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(podDir, "container=backstage-backend")); !os.IsNotExist(err) {
+		t.Error("expected no backstage-backend directory for pod without the container")
+	}
+}
+
+func TestProcessHeapDumpPod_ExecFails(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "rhdh"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: backstageContainer}},
+		},
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(&fakePodOps{execErr: fmt.Errorf("cannot exec")}))
+
+	heapDir := filepath.Join(dir, "heap")
+	processHeapDumpPod(cfg, "rhdh", "my-pod", heapDir, 30*time.Second, "inspector")
+
+	containerDir := filepath.Join(heapDir, "pod=my-pod", "container="+backstageContainer)
+	data, err := os.ReadFile(filepath.Join(containerDir, "no-node-process.txt"))
+	if err != nil {
+		t.Fatalf("expected no-node-process.txt: %v", err)
+	}
+	if !strings.Contains(string(data), "Failed to exec") {
+		t.Error("expected exec failure message")
+	}
+}
+
+func TestProcessHeapDumpPod_NoPID(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "rhdh"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: backstageContainer}},
+		},
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(&fakePodOps{execOutput: ""}))
+
+	heapDir := filepath.Join(dir, "heap")
+	processHeapDumpPod(cfg, "rhdh", "my-pod", heapDir, 30*time.Second, "inspector")
+
+	containerDir := filepath.Join(heapDir, "pod=my-pod", "container="+backstageContainer)
+	data, err := os.ReadFile(filepath.Join(containerDir, "no-node-process.txt"))
+	if err != nil {
+		t.Fatalf("expected no-node-process.txt: %v", err)
+	}
+	if !strings.Contains(string(data), "No Node.js process found") {
+		t.Error("expected no-process message")
+	}
+}
+
+func TestCollectHeapDumpSIGUSR2_SignalFails(t *testing.T) {
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+	logFile := filepath.Join(containerDir, "heap-dump.log")
+
+	cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{execErr: fmt.Errorf("signal failed")}))
+	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42", containerDir, "heapdump.heapsnapshot", logFile, 1*time.Second)
+	if result {
+		t.Error("expected false when signal fails")
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Failed to send SIGUSR2 signal") {
+		t.Error("expected signal failure in log")
+	}
 }
 
 func TestHumanSize(t *testing.T) {

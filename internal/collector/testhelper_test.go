@@ -1,6 +1,11 @@
 package collector
 
 import (
+	"context"
+	"io"
+	"os"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -15,6 +20,32 @@ import (
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
+
+// fakePodOps is a test double for the PodOps interface.
+type fakePodOps struct {
+	execOutput string
+	execErr    error
+	logOutput  string
+	logErr     error
+}
+
+func (f *fakePodOps) Exec(_ context.Context, _, _, _, _ string) (string, error) {
+	return f.execOutput, f.execErr
+}
+
+func (f *fakePodOps) ExecToFile(_ context.Context, _, _, _, script, destPath string) error {
+	if f.execErr != nil {
+		return f.execErr
+	}
+	return os.WriteFile(destPath, []byte(f.execOutput), 0o644)
+}
+
+func (f *fakePodOps) GetLogStream(_ context.Context, _, _ string, _ *corev1.PodLogOptions) (io.ReadCloser, error) {
+	if f.logErr != nil {
+		return nil, f.logErr
+	}
+	return io.NopCloser(strings.NewReader(f.logOutput)), nil
+}
 
 func newTestConfig(t *testing.T, basePath string, opts ...testConfigOption) *Config {
 	t.Helper()
@@ -44,6 +75,7 @@ func newTestConfig(t *testing.T, basePath string, opts ...testConfigOption) *Con
 	return &Config{
 		BasePath:    basePath,
 		Interrupted: interrupted,
+		PodOps:      o.podOps,
 		Client: &kube.Client{
 			Clientset: fakeClient,
 			Discovery: fd,
@@ -59,6 +91,7 @@ type testConfigOpts struct {
 	dynamicObjs      []runtime.Object
 	dynamicListKinds map[schema.GroupVersionResource]string
 	interrupted      bool
+	podOps           PodOps
 }
 
 type testConfigOption func(*testConfigOpts)
@@ -80,6 +113,55 @@ func withDynamicObjs(listKinds map[schema.GroupVersionResource]string, objs ...r
 
 func withInterrupted() testConfigOption {
 	return func(o *testConfigOpts) { o.interrupted = true }
+}
+
+func withPodOps(ops PodOps) testConfigOption {
+	return func(o *testConfigOpts) { o.podOps = ops }
+}
+
+type execResult struct {
+	output string
+	err    error
+}
+
+type scriptablePodOps struct {
+	mu          sync.Mutex
+	execResults []execResult
+	callIndex   int
+	logOutput   string
+	logErr      error
+}
+
+func (s *scriptablePodOps) Exec(_ context.Context, _, _, _, _ string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.callIndex >= len(s.execResults) {
+		return "", nil
+	}
+	r := s.execResults[s.callIndex]
+	s.callIndex++
+	return r.output, r.err
+}
+
+func (s *scriptablePodOps) ExecToFile(_ context.Context, _, _, _, _ string, destPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.callIndex >= len(s.execResults) {
+		return nil
+	}
+	r := s.execResults[s.callIndex]
+	s.callIndex++
+	if r.err != nil {
+		return r.err
+	}
+	return os.WriteFile(destPath, []byte(r.output), 0o644)
+}
+
+func (s *scriptablePodOps) GetLogStream(_ context.Context, _, _ string, _ *corev1.PodLogOptions) (io.ReadCloser, error) {
+	if s.logErr != nil {
+		return nil, s.logErr
+	}
+	return io.NopCloser(strings.NewReader(s.logOutput)), nil
 }
 
 func testNode(name, providerID string, labels map[string]string) *corev1.Node {

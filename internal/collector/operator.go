@@ -664,7 +664,6 @@ func writeAggregatedLogs(ctx context.Context, cfg *Config, ns string, pods []cor
 	w := bufio.NewWriter(f)
 	defer func() { _ = w.Flush() }()
 
-	client := cfg.Client.Clientset
 	for i := range pods {
 		pod := &pods[i]
 		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
@@ -674,7 +673,7 @@ func writeAggregatedLogs(ctx context.Context, cfg *Config, ns string, pods []cor
 		for _, c := range allContainers {
 			opts := &corev1.PodLogOptions{Container: c.Name, Previous: previous}
 			cfg.ApplyLogSince(opts)
-			stream, err := client.CoreV1().Pods(ns).GetLogs(pod.Name, opts).Stream(ctx)
+			stream, err := cfg.podOps().GetLogStream(ctx, ns, pod.Name, opts)
 			if err != nil {
 				continue
 			}

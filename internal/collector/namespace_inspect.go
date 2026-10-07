@@ -77,7 +77,7 @@ func (n *NamespaceInspect) resolveNamespaces(ctx context.Context, cfg *Config) [
 }
 
 func (n *NamespaceInspect) detectHelmNamespaces(_ context.Context, cfg *Config, nsSet map[string]struct{}) {
-	actionCfg, err := newHelmActionConfig(cfg, "")
+	actionCfg, err := cfg.helmActionConfig("")
 	if err != nil {
 		return
 	}
