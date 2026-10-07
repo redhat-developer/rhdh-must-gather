@@ -440,7 +440,7 @@ echo ""
 echo "Pulling must-gather data from data-holder container..."
 POD_NAME=$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -o jsonpath='{.items[0].metadata.name}')
 echo "Pod: ${POD_NAME}"
-if ! timeout 5m kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"; then
+if ! timeout 10m kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"; then
     echo "Error: Failed to pull data from data-holder container (timeout or error)"
     echo ""
     echo "Resources left in namespace ${NAMESPACE} for debugging."
