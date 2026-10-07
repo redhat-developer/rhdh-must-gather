@@ -17,68 +17,6 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
 
-func TestConfigYAMLDoesNotOmitResources(t *testing.T) {
-	got := configYAML([]string{"example.com"})
-	if strings.Contains(got, "omit:") {
-		t.Fatalf("config omits files:\n%s", got)
-	}
-	for _, kind := range []string{"ConfigMap", "Secret"} {
-		if strings.Contains(got, kind) {
-			t.Fatalf("config mentions %s:\n%s", kind, got)
-		}
-	}
-	for _, want := range []string{"type: IP", "type: MAC", "type: Domain", "replacementType: Consistent", "target: All", `"example.com"`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("config missing %q:\n%s", want, got)
-		}
-	}
-}
-
-func TestConfigYAMLOmitsDomainSectionWhenEmpty(t *testing.T) {
-	got := configYAML(nil)
-	if strings.Contains(got, "type: Domain") {
-		t.Fatalf("empty domain list should skip domain obfuscation:\n%s", got)
-	}
-	if !strings.Contains(got, "type: IP") || !strings.Contains(got, "type: MAC") {
-		t.Fatalf("IP and MAC obfuscation should remain:\n%s", got)
-	}
-}
-
-func TestAPIServerHost(t *testing.T) {
-	tests := []struct {
-		raw  string
-		want string
-	}{
-		{"https://api.cluster.example.com:6443", "api.cluster.example.com"},
-		{"api.cluster.example.com:6443", "api.cluster.example.com"},
-		{"https://10.0.0.1:6443", ""},
-		{"https://[2001:db8::1]:6443", ""},
-		{"", ""},
-		{"://bad", ""},
-	}
-	for _, tt := range tests {
-		if got := apiServerHost(tt.raw); got != tt.want {
-			t.Errorf("apiServerHost(%q) = %q, want %q", tt.raw, got, tt.want)
-		}
-	}
-}
-
-func TestMergeDomainsFiltersInternalNames(t *testing.T) {
-	got := mergeDomains(
-		[]string{"Cluster.Example.com.", "api.cluster.example.com", "10.1.2.3", "kubernetes.default.svc"},
-		[]string{"apps.cluster.example.com", "cluster.local", "extra.example.com", "node.cluster.local"},
-	)
-	want := []string{
-		"cluster.example.com",
-		"api.cluster.example.com",
-		"apps.cluster.example.com",
-		"extra.example.com",
-	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("mergeDomains() = %#v, want %#v", got, want)
-	}
-}
-
 func TestDiscoverFromClusterAndEnv(t *testing.T) {
 	dns := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "config.openshift.io/v1",

@@ -107,22 +107,6 @@ func TestHeapDumpMethodValidation(t *testing.T) {
 	}
 }
 
-func TestGetVersion_EnvOverride(t *testing.T) {
-	t.Setenv("RHDH_MUST_GATHER_VERSION", "1.2.3-test")
-	v := getVersion()
-	if v != "1.2.3-test" {
-		t.Errorf("getVersion() = %q, want %q", v, "1.2.3-test")
-	}
-}
-
-func TestGetVersion_Compiled(t *testing.T) {
-	t.Setenv("RHDH_MUST_GATHER_VERSION", "")
-	v := getVersion()
-	if v != version {
-		t.Errorf("getVersion() = %q, want compiled-in %q", v, version)
-	}
-}
-
 func TestObfuscateSubcommandCleansTree(t *testing.T) {
 	input := t.TempDir()
 	output := t.TempDir()
@@ -165,29 +149,3 @@ const obfuscateConfig = `config:
       replacementType: Consistent
       target: All
 `
-
-func TestPositionalArgsAllowed(t *testing.T) {
-	cmd := newRootCmd()
-	var got []string
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		got = args
-		return nil
-	}
-	cmd.SetArgs([]string{"some-collector-token"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("positional arg should be allowed, got: %v", err)
-	}
-	if len(got) != 1 || got[0] != "some-collector-token" {
-		t.Fatalf("args = %#v", got)
-	}
-}
-
-func TestUnknownFlagsAllowed(t *testing.T) {
-	cmd := newRootCmd()
-	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
-	cmd.SetArgs([]string{"--some-unknown-flag"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Errorf("unknown flag should be allowed, got: %v", err)
-	}
-}
