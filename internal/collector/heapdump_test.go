@@ -571,6 +571,203 @@ func TestCollectHeapDumpSIGUSR2_SignalFails(t *testing.T) {
 	}
 }
 
+func TestProcessHeapDumpPod_UnknownMethod(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "rhdh"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: backstageContainer}},
+		},
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(&fakePodOps{execOutput: "42"}))
+
+	heapDir := filepath.Join(dir, "heap")
+	processHeapDumpPod(cfg, "rhdh", "my-pod", heapDir, 30*time.Second, "badmethod")
+
+	containerDir := filepath.Join(heapDir, "pod=my-pod", "container="+backstageContainer)
+	if _, err := os.Stat(filepath.Join(containerDir, "process-info.txt")); err != nil {
+		t.Error("expected process-info.txt")
+	}
+	if _, err := os.Stat(filepath.Join(containerDir, "heap-dump.log")); err != nil {
+		t.Error("expected heap-dump.log")
+	}
+	data, err := os.ReadFile(filepath.Join(containerDir, "collection-failed.txt"))
+	if err != nil {
+		t.Fatal("expected collection-failed.txt")
+	}
+	if !strings.Contains(string(data), "Heap Dump Collection Failed") {
+		t.Error("expected failure guidance")
+	}
+}
+
+func TestProcessHeapDumpPod_SIGUSR2MethodSignalFails(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "rhdh"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: backstageContainer}},
+		},
+	}
+	ops := &scriptablePodOps{
+		execResults: []execResult{
+			{output: "42"},                              // findNodePID
+			{output: "=== Process Info ==="},            // collectProcessMetadata
+			{err: fmt.Errorf("signal delivery failed")}, // sendSignal inside collectHeapDumpSIGUSR2
+		},
+	}
+	cfg := newTestConfig(t, dir, withTypedObjs(pod), withPodOps(ops))
+
+	heapDir := filepath.Join(dir, "heap")
+	processHeapDumpPod(cfg, "rhdh", "my-pod", heapDir, 30*time.Second, "sigusr2")
+
+	containerDir := filepath.Join(heapDir, "pod=my-pod", "container="+backstageContainer)
+	data, err := os.ReadFile(filepath.Join(containerDir, "collection-failed.txt"))
+	if err != nil {
+		t.Fatal("expected collection-failed.txt after sigusr2 signal failure")
+	}
+	if !strings.Contains(string(data), "Why SIGUSR2 Method Failed") {
+		t.Error("expected sigusr2-specific guidance")
+	}
+}
+
+func TestCollectHeapDumpSIGUSR2_NoFileFoundTimeout(t *testing.T) {
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+	logFile := filepath.Join(containerDir, "heap-dump.log")
+
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+
+	cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{execOutput: ""}))
+	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
+		containerDir, "heapdump.heapsnapshot", logFile, 100*time.Millisecond)
+	if result {
+		t.Error("expected false when no file found before timeout")
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "No heap dump files found") {
+		t.Error("expected 'No heap dump files found' in log")
+	}
+}
+
+func TestCollectHeapDumpSIGUSR2_FileFoundNotStable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test: 5s poll interval")
+	}
+
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+	logFile := filepath.Join(containerDir, "heap-dump.log")
+
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "15")
+
+	ops := &scriptablePodOps{
+		execResults: []execResult{
+			{output: ""},                          // sendSignal
+			{output: "/tmp/heap.heapsnapshot"},    // find file
+			{output: "1024"},                      // size check
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withPodOps(ops))
+	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
+		containerDir, "heapdump.heapsnapshot", logFile, 6*time.Second)
+	if result {
+		t.Error("expected false when file is not stable")
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "not stable") {
+		t.Error("expected 'not stable' in log")
+	}
+}
+
+func TestCollectHeapDumpSIGUSR2_FullSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test: 5s poll interval")
+	}
+
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+	logFile := filepath.Join(containerDir, "heap-dump.log")
+
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+
+	ops := &scriptablePodOps{
+		execResults: []execResult{
+			{output: ""},                          // sendSignal
+			{output: "/tmp/heap.heapsnapshot"},    // find file (iteration 1)
+			{output: "1024"},                      // size check (iteration 1) — lastSize=1024
+			{output: "1024"},                      // size check (iteration 2) — stable, break
+			{output: "heapdump-binary-content"},   // ExecToFile (copy)
+			{output: ""},                          // cleanup rm
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withPodOps(ops))
+	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
+		containerDir, "heapdump.heapsnapshot", logFile, 12*time.Second)
+	if !result {
+		t.Error("expected true on successful collection")
+	}
+
+	heapFile := filepath.Join(containerDir, "heapdump.heapsnapshot")
+	data, err := os.ReadFile(heapFile)
+	if err != nil {
+		t.Fatalf("expected heap dump file: %v", err)
+	}
+	if string(data) != "heapdump-binary-content" {
+		t.Errorf("heap dump content = %q, want heapdump-binary-content", data)
+	}
+}
+
+func TestCollectHeapDumpSIGUSR2_CopyFails(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test: 5s poll interval")
+	}
+
+	dir := t.TempDir()
+	containerDir := filepath.Join(dir, "container")
+	_ = os.MkdirAll(containerDir, 0o755)
+	logFile := filepath.Join(containerDir, "heap-dump.log")
+
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+
+	ops := &scriptablePodOps{
+		execResults: []execResult{
+			{output: ""},                          // sendSignal
+			{output: "/tmp/heap.heapsnapshot"},    // find file (iteration 1)
+			{output: "1024"},                      // size check (iteration 1)
+			{output: "1024"},                      // size check (iteration 2) — stable
+			{err: fmt.Errorf("copy failed")},      // ExecToFile fails
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withPodOps(ops))
+	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
+		containerDir, "heapdump.heapsnapshot", logFile, 12*time.Second)
+	if result {
+		t.Error("expected false when copy fails")
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Failed to copy heap dump") {
+		t.Error("expected 'Failed to copy' in log")
+	}
+}
+
 func TestHumanSize(t *testing.T) {
 	tests := []struct {
 		name  string

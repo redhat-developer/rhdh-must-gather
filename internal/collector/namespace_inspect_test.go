@@ -407,3 +407,128 @@ func TestDetectHelmNamespaces_NonRHDHRelease(t *testing.T) {
 	}
 }
 
+func TestResolveNamespaces_WithTargetNamespaces(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	cfg.TargetNamespaces = []string{"ns1", "ns2"}
+
+	n := &NamespaceInspect{}
+	namespaces := n.resolveNamespaces(context.Background(), cfg)
+
+	if len(namespaces) != 2 || namespaces[0] != "ns1" || namespaces[1] != "ns2" {
+		t.Errorf("got %v, want [ns1 ns2]", namespaces)
+	}
+}
+
+func TestResolveNamespaces_AutoDetect(t *testing.T) {
+	dir := t.TempDir()
+
+	// Deployment with Helm label + RHDH name pattern → detectStandaloneNamespaces
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backstage-rhdh",
+			Namespace: "standalone-ns",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "Helm",
+				"app.kubernetes.io/name":       "backstage",
+			},
+		},
+	}
+
+	// Operator deployment → detectOperatorNamespaces
+	operatorDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "rhdh-operator-controller",
+			Namespace: "operator-ns",
+			Labels:    map[string]string{"app": "rhdh-operator"},
+		},
+	}
+
+	// Backstage CR → detectCRNamespaces
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+	cr := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "rhdh.redhat.com/v1alpha5",
+			"kind":       "Backstage",
+			"metadata": map[string]any{
+				"name":      "my-backstage",
+				"namespace": "cr-ns",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(dep, operatorDep),
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+			cr,
+		),
+	)
+	// Provide a Helm config that returns no releases to avoid REST config errors
+	emptyStore := storage.Init(driver.NewMemory())
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return &action.Configuration{Releases: emptyStore, KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard}}, nil
+	}
+
+	n := &NamespaceInspect{}
+	namespaces := n.resolveNamespaces(context.Background(), cfg)
+
+	nsMap := make(map[string]bool)
+	for _, ns := range namespaces {
+		nsMap[ns] = true
+	}
+	if !nsMap["standalone-ns"] {
+		t.Error("expected standalone-ns from detectStandaloneNamespaces")
+	}
+	if !nsMap["operator-ns"] {
+		t.Error("expected operator-ns from detectOperatorNamespaces")
+	}
+	if !nsMap["cr-ns"] {
+		t.Error("expected cr-ns from detectCRNamespaces")
+	}
+}
+
+func TestResolveNamespaces_NoDetections(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	// Provide Helm config factory to avoid REST config errors
+	emptyStore := storage.Init(driver.NewMemory())
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return &action.Configuration{Releases: emptyStore, KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard}}, nil
+	}
+
+	n := &NamespaceInspect{}
+	namespaces := n.resolveNamespaces(context.Background(), cfg)
+
+	if len(namespaces) != 0 {
+		t.Errorf("expected empty, got %v", namespaces)
+	}
+}
+
+func TestNamespaceInspect_Run_NoNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+	// Provide Helm config factory to avoid REST config errors
+	emptyStore := storage.Init(driver.NewMemory())
+	cfg.HelmConfigFactory = func(_ string) (*action.Configuration, error) {
+		return &action.Configuration{Releases: emptyStore, KubeClient: &kubefake.PrintingKubeClient{Out: io.Discard}}, nil
+	}
+
+	n := &NamespaceInspect{}
+	err := n.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	outDir := filepath.Join(dir, "namespace-inspect")
+	noNSFile := filepath.Join(outDir, "no-namespaces.txt")
+	data, err := os.ReadFile(noNSFile)
+	if err != nil {
+		t.Fatalf("expected no-namespaces.txt: %v", err)
+	}
+	if !strings.Contains(string(data), "No namespaces detected") {
+		t.Error("expected 'No namespaces detected' message")
+	}
+}
+

@@ -326,5 +326,79 @@ func TestResolveCRDType(t *testing.T) {
 		if err == nil {
 			t.Error("expected error for unknown CRD type")
 		}
+		if !strings.Contains(err.Error(), "unknown CRD resource type") {
+			t.Errorf("expected 'unknown CRD resource type' in error, got %v", err)
+		}
 	})
+
+	t.Run("singular with group gets pluralized", func(t *testing.T) {
+		gvr, err := resolveCRDType(cfg, "backstage.rhdh.redhat.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gvr.Resource != "backstages" {
+			t.Errorf("Resource = %q, want backstages (should pluralize singular)", gvr.Resource)
+		}
+	})
+}
+
+func TestDescribeCRD_ClusterScoped(t *testing.T) {
+	dir := t.TempDir()
+
+	cvGVR := schema.GroupVersionResource{
+		Group: "config.openshift.io", Version: "v1", Resource: "clusterversions",
+	}
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{"version": "4.16.0"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{cvGVR: "ClusterVersionList"},
+			cv,
+		),
+	)
+
+	path := filepath.Join(dir, "cv.describe.txt")
+	describeCRD(context.Background(), cfg, path, "clusterversions.config.openshift.io", "", "version")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "version") {
+		t.Errorf("expected cluster version name in output, got %q", string(data))
+	}
+}
+
+func TestDescribeCRD_GetFails(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				{Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages"}: "BackstageList",
+			},
+		),
+	)
+
+	path := filepath.Join(dir, "describe.txt")
+	describeCRD(context.Background(), cfg, path, "backstages.rhdh.redhat.com", "rhdh", "nonexistent")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "failed") {
+		t.Errorf("expected 'failed' in output for missing resource, got %q", string(data))
+	}
 }

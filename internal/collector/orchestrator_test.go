@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestGetConditionStatus(t *testing.T) {
@@ -948,5 +952,134 @@ func TestOrchestrator_Run_WithDetectedComponents(t *testing.T) {
 	}
 	if !strings.Contains(string(nsData), "openshift-serverless") {
 		t.Error("expected openshift-serverless in detected namespaces")
+	}
+}
+
+func TestCollectServerlessNamespace_WithCSVsAndDeployments(t *testing.T) {
+	dir := t.TempDir()
+
+	replicas := int32(1)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "knative-operator",
+			Namespace: "openshift-serverless",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "knative-operator"},
+			},
+		},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+
+	csv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "serverless-operator.v1.34.0",
+				"namespace": "openshift-serverless",
+			},
+			"spec": map[string]any{
+				"version": "1.34.0",
+			},
+			"status": map[string]any{
+				"phase": "Succeeded",
+			},
+		},
+	}
+
+	sub := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "Subscription",
+			"metadata": map[string]any{
+				"name":      "serverless-operator",
+				"namespace": "openshift-serverless",
+			},
+			"spec": map[string]any{
+				"channel": "stable",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(dep),
+		withAPIGroups("operators.coreos.com/v1alpha1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				csvGVR:          "ClusterServiceVersionList",
+				subscriptionGVR: "SubscriptionList",
+			},
+			csv, sub,
+		),
+	)
+
+	o := &Orchestrator{}
+	nsDir := filepath.Join(dir, "ns")
+	_ = os.MkdirAll(nsDir, 0o755)
+	o.collectServerlessNamespace(context.Background(), cfg, "openshift-serverless", nsDir,
+		[]logSelector{})
+
+	if _, err := os.Stat(filepath.Join(nsDir, "csv-list.txt")); err != nil {
+		t.Error("expected csv-list.txt")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "csv-all.yaml")); err != nil {
+		t.Error("expected csv-all.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "subscriptions.txt")); err != nil {
+		t.Error("expected subscriptions.txt")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "subscriptions.yaml")); err != nil {
+		t.Error("expected subscriptions.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "deployments.txt")); err != nil {
+		t.Error("expected deployments.txt")
+	}
+	if _, err := os.Stat(filepath.Join(nsDir, "deployments.yaml")); err != nil {
+		t.Error("expected deployments.yaml")
+	}
+}
+
+func TestCollectKnativeCRs_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	scheme := runtime.NewScheme()
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme,
+		map[schema.GroupVersionResource]string{
+			knativeServingGVR: "KnativeServingList",
+		},
+	)
+	dynClient.PrependReactor("list", "*", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("API unavailable")
+	})
+
+	cfg := newTestConfig(t, dir)
+	cfg.Client.Dynamic = dynClient
+
+	o := &Orchestrator{}
+	listPath := filepath.Join(dir, "serving-list.txt")
+	yamlPath := filepath.Join(dir, "serving.yaml")
+	items := o.collectKnativeCRs(context.Background(), cfg, knativeServingGVR, listPath, yamlPath, knativeServingColumns)
+
+	if len(items) != 0 {
+		t.Errorf("got %d items, want 0", len(items))
+	}
+
+	listData, err := os.ReadFile(listPath)
+	if err != nil {
+		t.Fatalf("expected list error file: %v", err)
+	}
+	if !strings.Contains(string(listData), "API unavailable") {
+		t.Error("expected error message in list file")
+	}
+
+	yamlData, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("expected yaml error file: %v", err)
+	}
+	if !strings.Contains(string(yamlData), "API unavailable") {
+		t.Error("expected error message in yaml file")
 	}
 }

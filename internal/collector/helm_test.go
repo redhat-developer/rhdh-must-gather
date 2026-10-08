@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"helm.sh/helm/v4/pkg/action"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
@@ -1661,5 +1662,112 @@ func TestHelmRun_WithRelease(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(releaseDir, "manifest.yaml")); err != nil {
 		t.Error("expected manifest.yaml in release dir")
+	}
+}
+
+func TestFormatReleaseStatus_Basic(t *testing.T) {
+	rel := makeTestRelease("my-release", "rhdh-ns", 3, "backstage", "1.5.0", "1.4.0", "")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	got := formatReleaseStatus(acc, rel)
+
+	for _, want := range []string{
+		"NAME: my-release",
+		"NAMESPACE: rhdh-ns",
+		"STATUS: deployed",
+		"REVISION: 3",
+		"LAST DEPLOYED:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "DESCRIPTION:") {
+		t.Error("should not contain DESCRIPTION when empty")
+	}
+	if strings.Contains(got, "NOTES:") {
+		t.Error("should not contain NOTES when empty")
+	}
+}
+
+func TestFormatReleaseStatus_WithDescription(t *testing.T) {
+	rel := makeTestRelease("my-release", "rhdh-ns", 1, "backstage", "1.0.0", "1.0.0", "Install complete")
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	got := formatReleaseStatus(acc, rel)
+
+	if !strings.Contains(got, "DESCRIPTION: Install complete") {
+		t.Errorf("expected DESCRIPTION in output:\n%s", got)
+	}
+}
+
+func TestFormatReleaseStatus_WithNotes(t *testing.T) {
+	rel := makeTestRelease("my-release", "rhdh-ns", 1, "backstage", "1.0.0", "1.0.0", "")
+	rel.Info.Notes = "Visit https://rhdh.example.com to access your instance."
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	got := formatReleaseStatus(acc, rel)
+
+	if !strings.Contains(got, "NOTES:") {
+		t.Errorf("expected NOTES header in output:\n%s", got)
+	}
+	if !strings.Contains(got, "Visit https://rhdh.example.com") {
+		t.Errorf("expected notes content in output:\n%s", got)
+	}
+}
+
+func TestFormatReleaseStatus_WithResources(t *testing.T) {
+	rel := makeTestRelease("my-release", "rhdh-ns", 1, "backstage", "1.0.0", "1.0.0", "")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-pod", Namespace: "rhdh-ns"},
+	}
+	pod.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
+	rel.Info.Resources = map[string][]runtime.Object{
+		"v1/Pod": {pod},
+	}
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	got := formatReleaseStatus(acc, rel)
+
+	if !strings.Contains(got, "RESOURCES:") {
+		t.Errorf("expected RESOURCES section in output:\n%s", got)
+	}
+	if !strings.Contains(got, "==> v1/Pod") {
+		t.Errorf("expected resource type header in output:\n%s", got)
+	}
+}
+
+func TestFormatReleaseStatus_WithAll(t *testing.T) {
+	rel := makeTestRelease("rhdh", "rhdh-ns", 2, "backstage", "1.5.0", "1.4.0", "Upgrade complete")
+	rel.Info.Notes = "Access RHDH at https://rhdh.example.com"
+	acc, err := release.NewAccessor(rel)
+	if err != nil {
+		t.Fatalf("NewAccessor: %v", err)
+	}
+
+	got := formatReleaseStatus(acc, rel)
+
+	for _, want := range []string{
+		"NAME: rhdh",
+		"REVISION: 2",
+		"DESCRIPTION: Upgrade complete",
+		"NOTES:",
+		"Access RHDH at https://rhdh.example.com",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
 	}
 }
