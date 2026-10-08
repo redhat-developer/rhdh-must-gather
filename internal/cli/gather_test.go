@@ -1,8 +1,20 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+
+	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
 
 func TestGetEnvDefault(t *testing.T) {
@@ -185,5 +197,225 @@ func TestResolveHeapDumpInstances_EnvFallback(t *testing.T) {
 	got := resolveHeapDumpInstances(&gatherOptions{})
 	if got != "env-instance" {
 		t.Errorf("resolveHeapDumpInstances() = %q, want env-instance", got)
+	}
+}
+
+func fakeClientFactory() (*kube.Client, error) {
+	fakeClient := fakeclientset.NewSimpleClientset()
+	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
+	scheme := runtime.NewScheme()
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme, nil)
+
+	return &kube.Client{
+		Clientset: fakeClient,
+		Discovery: fd,
+		Dynamic:   dynClient,
+		Config:    &rest.Config{Host: "https://fake-server:6443"},
+	}, nil
+}
+
+func TestRunGather_FullFlow(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	// Exclude all collectors to avoid actual collection
+	args := make([]string, 0, len(mandatoryScripts))
+	for _, s := range mandatoryScripts {
+		args = append(args, "--without-"+s)
+	}
+	_ = cmd.ParseFlags(args)
+
+	opts := &gatherOptions{
+		heapDumpMethod: "inspector",
+		clientFactory:  fakeClientFactory,
+	}
+	err := runGather(cmd, opts)
+	if err != nil {
+		t.Fatalf("runGather: %v", err)
+	}
+
+	versionFile := filepath.Join(dir, "version")
+	data, err := os.ReadFile(versionFile)
+	if err != nil {
+		t.Fatalf("version file not created: %v", err)
+	}
+	if !strings.Contains(string(data), "rhdh-must-gather") {
+		t.Error("version file missing expected content")
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "sanitization-report.txt")); err != nil {
+		t.Error("expected sanitization to run (sanitization-report.txt)")
+	}
+}
+
+func TestRunGather_ClientFactoryError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	_ = cmd.ParseFlags([]string{})
+
+	opts := &gatherOptions{
+		heapDumpMethod: "inspector",
+		clientFactory: func() (*kube.Client, error) {
+			return nil, fmt.Errorf("no cluster available")
+		},
+	}
+	err := runGather(cmd, opts)
+	if err == nil {
+		t.Fatal("expected error when client factory fails")
+	}
+	if !strings.Contains(err.Error(), "no cluster available") {
+		t.Errorf("error = %q, want to contain 'no cluster available'", err)
+	}
+}
+
+func TestRunGather_WithSecrets(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	args := make([]string, 0, len(mandatoryScripts))
+	for _, s := range mandatoryScripts {
+		args = append(args, "--without-"+s)
+	}
+	_ = cmd.ParseFlags(args)
+
+	opts := &gatherOptions{
+		heapDumpMethod: "inspector",
+		withSecrets:    true,
+		clientFactory:  fakeClientFactory,
+	}
+	err := runGather(cmd, opts)
+	if err != nil {
+		t.Fatalf("runGather: %v", err)
+	}
+}
+
+func TestRunGather_WithHeapDumps(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	args := make([]string, 0, len(mandatoryScripts))
+	for _, s := range mandatoryScripts {
+		args = append(args, "--without-"+s)
+	}
+	_ = cmd.ParseFlags(args)
+
+	opts := &gatherOptions{
+		heapDumpMethod:    "sigusr2",
+		withHeapDumps:     true,
+		heapDumpInstances: "my-instance",
+		clientFactory:     fakeClientFactory,
+	}
+	err := runGather(cmd, opts)
+	if err != nil {
+		t.Fatalf("runGather: %v", err)
+	}
+}
+
+func TestRunGather_WithNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	args := make([]string, 0, len(mandatoryScripts))
+	for _, s := range mandatoryScripts {
+		args = append(args, "--without-"+s)
+	}
+	_ = cmd.ParseFlags(args)
+
+	opts := &gatherOptions{
+		heapDumpMethod: "inspector",
+		namespaces:     "ns1,ns2",
+		clientFactory:  fakeClientFactory,
+	}
+	err := runGather(cmd, opts)
+	if err != nil {
+		t.Fatalf("runGather: %v", err)
+	}
+}
+
+func TestRunGather_UnknownCollector(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BASE_COLLECTION_PATH", dir)
+
+	cmd := newRootCmd()
+	// Exclude all mandatory scripts
+	args := make([]string, 0, len(mandatoryScripts))
+	for _, s := range mandatoryScripts {
+		args = append(args, "--without-"+s)
+	}
+	_ = cmd.ParseFlags(args)
+
+	// Add a nonexistent collector to the mandatory list temporarily
+	origScripts := mandatoryScripts
+	mandatoryScripts = []string{"nonexistent-collector"}
+	defer func() { mandatoryScripts = origScripts }()
+
+	// Re-parse without exclusions so the unknown collector is included
+	cmd2 := newRootCmd()
+	_ = cmd2.ParseFlags([]string{})
+
+	opts := &gatherOptions{
+		heapDumpMethod: "inspector",
+		clientFactory:  fakeClientFactory,
+	}
+	err := runGather(cmd2, opts)
+	if err != nil {
+		t.Fatalf("runGather should not fail for unknown collector: %v", err)
+	}
+}
+
+func TestCollectPodLogs_NotInPod(t *testing.T) {
+	client, _ := fakeClientFactory()
+	dir := t.TempDir()
+
+	collectPodLogs(t.Context(), client, dir)
+
+	if _, err := os.Stat(filepath.Join(dir, "must-gather.log")); !os.IsNotExist(err) {
+		t.Error("expected no log file when not running in a pod")
+	}
+}
+
+func TestCollectPodLogs_NoPodName(t *testing.T) {
+	client, _ := fakeClientFactory()
+	dir := t.TempDir()
+
+	nsFile := filepath.Join(dir, "namespace")
+	_ = os.WriteFile(nsFile, []byte("test-ns"), 0o644)
+	orig := serviceAccountNSFile
+	serviceAccountNSFile = nsFile
+	defer func() { serviceAccountNSFile = orig }()
+
+	t.Setenv("POD_NAME", "")
+
+	outDir := t.TempDir()
+	collectPodLogs(t.Context(), client, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "must-gather.log")); !os.IsNotExist(err) {
+		t.Error("expected no log file when POD_NAME is empty")
+	}
+}
+
+func TestCollectPodLogs_Success(t *testing.T) {
+	client, _ := fakeClientFactory()
+	dir := t.TempDir()
+
+	nsFile := filepath.Join(dir, "namespace")
+	_ = os.WriteFile(nsFile, []byte("test-ns"), 0o644)
+	orig := serviceAccountNSFile
+	serviceAccountNSFile = nsFile
+	defer func() { serviceAccountNSFile = orig }()
+
+	t.Setenv("POD_NAME", "my-gather-pod")
+
+	outDir := t.TempDir()
+	collectPodLogs(t.Context(), client, outDir)
+
+	if _, err := os.Stat(filepath.Join(outDir, "must-gather.log")); err != nil {
+		t.Error("expected must-gather.log to be created")
 	}
 }

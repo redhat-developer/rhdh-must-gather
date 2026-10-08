@@ -73,7 +73,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
-	kubeClient, err := kube.NewClient()
+	newClient := opts.clientFactory
+	if newClient == nil {
+		newClient = kube.NewClient
+	}
+	kubeClient, err := newClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
@@ -139,10 +143,12 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 	return nil
 }
 
+var serviceAccountNSFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 // collectPodLogs collects logs from the must-gather pod itself when running
 // inside a pod (replaces logs.sh).
 func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
-	nsFile := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	nsFile := serviceAccountNSFile
 	nsBytes, err := os.ReadFile(nsFile)
 	if err != nil {
 		return
