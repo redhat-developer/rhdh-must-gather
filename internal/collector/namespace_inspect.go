@@ -46,6 +46,7 @@ func (n *NamespaceInspect) Run(ctx context.Context, cfg *Config) error {
 
 	n.runInspect(ctx, cfg, outDir, namespaces)
 	n.removeSecrets(cfg, outDir)
+	n.cleanupEmptyAndInsecureLogs(outDir)
 	n.writeSummary(cfg, outDir, namespaces)
 
 	log.Info("Namespace inspect collection completed.")
@@ -285,6 +286,28 @@ func (n *NamespaceInspect) removeSecrets(cfg *Config, outDir string) {
 		return nil
 	})
 	log.Info("Secret files excluded from collection")
+}
+
+func (n *NamespaceInspect) cleanupEmptyAndInsecureLogs(outDir string) {
+	var removed int
+	_ = filepath.WalkDir(outDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+
+		// Remove all *.insecure.log files (duplicates created by oc inspect
+		// when TLS-verified log fetch fails and retries with InsecureSkipTLS).
+		// These contain the same data as the corresponding .log files.
+		if strings.HasSuffix(name, ".insecure.log") {
+			_ = os.Remove(path)
+			removed++
+		}
+		return nil
+	})
+	if removed > 0 {
+		log.Info("Removed %d duplicate .insecure.log files", removed)
+	}
 }
 
 func (n *NamespaceInspect) writeSummary(cfg *Config, outDir string, namespaces []string) {
