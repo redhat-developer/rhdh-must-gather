@@ -71,6 +71,43 @@ func TestClusterInfo_Run(t *testing.T) {
 	}
 }
 
+func TestClusterInfo_Run_WithNodes(t *testing.T) {
+	dir := t.TempDir()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Status:     corev1.NodeStatus{Phase: corev1.NodeRunning},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(node, ns))
+
+	c := &ClusterInfo{}
+	if err := c.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	nodesFile := filepath.Join(dir, "cluster-info", "nodes.yaml")
+	data, err := os.ReadFile(nodesFile)
+	if err != nil {
+		t.Fatalf("expected nodes.yaml: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty nodes.yaml")
+	}
+}
+
+func TestWriteYAML_UnmarshalableValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+
+	writeYAML(path, func() {})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected no file when marshal fails")
+	}
+}
+
 func TestClusterInfo_Run_Interrupted(t *testing.T) {
 	dir := t.TempDir()
 

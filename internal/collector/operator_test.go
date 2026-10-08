@@ -1292,3 +1292,101 @@ func TestOperator_WriteAggregatedLogs(t *testing.T) {
 		t.Error("expected logs file to be created")
 	}
 }
+
+func TestOperator_CollectOKPWorkload_MultipleOKP(t *testing.T) {
+	dir := t.TempDir()
+
+	controller := true
+	replicas := int32(1)
+	okp1 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-cr-okp-alpha",
+			Namespace: "ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "rhdh.redhat.com/v1alpha5",
+				Kind:       "Backstage",
+				Name:       "my-cr",
+				UID:        "uid-1",
+				Controller: &controller,
+			}},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "okp"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "okp"}}},
+			},
+		},
+	}
+	okp2 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-cr-okp-beta",
+			Namespace: "ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "rhdh.redhat.com/v1alpha5",
+				Kind:       "Backstage",
+				Name:       "my-cr",
+				UID:        "uid-1",
+				Controller: &controller,
+			}},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "okp2"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "okp"}}},
+			},
+		},
+	}
+	primaryDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "backstage-my-cr", Namespace: "ns"},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "backstage"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "backstage-backend"}}},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(okp1, okp2, primaryDep))
+
+	o := &Operator{}
+	crDir := filepath.Join(dir, "cr")
+	_ = os.MkdirAll(crDir, 0o755)
+	o.collectOKPWorkload(context.Background(), cfg, "ns", "my-cr", "uid-1", "backstage-my-cr", crDir)
+
+	if _, err := os.Stat(filepath.Join(crDir, "okp-deployment")); err != nil {
+		t.Error("expected okp-deployment directory (first alphabetically)")
+	}
+}
+
+func TestGetFieldAsString_NonString(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"replicas": int64(3),
+		},
+	}
+	got := getFieldAsString(obj, "spec", "replicas")
+	if got != "3" {
+		t.Errorf("getFieldAsString(int) = %q, want '3'", got)
+	}
+}
+
+func TestGetFieldAsString_MissingIntermediate(t *testing.T) {
+	obj := map[string]any{}
+	got := getFieldAsString(obj, "spec", "version")
+	if got != "" {
+		t.Errorf("getFieldAsString(missing) = %q, want empty", got)
+	}
+}
+
+func TestGetFieldAsString_NonMapIntermediate(t *testing.T) {
+	obj := map[string]any{
+		"spec": "not-a-map",
+	}
+	got := getFieldAsString(obj, "spec", "version")
+	if got != "" {
+		t.Errorf("getFieldAsString(non-map) = %q, want empty", got)
+	}
+}

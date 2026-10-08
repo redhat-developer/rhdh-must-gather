@@ -1042,6 +1042,284 @@ func TestCollectServerlessNamespace_WithCSVsAndDeployments(t *testing.T) {
 	}
 }
 
+func TestGenerateSummary_WithOLMCSVs(t *testing.T) {
+	dir := t.TempDir()
+
+	serverlessCSV := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "serverless-operator.v1.34.0",
+				"namespace": "openshift-serverless",
+			},
+			"spec":   map[string]any{"version": "1.34.0"},
+			"status": map[string]any{"phase": "Succeeded"},
+		},
+	}
+	logicCSV := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operators.coreos.com/v1alpha1",
+			"kind":       "ClusterServiceVersion",
+			"metadata": map[string]any{
+				"name":      "logic-operator-rhel8.v1.34.0",
+				"namespace": "openshift-serverless-logic",
+			},
+			"spec":   map[string]any{"version": "1.34.0"},
+			"status": map[string]any{"phase": "Succeeded"},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("operators.coreos.com/v1alpha1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				csvGVR:                "ClusterServiceVersionList",
+				sonataFlowPlatformGVR: "SonataFlowPlatformList",
+				sonataFlowGVR:         "SonataFlowList",
+				knativeServingGVR:     "KnativeServingList",
+				knativeEventingGVR:    "KnativeEventingList",
+			},
+			serverlessCSV, logicCSV,
+		),
+	)
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.generateSummary(context.Background(), cfg, outDir, true)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "serverless-operator.v1.34.0") {
+		t.Error("expected serverless CSV name in summary")
+	}
+	if !strings.Contains(content, "logic-operator-rhel8.v1.34.0") {
+		t.Error("expected logic CSV name in summary")
+	}
+	if !strings.Contains(content, "1.34.0") {
+		t.Error("expected version in summary")
+	}
+	if !strings.Contains(content, "Succeeded") {
+		t.Error("expected phase in summary")
+	}
+}
+
+func TestGenerateSummary_WithAllComponents(t *testing.T) {
+	dir := t.TempDir()
+
+	sfp := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "sonataflow.org/v1alpha08",
+			"kind":       "SonataFlowPlatform",
+			"metadata":   map[string]any{"name": "platform-1", "namespace": "sonata-ns"},
+			"status":     map[string]any{"phase": "Ready"},
+		},
+	}
+	wf := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "sonataflow.org/v1alpha08",
+			"kind":       "SonataFlow",
+			"metadata":   map[string]any{"name": "my-workflow", "namespace": "wf-ns"},
+			"status":     map[string]any{"phase": "Running"},
+		},
+	}
+	serving := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operator.knative.dev/v1beta1",
+			"kind":       "KnativeServing",
+			"metadata":   map[string]any{"name": "knative-serving", "namespace": "knative-serving"},
+			"status": map[string]any{
+				"version": "1.14.0",
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "True"},
+				},
+			},
+		},
+	}
+	eventing := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operator.knative.dev/v1beta1",
+			"kind":       "KnativeEventing",
+			"metadata":   map[string]any{"name": "knative-eventing", "namespace": "knative-eventing"},
+			"status": map[string]any{
+				"version": "1.14.0",
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "True"},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				sonataFlowPlatformGVR: "SonataFlowPlatformList",
+				sonataFlowGVR:         "SonataFlowList",
+				knativeServingGVR:     "KnativeServingList",
+				knativeEventingGVR:    "KnativeEventingList",
+			},
+			sfp, wf, serving, eventing,
+		),
+	)
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.generateSummary(context.Background(), cfg, outDir, true)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "platform-1") {
+		t.Error("expected SonataFlowPlatform name")
+	}
+	if !strings.Contains(content, "my-workflow") {
+		t.Error("expected SonataFlow workflow name")
+	}
+	if !strings.Contains(content, "knative-serving") {
+		t.Error("expected KnativeServing name")
+	}
+	if !strings.Contains(content, "knative-eventing") {
+		t.Error("expected KnativeEventing name")
+	}
+	if !strings.Contains(content, "1.14.0") {
+		t.Error("expected version in Knative section")
+	}
+}
+
+func TestGenerateSummary_OLMSkippedNamespace(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("operators.coreos.com/v1alpha1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				csvGVR:                "ClusterServiceVersionList",
+				sonataFlowPlatformGVR: "SonataFlowPlatformList",
+				sonataFlowGVR:         "SonataFlowList",
+				knativeServingGVR:     "KnativeServingList",
+				knativeEventingGVR:    "KnativeEventingList",
+			},
+		),
+	)
+	cfg.TargetNamespaces = []string{"other-ns"}
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+	o.generateSummary(context.Background(), cfg, outDir, false)
+
+	data, err := os.ReadFile(filepath.Join(outDir, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Skipped (not in target namespaces)") {
+		t.Error("expected skipped message for filtered OLM namespaces")
+	}
+}
+
+func TestGatherKnativeResources_WithEventingNamespace(t *testing.T) {
+	dir := t.TempDir()
+
+	eventingNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "knative-eventing"},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(eventingNS),
+		withAPIGroups("apps/v1"),
+	)
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+
+	var addedNS []string
+	addNS := func(ns string) { addedNS = append(addedNS, ns) }
+	detected := o.gatherKnativeResources(context.Background(), cfg, outDir, addNS)
+
+	if !detected {
+		t.Error("expected detected=true when knative-eventing namespace exists")
+	}
+	if len(addedNS) != 1 || addedNS[0] != "knative-eventing" {
+		t.Errorf("expected [knative-eventing], got %v", addedNS)
+	}
+}
+
+func TestGatherKnativeResources_WithKafkaCRs(t *testing.T) {
+	dir := t.TempDir()
+
+	kafka := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "operator.serverless.openshift.io/v1alpha1",
+			"kind":       "KnativeKafka",
+			"metadata":   map[string]any{"name": "knative-kafka", "namespace": "knative-eventing"},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("operator.knative.dev/v1beta1", "operator.serverless.openshift.io/v1alpha1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				knativeServingGVR:  "KnativeServingList",
+				knativeEventingGVR: "KnativeEventingList",
+				knativeKafkaGVR:    "KnativeKafkaList",
+			},
+			kafka,
+		),
+	)
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+
+	var addedNS []string
+	addNS := func(ns string) { addedNS = append(addedNS, ns) }
+	o.gatherKnativeResources(context.Background(), cfg, outDir, addNS)
+
+	knativeDir := filepath.Join(outDir, "knative")
+	if _, err := os.Stat(filepath.Join(knativeDir, "knative-kafka-list.txt")); err != nil {
+		t.Error("expected knative-kafka-list.txt")
+	}
+}
+
+func TestGatherKnativeResources_NamespaceFiltered(t *testing.T) {
+	dir := t.TempDir()
+
+	servingNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "knative-serving"},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withTypedObjs(servingNS),
+		withAPIGroups("apps/v1"),
+	)
+	cfg.TargetNamespaces = []string{"other-ns"}
+
+	o := &Orchestrator{}
+	outDir := filepath.Join(dir, "orchestrator")
+	_ = os.MkdirAll(outDir, 0o755)
+
+	var addedNS []string
+	addNS := func(ns string) { addedNS = append(addedNS, ns) }
+	detected := o.gatherKnativeResources(context.Background(), cfg, outDir, addNS)
+
+	if !detected {
+		t.Error("expected detected=true (namespace exists even if filtered)")
+	}
+	if len(addedNS) != 0 {
+		t.Errorf("expected no namespaces added when filtered, got %v", addedNS)
+	}
+}
+
 func TestCollectKnativeCRs_Error(t *testing.T) {
 	dir := t.TempDir()
 

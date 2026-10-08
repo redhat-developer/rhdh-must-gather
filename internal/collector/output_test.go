@@ -402,3 +402,41 @@ func TestDescribeCRD_GetFails(t *testing.T) {
 		t.Errorf("expected 'failed' in output for missing resource, got %q", string(data))
 	}
 }
+
+func TestWriteResource_Unmarshalable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+
+	writeResource(path, func() {})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected no file when marshal fails")
+	}
+}
+
+func TestDescribeCRD_ResolveFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir, withAPIGroups("apps/v1"))
+
+	path := filepath.Join(dir, "describe.txt")
+	describeCRD(context.Background(), cfg, path, "unknowntype.missing.io", "ns", "name")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "failed") {
+		t.Error("expected 'failed' for unresolvable type")
+	}
+}
+
+func TestListResourceNames_UnknownKind(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	gk := schema.GroupKind{Group: "unknown.io", Kind: "Unknown"}
+	_, err := listResourceNames(context.Background(), cfg, gk, "ns", "")
+	if err == nil {
+		t.Error("expected error for unknown kind")
+	}
+}

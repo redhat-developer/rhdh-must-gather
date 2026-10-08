@@ -2,13 +2,17 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestRoute_Name(t *testing.T) {
@@ -177,5 +181,33 @@ func TestRoute_Run_NoRoutes(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "No resources found") {
 		t.Error("expected 'No resources found' for empty route list")
+	}
+}
+
+func TestRoute_Run_ListError(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("route.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{routeGVR: "RouteList"},
+		),
+	)
+
+	cfg.Client.Dynamic.(*fakedynamic.FakeDynamicClient).PrependReactor("list", "routes", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden")
+	})
+
+	r := &Route{}
+	if err := r.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "all-routes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "forbidden") {
+		t.Error("expected error message in output")
 	}
 }

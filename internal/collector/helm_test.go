@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	yamlv3 "go.yaml.in/yaml/v3"
 	"helm.sh/helm/v4/pkg/action"
 	chartv2 "helm.sh/helm/v4/pkg/chart/v2"
 	kubefake "helm.sh/helm/v4/pkg/kube/fake"
@@ -1769,5 +1770,232 @@ func TestFormatReleaseStatus_WithAll(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in output:\n%s", want, got)
 		}
+	}
+}
+
+func TestCollectReleaseData_OKPDeployment(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backstage-rhdh\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: rhdh-okp\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	primary := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "backstage-rhdh", Namespace: "rhdh-ns"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "backstage-backend"}},
+				},
+			},
+		},
+	}
+	okp := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-okp", Namespace: "rhdh-ns"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "okp"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "okp"}}},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(primary, okp))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, processedWorkloads)
+
+	if _, err := os.Stat(filepath.Join(releaseDir, "okp-deployment")); err != nil {
+		t.Error("expected okp-deployment directory")
+	}
+	if !processedWorkloads[workloadKey(KindDeployment, "rhdh-ns", "rhdh-okp")] {
+		t.Error("expected OKP deployment to be marked as processed")
+	}
+}
+
+func TestCollectReleaseData_NoPrimaryBackstageContainer(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: custom-rhdh\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "custom-rhdh", Namespace: "rhdh-ns"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "custom-backend"}}},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(dep))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, processedWorkloads)
+
+	if _, err := os.Stat(filepath.Join(releaseDir, "deployment")); err != nil {
+		t.Error("expected deployment directory even without backstage-backend container")
+	}
+}
+
+func TestCollectReleaseData_DependencyDeployment(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backstage-rhdh\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: rhdh-redis\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+
+	primary := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "backstage-rhdh", Namespace: "rhdh-ns"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "rhdh"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "backstage-backend"}}},
+			},
+		},
+	}
+	redis := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "rhdh-redis", Namespace: "rhdh-ns"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "redis"}},
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "redis"}}},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir, withTypedObjs(primary, redis))
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	processedWorkloads := make(map[string]bool)
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, processedWorkloads)
+
+	if _, err := os.Stat(filepath.Join(releaseDir, "dependencies", "rhdh-redis")); err != nil {
+		t.Error("expected dependencies/rhdh-redis directory")
+	}
+	if !processedWorkloads[workloadKey(KindDeployment, "rhdh-ns", "rhdh-redis")] {
+		t.Error("expected dependency deployment to be marked as processed")
+	}
+}
+
+func TestFilterSecretsFromYAML_InvalidYAML(t *testing.T) {
+	got := filterSecretsFromYAML("not: valid: yaml: [broken")
+	if got != "" {
+		t.Errorf("expected empty string for invalid YAML, got %q", got)
+	}
+}
+
+func TestFilterSecretsFromYAML_SingleDocument(t *testing.T) {
+	input := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-config\ndata:\n  key: value\n"
+	got := filterSecretsFromYAML(input)
+	if !strings.Contains(got, "ConfigMap") {
+		t.Error("expected ConfigMap to be preserved")
+	}
+	if strings.Contains(got, "---") {
+		t.Error("expected no separator for single document")
+	}
+}
+
+func TestIsSecretDocument_NonDocumentNode(t *testing.T) {
+	node := &yamlv3.Node{Kind: yamlv3.ScalarNode, Value: "hello"}
+	if isSecretDocument(node) {
+		t.Error("expected false for non-document node")
+	}
+}
+
+func TestIsSecretDocument_EmptyDocument(t *testing.T) {
+	node := &yamlv3.Node{Kind: yamlv3.DocumentNode}
+	if isSecretDocument(node) {
+		t.Error("expected false for empty document node")
+	}
+}
+
+func TestIsSecretDocument_NonMappingContent(t *testing.T) {
+	node := &yamlv3.Node{
+		Kind:    yamlv3.DocumentNode,
+		Content: []*yamlv3.Node{{Kind: yamlv3.SequenceNode}},
+	}
+	if isSecretDocument(node) {
+		t.Error("expected false for non-mapping content")
+	}
+}
+
+func TestCollectReleaseData_WithHooks(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rhdh-config\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+	rel.Hooks = []*releasev1.Hook{
+		{
+			Name:     "pre-install",
+			Manifest: "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: rhdh-pre-install\n",
+		},
+	}
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	data, err := os.ReadFile(filepath.Join(releaseDir, "hooks.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile hooks.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "rhdh-pre-install") {
+		t.Error("expected hook manifest in hooks.yaml")
+	}
+}
+
+func TestCollectReleaseData_HooksSecretFiltering(t *testing.T) {
+	dir := t.TempDir()
+
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: rhdh-config\n"
+	rel := makeTestRelease("rhdh", "rhdh-ns", 1, "backstage", "1.5.0", "1.4.0", "")
+	rel.Manifest = manifest
+	rel.Hooks = []*releasev1.Hook{
+		{
+			Name:     "secret-hook",
+			Manifest: "apiVersion: v1\nkind: Secret\nmetadata:\n  name: hook-secret\ndata:\n  password: cGFzcw==\n",
+		},
+	}
+
+	cfg := newTestConfig(t, dir)
+	cfg.HelmConfigFactory = fakeHelmConfig(rel)
+	cfg.WithSecrets = false
+
+	h := &Helm{}
+	releaseDir := filepath.Join(dir, "release-data")
+	_ = os.MkdirAll(releaseDir, 0o755)
+
+	h.collectReleaseData(context.Background(), cfg, "rhdh-ns", "rhdh", releaseDir, make(map[string]bool))
+
+	data, err := os.ReadFile(filepath.Join(releaseDir, "hooks.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile hooks.yaml: %v", err)
+	}
+	if strings.Contains(string(data), "Secret") {
+		t.Error("expected secrets filtered from hooks")
 	}
 }

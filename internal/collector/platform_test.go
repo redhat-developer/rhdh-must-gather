@@ -537,6 +537,51 @@ func TestPlatform_OCP_InfraPlatformFallback(t *testing.T) {
 	}
 }
 
+func TestNestedString_NonMapIntermediate(t *testing.T) {
+	obj := map[string]any{
+		"status": "not-a-map",
+	}
+	val, found, err := nestedString(obj, "status", "version")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if found {
+		t.Error("expected found=false for non-map intermediate")
+	}
+	if val != "" {
+		t.Errorf("val = %q, want empty", val)
+	}
+}
+
+func TestNestedString_NonStringFinalValue(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"replicas": int64(3),
+		},
+	}
+	val, found, err := nestedString(obj, "spec", "replicas")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if found {
+		t.Error("expected found=false for non-string value")
+	}
+	if val != "" {
+		t.Errorf("val = %q, want empty", val)
+	}
+}
+
+func TestGetServerVersion_VanillaK8s(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	p := &Platform{}
+	ver := p.getServerVersion(cfg)
+	if ver == "" {
+		t.Log("FakeDiscovery.ServerVersion returns empty by default, expected")
+	}
+}
+
 func readPlatformJSON(t *testing.T, dir string) platformInfo {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "platform", "platform.json"))

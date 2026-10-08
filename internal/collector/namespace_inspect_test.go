@@ -212,6 +212,40 @@ func TestDetectStandaloneNamespaces(t *testing.T) {
 	}
 }
 
+func TestDetectOperatorNamespaces_NoDeps(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectOperatorNamespaces(context.Background(), cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected no namespaces, got %v", nsSet)
+	}
+}
+
+func TestDetectCRNamespaces_NoAPI(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir(), withAPIGroups("apps/v1"))
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectCRNamespaces(context.Background(), cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected no namespaces when API not available, got %v", nsSet)
+	}
+}
+
+func TestDetectCRNamespaces_NilDynamic(t *testing.T) {
+	cfg := newTestConfig(t, t.TempDir())
+	cfg.Client.Dynamic = nil
+	n := &NamespaceInspect{}
+	nsSet := make(map[string]struct{})
+	n.detectCRNamespaces(context.Background(), cfg, nsSet)
+
+	if len(nsSet) != 0 {
+		t.Errorf("expected no namespaces when dynamic client is nil, got %v", nsSet)
+	}
+}
+
 func TestDetectOperatorNamespaces(t *testing.T) {
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
