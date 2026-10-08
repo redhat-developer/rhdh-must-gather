@@ -2,13 +2,19 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -765,6 +771,305 @@ func TestCollectHeapDumpSIGUSR2_CopyFails(t *testing.T) {
 	if !strings.Contains(string(data), "Failed to copy heap dump") {
 		t.Error("expected 'Failed to copy' in log")
 	}
+}
+
+func serverPort(t *testing.T, s *httptest.Server) int {
+	t.Helper()
+	_, portStr, err := net.SplitHostPort(s.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := strconv.Atoi(portStr)
+	return p
+}
+
+func TestGetInspectorWSURL_Success(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"webSocketDebuggerUrl":"ws://127.0.0.1:9229/ws/some-uuid"}]`))
+	}))
+	defer s.Close()
+
+	port := serverPort(t, s)
+	url, err := getInspectorWSURL(port, 9229)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(url, "/ws/some-uuid") {
+		t.Errorf("url = %q, expected to contain /ws/some-uuid", url)
+	}
+	if !strings.Contains(url, fmt.Sprintf(":%d/", port)) {
+		t.Errorf("url = %q, expected port rewrite to %d", url, port)
+	}
+}
+
+func TestGetInspectorWSURL_EmptyTargets(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer s.Close()
+
+	port := serverPort(t, s)
+	_, err := getInspectorWSURL(port, 9229)
+	if err == nil {
+		t.Fatal("expected error for empty targets")
+	}
+	if !strings.Contains(err.Error(), "no WebSocket URL") {
+		t.Errorf("error = %q, want 'no WebSocket URL'", err)
+	}
+}
+
+func TestGetInspectorWSURL_InvalidJSON(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer s.Close()
+
+	port := serverPort(t, s)
+	_, err := getInspectorWSURL(port, 9229)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "parsing inspector response") {
+		t.Errorf("error = %q, want 'parsing inspector response'", err)
+	}
+}
+
+func TestGetInspectorWSURL_Unreachable(t *testing.T) {
+	// Use a port that's not listening
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+
+	_, err = getInspectorWSURL(port, 9229)
+	if err == nil {
+		t.Fatal("expected error for unreachable server")
+	}
+	if !strings.Contains(err.Error(), "fetching inspector info") {
+		t.Errorf("error = %q, want 'fetching inspector info'", err)
+	}
+}
+
+var wsUpgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+
+func TestTakeHeapSnapshot_Success(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Read HeapProfiler.enable
+		var msg cdpMessage
+		_ = conn.ReadJSON(&msg)
+
+		// Read HeapProfiler.takeHeapSnapshot
+		_ = conn.ReadJSON(&msg)
+
+		// Send a chunk
+		_ = conn.WriteJSON(cdpMessage{
+			Method: "HeapProfiler.addHeapSnapshotChunk",
+			Params: mustJSON(t, heapChunkParams{Chunk: "heap-data-here"}),
+		})
+
+		// Send progress
+		_ = conn.WriteJSON(cdpMessage{
+			Method: "HeapProfiler.reportHeapSnapshotProgress",
+			Params: mustJSON(t, heapProgressParams{Done: 100, Total: 100}),
+		})
+
+		// Send completion
+		_ = conn.WriteJSON(cdpMessage{ID: 2})
+	}))
+	defer s.Close()
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+	logFile := filepath.Join(dir, "heap.log")
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	err := takeHeapSnapshot(wsURL, outPath, logFile, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "heap-data-here" {
+		t.Errorf("snapshot content = %q, want 'heap-data-here'", data)
+	}
+}
+
+func TestTakeHeapSnapshot_Error(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		_ = conn.ReadJSON(new(cdpMessage))
+		_ = conn.ReadJSON(new(cdpMessage))
+
+		_ = conn.WriteJSON(cdpMessage{
+			ID:    2,
+			Error: &cdpError{Message: "snapshot failed"},
+		})
+	}))
+	defer s.Close()
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+	logFile := filepath.Join(dir, "heap.log")
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	err := takeHeapSnapshot(wsURL, outPath, logFile, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "snapshot failed") {
+		t.Errorf("error = %q, want 'snapshot failed'", err)
+	}
+}
+
+func TestTakeHeapSnapshot_Timeout(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		_ = conn.ReadJSON(new(cdpMessage))
+		_ = conn.ReadJSON(new(cdpMessage))
+		// Never respond — let timeout expire
+		time.Sleep(2 * time.Second)
+	}))
+	defer s.Close()
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+	logFile := filepath.Join(dir, "heap.log")
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	err := takeHeapSnapshot(wsURL, outPath, logFile, 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestFallbackHeapDump_Success(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Read Runtime.evaluate
+		_ = conn.ReadJSON(new(cdpMessage))
+
+		// Send successful response with file path
+		_ = conn.WriteJSON(cdpMessage{
+			ID:     10,
+			Result: mustJSON(t, map[string]any{"result": map[string]any{"value": "/tmp/heap.heapsnapshot"}}),
+		})
+	}))
+	defer s.Close()
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+	logFile := filepath.Join(dir, "heap.log")
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	ops := &scriptablePodOps{
+		execResults: []execResult{
+			{output: "heap-content"},  // ExecToFile (copy)
+			{output: ""},             // cleanup rm
+		},
+	}
+	cfg := newTestConfig(t, dir, withPodOps(ops))
+
+	result := fallbackHeapDump(wsURL, cfg, "ns", "pod", "backstage-backend", outPath, logFile, 5*time.Second)
+	if !result {
+		t.Error("expected true on successful fallback")
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "heap-content" {
+		t.Errorf("content = %q, want 'heap-content'", data)
+	}
+}
+
+func TestFallbackHeapDump_ConnectError(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "heap.log")
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+
+	cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{}))
+
+	result := fallbackHeapDump("ws://127.0.0.1:1/invalid", cfg, "ns", "pod", "c", outPath, logFile, time.Second)
+	if result {
+		t.Error("expected false when WebSocket connect fails")
+	}
+}
+
+func TestFallbackHeapDump_ServerError(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		_ = conn.ReadJSON(new(cdpMessage))
+
+		_ = conn.WriteJSON(cdpMessage{
+			ID:    10,
+			Error: &cdpError{Message: "eval failed"},
+		})
+	}))
+	defer s.Close()
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "heap.heapsnapshot")
+	logFile := filepath.Join(dir, "heap.log")
+	wsURL := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{}))
+
+	result := fallbackHeapDump(wsURL, cfg, "ns", "pod", "c", outPath, logFile, 5*time.Second)
+	if result {
+		t.Error("expected false when server returns error")
+	}
+
+	data, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(data), "eval failed") {
+		t.Error("expected 'eval failed' in log")
+	}
+}
+
+func TestAppendLog_UnwritablePath(t *testing.T) {
+	// appendLog should not panic on unwritable path
+	appendLog("/dev/null/impossible/path", "test %s", "value")
+}
+
+func mustJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestHumanSize(t *testing.T) {

@@ -99,3 +99,61 @@ func TestStaticClientConfig_ConfigAccess(t *testing.T) {
 		t.Errorf("ConfigAccess() = %v, want nil", got)
 	}
 }
+
+func TestRESTClientGetter_ToDiscoveryClient(t *testing.T) {
+	cfg := &rest.Config{Host: "https://fake-server:6443"}
+	getter := newRESTClientGetter(cfg, "test-ns")
+
+	dc, err := getter.ToDiscoveryClient()
+	if err != nil {
+		t.Fatalf("ToDiscoveryClient: %v", err)
+	}
+	if dc == nil {
+		t.Error("expected non-nil discovery client")
+	}
+}
+
+func TestRESTClientGetter_ToDiscoveryClient_Error(t *testing.T) {
+	cfg := &rest.Config{
+		Host: "https://fake-server:6443",
+		TLSClientConfig: rest.TLSClientConfig{
+			CertFile: "/nonexistent/cert.pem",
+			KeyFile:  "/nonexistent/key.pem",
+		},
+	}
+	getter := newRESTClientGetter(cfg, "test-ns")
+
+	_, err := getter.ToDiscoveryClient()
+	if err == nil {
+		t.Fatal("expected error with invalid TLS config")
+	}
+}
+
+func TestRESTClientGetter_ToRESTMapper(t *testing.T) {
+	cfg := &rest.Config{Host: "https://fake-server:6443"}
+	getter := newRESTClientGetter(cfg, "test-ns")
+
+	mapper, err := getter.ToRESTMapper()
+	if err != nil {
+		t.Fatalf("ToRESTMapper: %v", err)
+	}
+	if mapper == nil {
+		t.Error("expected non-nil REST mapper")
+	}
+}
+
+func TestRESTClientGetter_ToRESTMapper_Error(t *testing.T) {
+	cfg := &rest.Config{
+		Host: "https://fake-server:6443",
+		TLSClientConfig: rest.TLSClientConfig{
+			CertFile: "/nonexistent/cert.pem",
+			KeyFile:  "/nonexistent/key.pem",
+		},
+	}
+	getter := newRESTClientGetter(cfg, "test-ns")
+
+	_, err := getter.ToRESTMapper()
+	if err == nil {
+		t.Fatal("expected error with invalid TLS config")
+	}
+}

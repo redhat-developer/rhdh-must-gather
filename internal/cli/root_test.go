@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -102,6 +103,67 @@ func TestHeapDumpMethodValidation(t *testing.T) {
 			err := cmd.Execute()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("method=%q: got err=%v, wantErr=%v", tt.method, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPreRunE_SinceValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "both since and since-time",
+			args:    []string{"--since", "5m", "--since-time", "2024-01-01T00:00:00Z"},
+			wantErr: "at most one of --since or --since-time",
+		},
+		{
+			name:    "invalid since duration",
+			args:    []string{"--since", "not-a-duration"},
+			wantErr: "--since must be a valid Go duration",
+		},
+		{
+			name:    "negative since",
+			args:    []string{"--since", "-1h"},
+			wantErr: "--since must be a positive duration",
+		},
+		{
+			name:    "sub-second since",
+			args:    []string{"--since", "500ms"},
+			wantErr: "--since must be at least 1s",
+		},
+		{
+			name:    "invalid since-time",
+			args:    []string{"--since-time", "not-a-timestamp"},
+			wantErr: "--since-time must be a valid RFC3339 timestamp",
+		},
+		{
+			name: "valid since",
+			args: []string{"--since", "5m"},
+		},
+		{
+			name: "valid since-time",
+			args: []string{"--since-time", "2024-01-01T00:00:00Z"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newRootCmd()
+			cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want to contain %q", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}
