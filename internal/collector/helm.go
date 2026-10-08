@@ -28,6 +28,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Helm)(nil)
+
 type Helm struct{}
 
 func (h *Helm) Name() string { return "helm" }

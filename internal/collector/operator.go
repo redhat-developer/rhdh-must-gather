@@ -19,6 +19,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Operator)(nil)
+
 type Operator struct{}
 
 func (o *Operator) Name() string { return "operator" }

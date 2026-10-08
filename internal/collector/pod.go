@@ -19,6 +19,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ PodOps = (*kubePodOps)(nil)
+
 type kubePodOps struct {
 	config *rest.Config
 	client kubernetes.Interface

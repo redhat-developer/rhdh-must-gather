@@ -25,6 +25,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*NamespaceInspect)(nil)
+
 type NamespaceInspect struct{}
 
 func (n *NamespaceInspect) Name() string { return "namespace-inspect" }
