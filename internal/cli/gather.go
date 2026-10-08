@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,10 +20,11 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
+	"github.com/redhat-developer/rhdh-must-gather/internal/obfuscate"
 	"github.com/redhat-developer/rhdh-must-gather/internal/sanitize"
 )
 
-func runGather(cmd *cobra.Command, opts *gatherOptions) error {
+func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 	log.Init()
 
 	basePath := os.Getenv("BASE_COLLECTION_PATH")
@@ -34,7 +36,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 		logLevel = "info"
 	}
 
-	if err := os.MkdirAll(basePath, 0o755); err != nil {
+	if err = os.MkdirAll(basePath, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -43,10 +45,24 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 
 	var interrupted atomic.Bool
 	sanitizeStop := make(chan struct{})
+	var kubeClient *kube.Client
 
 	defer func() {
 		log.Info("done with data collection. Now sanitizing data...")
 		sanitize.Run(basePath, sanitizeStop)
+
+		select {
+		case <-sanitizeStop:
+			log.Warn("Sanitization aborted by interrupt. Review carefully before sharing externally.")
+			err = errors.Join(err, fmt.Errorf("sanitization aborted"))
+		default:
+			log.Info("Obfuscating data...")
+			if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
+				log.Warn("Obfuscation failed: %v. Review carefully before sharing externally.", oerr)
+			} else {
+				log.Info("Post-processing complete")
+			}
+		}
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -69,11 +85,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) error {
 
 	ver := getVersion()
 	versionFile := filepath.Join(basePath, "version")
-	if err := os.WriteFile(versionFile, []byte("rhdh-must-gather\n"+ver+"\n"), 0o644); err != nil {
+	if err = os.WriteFile(versionFile, []byte("rhdh-must-gather\n"+ver+"\n"), 0o644); err != nil {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
-	kubeClient, err := kube.NewClient()
+	kubeClient, err = kube.NewClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}

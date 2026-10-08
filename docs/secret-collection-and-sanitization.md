@@ -50,4 +50,29 @@ When secrets are collected (`--with-secrets`), the tool includes automatic sanit
 - **Comprehensive coverage** - Processes all YAML, JSON, and text files in the collected data
 - **Detailed reporting** - Provides sanitization summary with file and item counts
 
-**Important**: While automatic sanitization catches common sensitive patterns, always review the sanitization report and manually check for any domain-specific sensitive information before sharing externally.
+### Automatic Obfuscation
+
+After secret sanitization, the tool automatically runs [must-gather-clean](https://github.com/openshift/must-gather-clean) to obfuscate network identifiers in the collected output.
+
+**What gets obfuscated:**
+- **IP addresses** - Replaced with consistent tokens like `x-ipv4-00000001-x` (loopback addresses `127.0.0.1`, `0.0.0.0`, `::1` are preserved)
+- **MAC addresses** - Replaced with consistent tokens like `x-mac-00000001-x`
+- **Cluster domain names** - Rewritten to `domain0000001`, preserving subdomain structure (e.g., `console.apps.example.com` → `console.apps.domain0000001`)
+
+Each unique address gets the same placeholder throughout the gather, so patterns and relationships remain visible for troubleshooting.
+
+**When it runs:**
+Obfuscation always runs automatically after collection completes. If obfuscation fails, the command logs a warning and continues with the un-obfuscated data, ensuring must-gather never loses collected diagnostics.
+
+**How domain discovery works:**
+- **OpenShift**: Reads DNS cluster config, ingress controller domains, and API server hostname
+- **Kubernetes**: Uses Ingress/Route hostnames from collected namespaces plus API server hostname
+- **Internal names excluded**: `cluster.local`, `kubernetes.default.svc`, and similar in-cluster names are not obfuscated
+- **Manual additions**: Set `RHDH_OBFUSCATE_DOMAINS=example.com,corp.internal` to add domains that auto-discovery missed
+
+**What's preserved:**
+- ConfigMaps and Secrets stay in the output (Secret values are still `[REDACTED]` by the sanitizer)
+- The reversible `report.yaml` map is NOT included (do not manually add it if you find it elsewhere)
+- A `watermark.txt` file records that obfuscation ran
+
+**Important**: Always review the output before sharing. While obfuscation handles common cases, domain-specific sensitive information may remain.

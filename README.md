@@ -102,6 +102,7 @@ For running in airgapped environments (partially or fully disconnected), see [di
 | `HEAP_DUMP_TIMEOUT`      | `600`           | Timeout for heap dump collection in seconds            |
 | `HEAP_DUMP_BUFFER_SIZE`  | `16777216`      | WebSocket buffer size in bytes (16MB) for inspector method |
 | `HEAP_DUMP_REMOTE_DIR`   | `/tmp`          | Directory in container for heap dumps (SIGUSR2 method) |
+| `RHDH_OBFUSCATE_DOMAINS` | -               | Extra comma-separated domain names to obfuscate when discovery misses them |
 
 ### Command-line options
 
@@ -144,6 +145,11 @@ Usage: ./must_gather [params...]
   --with-secrets                Include Kubernetes Secrets in collection (opt-in, disabled by default)
                                 When disabled, secret resources are excluded from all collectors
                                 When enabled, secrets are collected but automatically sanitized
+                                
+                                After secret sanitization, obfuscation runs automatically to rewrite
+                                IP addresses, MAC addresses, and cluster domain names. If obfuscation
+                                fails, the command continues with a warning. See
+                                docs/secret-collection-and-sanitization.md.
 
   > Diagnostic and Troubleshooting Options:
   --with-heap-dumps             Collect heap dumps from running backstage-backend processes (opt-in, disabled by default)
@@ -243,6 +249,7 @@ Usage: ./must_gather [params...]
 /must-gather/
 ├── version                         # Tool version information (e.g., "rhdh-must-gather x.y.z-sha")
 ├── sanitization-report.txt         # Data sanitization summary and details
+├── watermark.txt                   # Records that IP, MAC, and domain obfuscation ran
 ├── all-routes.txt                  # All OpenShift routes cluster-wide
 ├── all-ingresses.txt               # All Kubernetes ingresses cluster-wide
 ├── must-gather.log                 # Must-gather container logs (if running in pod)
