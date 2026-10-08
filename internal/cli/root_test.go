@@ -107,6 +107,32 @@ func TestHeapDumpMethodValidation(t *testing.T) {
 	}
 }
 
+func TestGetVersion_EnvOverride(t *testing.T) {
+	t.Setenv("RHDH_MUST_GATHER_VERSION", "1.2.3-test")
+	v := getVersion()
+	if v != "1.2.3-test" {
+		t.Errorf("getVersion() = %q, want %q", v, "1.2.3-test")
+	}
+}
+
+func TestGetVersion_Compiled(t *testing.T) {
+	t.Setenv("RHDH_MUST_GATHER_VERSION", "")
+	v := getVersion()
+	if v != version {
+		t.Errorf("getVersion() = %q, want compiled-in %q", v, version)
+	}
+}
+
+func TestUnknownFlagsAllowed(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.RunE = func(cmd *cobra.Command, args []string) error { return nil }
+	cmd.SetArgs([]string{"--some-unknown-flag"})
+	err := cmd.Execute()
+	if err != nil {
+		t.Errorf("unknown flag should be allowed, got: %v", err)
+	}
+}
+
 func TestObfuscateSubcommandCleansTree(t *testing.T) {
 	input := t.TempDir()
 	output := t.TempDir()
