@@ -630,13 +630,21 @@ func TestProcessHeapDumpPod_SIGUSR2MethodSignalFails(t *testing.T) {
 	}
 }
 
+func withFastPoll(t *testing.T) {
+	t.Helper()
+	orig := sigusr2PollInterval
+	sigusr2PollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sigusr2PollInterval = orig })
+}
+
 func TestCollectHeapDumpSIGUSR2_NoFileFoundTimeout(t *testing.T) {
+	withFastPoll(t)
 	dir := t.TempDir()
 	containerDir := filepath.Join(dir, "container")
 	_ = os.MkdirAll(containerDir, 0o755)
 	logFile := filepath.Join(containerDir, "heap-dump.log")
 
-	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "0")
 
 	cfg := newTestConfig(t, dir, withPodOps(&fakePodOps{execOutput: ""}))
 	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
@@ -655,16 +663,13 @@ func TestCollectHeapDumpSIGUSR2_NoFileFoundTimeout(t *testing.T) {
 }
 
 func TestCollectHeapDumpSIGUSR2_FileFoundNotStable(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test: 5s poll interval")
-	}
-
+	withFastPoll(t)
 	dir := t.TempDir()
 	containerDir := filepath.Join(dir, "container")
 	_ = os.MkdirAll(containerDir, 0o755)
 	logFile := filepath.Join(containerDir, "heap-dump.log")
 
-	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "15")
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "9999")
 
 	ops := &scriptablePodOps{
 		execResults: []execResult{
@@ -676,7 +681,7 @@ func TestCollectHeapDumpSIGUSR2_FileFoundNotStable(t *testing.T) {
 
 	cfg := newTestConfig(t, dir, withPodOps(ops))
 	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
-		containerDir, "heapdump.heapsnapshot", logFile, 6*time.Second)
+		containerDir, "heapdump.heapsnapshot", logFile, 50*time.Millisecond)
 	if result {
 		t.Error("expected false when file is not stable")
 	}
@@ -691,16 +696,13 @@ func TestCollectHeapDumpSIGUSR2_FileFoundNotStable(t *testing.T) {
 }
 
 func TestCollectHeapDumpSIGUSR2_FullSuccess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test: 5s poll interval")
-	}
-
+	withFastPoll(t)
 	dir := t.TempDir()
 	containerDir := filepath.Join(dir, "container")
 	_ = os.MkdirAll(containerDir, 0o755)
 	logFile := filepath.Join(containerDir, "heap-dump.log")
 
-	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "0")
 
 	ops := &scriptablePodOps{
 		execResults: []execResult{
@@ -715,7 +717,7 @@ func TestCollectHeapDumpSIGUSR2_FullSuccess(t *testing.T) {
 
 	cfg := newTestConfig(t, dir, withPodOps(ops))
 	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
-		containerDir, "heapdump.heapsnapshot", logFile, 12*time.Second)
+		containerDir, "heapdump.heapsnapshot", logFile, time.Second)
 	if !result {
 		t.Error("expected true on successful collection")
 	}
@@ -731,16 +733,13 @@ func TestCollectHeapDumpSIGUSR2_FullSuccess(t *testing.T) {
 }
 
 func TestCollectHeapDumpSIGUSR2_CopyFails(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test: 5s poll interval")
-	}
-
+	withFastPoll(t)
 	dir := t.TempDir()
 	containerDir := filepath.Join(dir, "container")
 	_ = os.MkdirAll(containerDir, 0o755)
 	logFile := filepath.Join(containerDir, "heap-dump.log")
 
-	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "5")
+	t.Setenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS", "0")
 
 	ops := &scriptablePodOps{
 		execResults: []execResult{
@@ -754,7 +753,7 @@ func TestCollectHeapDumpSIGUSR2_CopyFails(t *testing.T) {
 
 	cfg := newTestConfig(t, dir, withPodOps(ops))
 	result := collectHeapDumpSIGUSR2(context.Background(), cfg, "rhdh", "pod-1", "42",
-		containerDir, "heapdump.heapsnapshot", logFile, 12*time.Second)
+		containerDir, "heapdump.heapsnapshot", logFile, time.Second)
 	if result {
 		t.Error("expected false when copy fails")
 	}

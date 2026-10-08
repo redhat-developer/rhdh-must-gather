@@ -26,6 +26,8 @@ const (
 	backstageContainer     = "backstage-backend"
 )
 
+var sigusr2PollInterval = 5 * time.Second
+
 func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instanceName, kind string) {
 	if !cfg.WithHeapDumps {
 		return
@@ -618,7 +620,7 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 		remoteDir = "/tmp"
 	}
 	searchPaths := remoteDir + " /tmp /app /opt/app-root/src"
-	pollInterval := 5 * time.Second
+	pollInterval := sigusr2PollInterval
 	stableSeconds := 150
 	if s := os.Getenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS"); s != "" {
 		if v, err := strconv.Atoi(s); err == nil {
