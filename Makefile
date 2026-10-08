@@ -25,7 +25,8 @@ BASE_COLLECTION_PATH ?= ./out
 GO ?= go
 GO_MODULE := github.com/redhat-developer/rhdh-must-gather
 GO_BUILD_FLAGS ?= -trimpath -mod=mod
-GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)'
+MUST_GATHER_CLEAN_VERSION := $(shell $(GO) list -m -f '{{.Version}}' github.com/openshift/must-gather-clean 2>/dev/null || echo unknown)
+GO_LDFLAGS := -X '$(GO_MODULE)/internal/cli.version=$(RHDH_MUST_GATHER_VERSION)' -X 'github.com/openshift/must-gather-clean/pkg/version.versionFromGit=$(MUST_GATHER_CLEAN_VERSION)'
 
 
 default: build
