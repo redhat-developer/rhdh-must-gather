@@ -18,6 +18,7 @@ mandatory_scripts=(
   "orchestrator"
   "route"
   "ingress"
+  "network-policies"
   "namespace-inspect"
 )
 requested_scripts=("${mandatory_scripts[@]}")
@@ -181,6 +182,7 @@ Usage: ./$(basename "$0") [params...]
   --without-route               Skip OpenShift route collection
   --without-ingress             Skip Kubernetes ingress collection
   --without-namespace-inspect   Skip deep Namespace inspect
+  --without-network-policies    Skip NetworkPolicy collection
 
   > You can also choose to enable optional collectors:
   --cluster-info                Collect cluster-wide diagnostic information

@@ -122,6 +122,7 @@ Usage: ./must_gather [params...]
   > - orchestrator
   > - route
   > - ingress
+  > - network-policies
   > - namespace-inspect
 
   > You can exclude specific data collection types:
@@ -132,6 +133,7 @@ Usage: ./must_gather [params...]
   --without-platform            Skip platform detection and information
   --without-route               Skip OpenShift route collection
   --without-ingress             Skip Kubernetes ingress collection
+  --without-network-policies    Skip NetworkPolicy diagnostic collection
   --without-namespace-inspect   Skip deep Namespace inspect
 
   > You can also choose to enable optional collectors:
@@ -204,6 +206,7 @@ Usage: ./must_gather [params...]
 | `--without-orchestrator` | Skip Orchestrator-related data (Serverless, Serverless Logic, SonataFlowPlatform) | When you know you don't have any Orchestrator flavor instances of RHDH |
 | `--without-helm` | Skip Helm-based RHDH deployment data | When you know RHDH is deployed via Operator only |
 | `--without-platform` | Skip platform detection and information | For minimal collections when platform info is not needed |
+| `--without-network-policies` | Skip NetworkPolicy diagnostic collection | When NetworkPolicy data is not needed, or for a faster gather |
 | `--without-route` | Skip OpenShift route collection | For non-OpenShift clusters or when routes are not relevant |
 | `--without-ingress` | Skip Kubernetes ingress collection | When ingresses are not used for RHDH access |
 | `--without-namespace-inspect` | Skip deep Namespace inspect | **Not recommended** as it removes OMC compatibility. Use only for minimal/quick collections |
@@ -248,6 +251,19 @@ Usage: ./must_gather [params...]
 ├── must-gather.log                 # Must-gather container logs (if running in pod)
 ├── cluster-info/                   # Cluster-wide information (if --cluster-info used)
 │   └── [cluster-info dump output]
+├── network-policies/               # NetworkPolicy diagnostics (collected by default)
+│   ├── detected-namespaces.txt
+│   ├── summary.txt                 # How to use the dump for connectivity failures
+│   ├── ns=[namespace]/
+│   │   ├── networkpolicies.yaml
+│   │   ├── networkpolicies.json
+│   │   ├── networkpolicies.txt
+│   │   ├── networkpolicies.describe.txt
+│   │   ├── networkpolicies.labels.txt
+│   │   ├── namespace.yaml          # Namespace labels
+│   │   ├── pods-show-labels.txt    # Pod labels for podSelector matching
+│   │   └── services.yaml
+│   └── peer-namespaces/            # Labels for namespaceSelector (ingress, monitoring, knative)
 ├── namespace-inspect/              # Deep Namespace inspect (collected by default)
 │   ├── inspect.log                 # Inspection command logs
 │   ├── inspection-summary.txt      # Summary of inspected namespaces and data collected

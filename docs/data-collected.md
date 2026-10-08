@@ -111,6 +111,16 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
 - **Secrets**(opt-in with `--with-secrets`): Sanitized secret resources (data fields redacted for security)
 - **Services, Routes, Ingresses**: Network configurations for RHDH access
 
+### NetworkPolicy diagnostics (collected by default)
+- **All NetworkPolicy resources** in each detected RHDH namespace (list, YAML, JSON, describe, and labels)
+- **Pod labels and namespace labels** used by NetworkPolicy selectors (`pods-show-labels.txt`, `namespace.yaml`)
+- **Services** in those namespaces (ports such as 7007, 5432, 9464)
+- **Peer namespaces** commonly referenced by `namespaceSelector` (OpenShift ingress/monitoring, Knative, GKE monitoring)
+- **summary.txt** explaining how to match policies to pods and labels when troubleshooting connectivity failures
+- Auto-detects Helm, Operator, and Orchestrator namespaces; honours `--namespaces`
+- Works with `kubectl` on OpenShift and vanilla Kubernetes (does not require `oc adm inspect`)
+- **Can be skipped** with `--without-network-policies`
+
 ### Namespace inspect (collected by default)
 - **Deep namespace resource inspection** using `oc adm inspect namespace` (included by default)
 - **Auto-detects RHDH namespaces**:
