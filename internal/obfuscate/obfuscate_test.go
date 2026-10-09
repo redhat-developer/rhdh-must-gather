@@ -11,8 +11,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
@@ -287,6 +290,302 @@ func findFile(t *testing.T, root, name string) string {
 		t.Fatalf("file %s not found under %s", name, root)
 	}
 	return found
+}
+
+func TestRun_WithFakeClient(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "kubelet.log"), "node 10.9.8.7\n")
+
+	dns := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "config.openshift.io/v1",
+		"kind":       "DNS",
+		"metadata":   map[string]any{"name": "cluster"},
+		"spec":       map[string]any{"baseDomain": "cluster.example.com"},
+	}}
+	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}: "DNSList",
+	}
+	client := &kube.Client{
+		Dynamic: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, dns),
+		Config:  &rest.Config{Host: "https://api.cluster.example.com:6443"},
+	}
+
+	err := Run(context.Background(), client, dir, nil, func(config, input, output, report string) error {
+		return Clean(config, input, output, report, 1)
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	body := mustRead(t, filepath.Join(dir, "kubelet.log"))
+	if strings.Contains(body, "10.9.8.7") {
+		t.Fatalf("IP was not obfuscated: %s", body)
+	}
+}
+
+func TestRun_NilContext(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "data.log"), "hello\n")
+
+	//nolint:staticcheck // testing nil ctx path
+	err := Run(nil, nil, dir, nil, func(config, input, output, report string) error {
+		return Clean(config, input, output, report, 1)
+	})
+	if err != nil {
+		t.Fatalf("Run(nil ctx) error = %v", err)
+	}
+}
+
+func TestApply_NilClean(t *testing.T) {
+	dir := t.TempDir()
+	err := Apply(dir, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("Apply(nil clean) error = %v, want 'not configured'", err)
+	}
+}
+
+func TestApply_NotADirectory(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file.txt")
+	mustWrite(t, f, "data")
+	err := Apply(f, nil, func(string, string, string, string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Apply(file) error = %v, want 'not a directory'", err)
+	}
+}
+
+func TestApply_NonexistentPath(t *testing.T) {
+	err := Apply("/nonexistent/path/xyz", nil, func(string, string, string, string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "obfuscation input") {
+		t.Fatalf("Apply(nonexistent) error = %v, want 'obfuscation input'", err)
+	}
+}
+
+func TestClean_WorkersClamped(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "data.log"), "hello 10.0.0.1\n")
+	output := filepath.Join(t.TempDir(), "out")
+	report := t.TempDir()
+
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	mustWrite(t, config, "config:\n  obfuscate:\n    - type: IP\n      replacementType: Consistent\n      target: All\n")
+
+	err := Clean(config, dir, output, report, 0)
+	if err != nil {
+		t.Fatalf("Clean(workers=0) error = %v", err)
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatalf("output not created: %v", err)
+	}
+}
+
+func TestApiServerHost(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", "", ""},
+		{"whitespace", "  ", ""},
+		{"ip bare", "10.0.0.1", ""},
+		{"ip with scheme", "https://10.0.0.1:6443", ""},
+		{"hostname with scheme", "https://api.example.com:6443", "api.example.com"},
+		{"hostname no scheme", "api.example.com:6443", "api.example.com"},
+		{"hostname no port", "api.example.com", "api.example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := apiServerHost(tt.raw)
+			if got != tt.want {
+				t.Errorf("apiServerHost(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUsableDomain(t *testing.T) {
+	tests := []struct {
+		domain string
+		want   bool
+	}{
+		{"example.com", true},
+		{"sub.example.com", true},
+		{"", false},
+		{"nodot", false},
+		{"foo bar.com", false},
+		{"foo/bar.com", false},
+		{"foo\\bar.com", false},
+		{"192.168.1.1", false},
+		{"cluster.local", false},
+		{"svc.cluster.local", false},
+		{"kubernetes.default.svc", false},
+		{"kubernetes.default.svc.cluster.local", false},
+		{"myapp.ns.svc", false},
+		{"myapp.ns.svc.cluster.local", false},
+		{"localhost", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.domain, func(t *testing.T) {
+			got := usableDomain(tt.domain)
+			if got != tt.want {
+				t.Errorf("usableDomain(%q) = %v, want %v", tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestListNamespaced_SpecificNamespaceError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvr := schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}
+	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		gvr: "IngressList",
+	})
+	dynClient.PrependReactor("list", "ingresses", func(action ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("forbidden")
+	})
+	client := &kube.Client{Dynamic: dynClient}
+
+	got := listNamespaced(context.Background(), client, gvr, []string{"ns1"}, "Ingress")
+	if len(got) != 0 {
+		t.Fatalf("expected empty result on error, got %d items", len(got))
+	}
+}
+
+func TestListNamespaced_AllNamespacesError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvr := schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}
+	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		gvr: "IngressList",
+	})
+	dynClient.PrependReactor("list", "ingresses", func(action ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("forbidden")
+	})
+	client := &kube.Client{Dynamic: dynClient}
+
+	got := listNamespaced(context.Background(), client, gvr, nil, "Ingress")
+	if len(got) != 0 {
+		t.Fatalf("expected empty result on error, got %d items", len(got))
+	}
+}
+
+func TestApiGroupPresent_NilDiscovery(t *testing.T) {
+	client := &kube.Client{Discovery: nil}
+	present, err := apiGroupPresent(client, "anything")
+	if err != nil {
+		t.Fatalf("apiGroupPresent() error = %v", err)
+	}
+	if !present {
+		t.Fatal("expected true when Discovery is nil")
+	}
+}
+
+func TestApiGroupPresent_WithDiscovery(t *testing.T) {
+	fakeClient := fakeclientset.NewSimpleClientset()
+	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
+	client := &kube.Client{Discovery: fd}
+
+	present, err := apiGroupPresent(client, "nonexistent.group.io")
+	if err != nil {
+		t.Fatalf("apiGroupPresent() error = %v", err)
+	}
+	if present {
+		t.Fatal("expected false for nonexistent group")
+	}
+}
+
+func TestReportStaysOutside_InsideOutput(t *testing.T) {
+	err := reportStaysOutside("/output", "/base", "/output/report")
+	if err == nil {
+		t.Fatal("expected error when reportDir is inside outputPath")
+	}
+}
+
+func TestReportStaysOutside_InsideBase(t *testing.T) {
+	err := reportStaysOutside("/output", "/base", "/base/report")
+	if err == nil {
+		t.Fatal("expected error when reportDir is inside basePath")
+	}
+}
+
+func TestReportStaysOutside_Outside(t *testing.T) {
+	err := reportStaysOutside("/output", "/base", "/other/report")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestDirInside(t *testing.T) {
+	tests := []struct {
+		name   string
+		parent string
+		child  string
+		want   bool
+	}{
+		{"same path", "/a/b", "/a/b", true},
+		{"child inside", "/a/b", "/a/b/c", true},
+		{"child outside", "/a/b", "/a/c", false},
+		{"parent of parent", "/a/b", "/a", false},
+		{"unrelated", "/x", "/y", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dirInside(tt.parent, tt.child)
+			if got != tt.want {
+				t.Errorf("dirInside(%q, %q) = %v, want %v", tt.parent, tt.child, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCopyTree(t *testing.T) {
+	src := t.TempDir()
+	mustWrite(t, filepath.Join(src, "file.txt"), "hello")
+	mustWrite(t, filepath.Join(src, "sub", "nested.txt"), "world")
+	if err := os.Symlink("file.txt", filepath.Join(src, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(t.TempDir(), "copy")
+	if err := copyTree(src, dst); err != nil {
+		t.Fatalf("copyTree() error = %v", err)
+	}
+
+	if got := mustRead(t, filepath.Join(dst, "file.txt")); got != "hello" {
+		t.Errorf("file.txt = %q, want hello", got)
+	}
+	if got := mustRead(t, filepath.Join(dst, "sub", "nested.txt")); got != "world" {
+		t.Errorf("sub/nested.txt = %q, want world", got)
+	}
+	link, err := os.Readlink(filepath.Join(dst, "link.txt"))
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+	if link != "file.txt" {
+		t.Errorf("symlink target = %q, want file.txt", link)
+	}
+}
+
+func TestPublish(t *testing.T) {
+	base := t.TempDir()
+	mustWrite(t, filepath.Join(base, "original.txt"), "old data")
+
+	cleaned := filepath.Join(t.TempDir(), "cleaned")
+	if err := os.Mkdir(cleaned, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(cleaned, "result.txt"), "new data")
+
+	if err := publish(cleaned, base); err != nil {
+		t.Fatalf("publish() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(base, "result.txt")); got != "new data" {
+		t.Errorf("result.txt = %q, want 'new data'", got)
+	}
+	if _, err := os.Stat(filepath.Join(base, "original.txt")); !os.IsNotExist(err) {
+		t.Fatal("original.txt should have been removed")
+	}
+	if _, err := os.Stat(filepath.Join(base, stagingDirName)); !os.IsNotExist(err) {
+		t.Fatal("staging directory should have been removed")
+	}
 }
 
 func ipToken(body string) string {
