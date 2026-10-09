@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
@@ -200,11 +201,24 @@ func TestResolveHeapDumpInstances_EnvFallback(t *testing.T) {
 	}
 }
 
+func noopClean(_, _, _, _ string) error { return nil }
+
 func fakeClientFactory() (*kube.Client, error) {
 	fakeClient := fakeclientset.NewSimpleClientset()
 	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
 	scheme := runtime.NewScheme()
-	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme, nil)
+	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}:                 "IngressList",
+		{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}:                   "DNSList",
+		{Group: "operator.openshift.io", Version: "v1", Resource: "ingresscontrollers"}:     "IngressControllerList",
+		{Group: "route.openshift.io", Version: "v1", Resource: "routes"}:                    "RouteList",
+		{Group: "apps", Version: "v1", Resource: "deployments"}:                             "DeploymentList",
+		{Group: "apps", Version: "v1", Resource: "statefulsets"}:                             "StatefulSetList",
+		{Group: "apps", Version: "v1", Resource: "replicasets"}:                              "ReplicaSetList",
+		{Group: "rhdh.redhat.com", Version: "v1alpha3", Resource: "backstages"}:              "BackstageList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}:             "NetworkPolicyList",
+		{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+	})
 
 	return &kube.Client{
 		Clientset: fakeClient,
@@ -229,6 +243,7 @@ func TestRunGather_FullFlow(t *testing.T) {
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
 		clientFactory:  fakeClientFactory,
+		cleanFunc:      noopClean,
 	}
 	err := runGather(cmd, opts)
 	if err != nil {
@@ -258,6 +273,7 @@ func TestRunGather_ClientFactoryError(t *testing.T) {
 
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
+		cleanFunc:      noopClean,
 		clientFactory: func() (*kube.Client, error) {
 			return nil, fmt.Errorf("no cluster available")
 		},
@@ -286,6 +302,7 @@ func TestRunGather_WithSecrets(t *testing.T) {
 		heapDumpMethod: "inspector",
 		withSecrets:    true,
 		clientFactory:  fakeClientFactory,
+		cleanFunc:      noopClean,
 	}
 	err := runGather(cmd, opts)
 	if err != nil {
@@ -309,6 +326,7 @@ func TestRunGather_WithHeapDumps(t *testing.T) {
 		withHeapDumps:     true,
 		heapDumpInstances: "my-instance",
 		clientFactory:     fakeClientFactory,
+		cleanFunc:         noopClean,
 	}
 	err := runGather(cmd, opts)
 	if err != nil {
@@ -331,6 +349,7 @@ func TestRunGather_WithNamespaces(t *testing.T) {
 		heapDumpMethod: "inspector",
 		namespaces:     "ns1,ns2",
 		clientFactory:  fakeClientFactory,
+		cleanFunc:      noopClean,
 	}
 	err := runGather(cmd, opts)
 	if err != nil {
@@ -362,6 +381,7 @@ func TestRunGather_UnknownCollector(t *testing.T) {
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
 		clientFactory:  fakeClientFactory,
+		cleanFunc:      noopClean,
 	}
 	err := runGather(cmd2, opts)
 	if err != nil {

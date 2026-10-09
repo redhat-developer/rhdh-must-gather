@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -194,3 +196,46 @@ func TestUnknownFlagsAllowed(t *testing.T) {
 		t.Errorf("unknown flag should be allowed, got: %v", err)
 	}
 }
+
+func TestObfuscateSubcommandCleansTree(t *testing.T) {
+	input := t.TempDir()
+	output := t.TempDir()
+	report := t.TempDir()
+	if err := os.WriteFile(filepath.Join(input, "kubelet.log"), []byte("node 10.9.8.7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(config, []byte(obfuscateConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	args := obfuscateCommandArgs(config, input, output, report, 2)
+	cmd := newRootCmd()
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute obfuscate: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(output, "kubelet.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "10.9.8.7") {
+		t.Fatalf("IP was not obfuscated: %s", body)
+	}
+	if _, err := os.Stat(filepath.Join(output, "report.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("report.yaml published in output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(report, "report.yaml")); err != nil {
+		t.Fatalf("report.yaml missing from report dir: %v", err)
+	}
+}
+
+const obfuscateConfig = `config:
+  obfuscate:
+    - type: IP
+      replacementType: Consistent
+      target: All
+    - type: MAC
+      replacementType: Consistent
+      target: All
+`
