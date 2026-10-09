@@ -26,6 +26,8 @@ const (
 	backstageContainer     = "backstage-backend"
 )
 
+var sigusr2PollInterval = 5 * time.Second
+
 func collectHeapDumps(cfg *Config, ns, labelSelector, outDir, deployName, instanceName, kind string) {
 	if !cfg.WithHeapDumps {
 		return
@@ -205,7 +207,7 @@ for pid_dir in /proc/[0-9]*; do
   fi
 done
 `
-	out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, script)
+	out, err := cfg.podOps().Exec(ctx, ns, pod, container, script)
 	if err != nil {
 		return "", err
 	}
@@ -236,7 +238,7 @@ echo "=== Available Disk Space ==="
 df -h 2>/dev/null || echo "Could not get disk space"
 `, pid, pid, pid, pid, pid, pid, pid)
 
-	out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, script)
+	out, err := cfg.podOps().Exec(ctx, ns, pod, container, script)
 	if err != nil {
 		out = fmt.Sprintf("Failed to collect process metadata: %v\n", err)
 	}
@@ -245,7 +247,7 @@ df -h 2>/dev/null || echo "Could not get disk space"
 
 func sendSignal(ctx context.Context, cfg *Config, ns, pod, container, pid, signal string) error {
 	script := fmt.Sprintf(`kill -%s %s 2>/dev/null || node -e "process.kill(%s, 'SIG%s')" 2>/dev/null`, signal, pid, pid, signal)
-	_, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, script)
+	_, err := cfg.podOps().Exec(ctx, ns, pod, container, script)
 	return err
 }
 
@@ -259,7 +261,7 @@ port=$(echo "$env_opts" | grep -oE '\-\-inspect(-brk)?=[^[:space:]]*' | head -1 
 if [ -n "$port" ]; then echo "$port"; fi
 `, pid, pid)
 
-	out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, script)
+	out, err := cfg.podOps().Exec(ctx, ns, pod, container, script)
 	if err != nil {
 		return 9229
 	}
@@ -273,7 +275,7 @@ if [ -n "$port" ]; then echo "$port"; fi
 func isInspectorActive(ctx context.Context, cfg *Config, ns, pod, container string, port int) bool {
 	portHex := fmt.Sprintf("%04X", port)
 	script := fmt.Sprintf(`grep -qi ':%s' /proc/net/tcp 2>/dev/null || grep -qi ':%s' /proc/net/tcp6 2>/dev/null`, portHex, portHex)
-	_, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, script)
+	_, err := cfg.podOps().Exec(ctx, ns, pod, container, script)
 	return err == nil
 }
 
@@ -584,13 +586,13 @@ func fallbackHeapDump(wsURL string, cfg *Config, ns, pod, container, outPath, lo
 
 			ctx := context.Background()
 			copyScript := fmt.Sprintf("cat %q", remoteFile)
-			if err := execInPodToFile(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, copyScript, outPath); err != nil {
+			if err := cfg.podOps().ExecToFile(ctx, ns, pod, container, copyScript, outPath); err != nil {
 				appendLog(logFile, "Failed to copy heap snapshot from container: %v\n", err)
 				return false
 			}
 
 			cleanupScript := fmt.Sprintf("rm -f %q", remoteFile)
-			_, _ = execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, container, cleanupScript)
+			_, _ = cfg.podOps().Exec(ctx, ns, pod, container, cleanupScript)
 
 			fi, _ := os.Stat(outPath)
 			if fi != nil {
@@ -618,7 +620,7 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 		remoteDir = "/tmp"
 	}
 	searchPaths := remoteDir + " /tmp /app /opt/app-root/src"
-	pollInterval := 5 * time.Second
+	pollInterval := sigusr2PollInterval
 	stableSeconds := 150
 	if s := os.Getenv("HEAP_DUMP_SIGUSR2_STABLE_SECONDS"); s != "" {
 		if v, err := strconv.Atoi(s); err == nil {
@@ -636,7 +638,7 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 	for time.Now().Before(deadline) {
 		if foundFile == "" {
 			script := fmt.Sprintf(`for p in %s; do f=$(find $p -maxdepth 2 -name '*.heapsnapshot' 2>/dev/null | head -1); [ -n "$f" ] && echo "$f" && break; done`, searchPaths)
-			out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, script)
+			out, err := cfg.podOps().Exec(ctx, ns, pod, backstageContainer, script)
 			if err == nil {
 				foundFile = strings.TrimSpace(out)
 				if foundFile != "" {
@@ -648,7 +650,7 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 
 		if foundFile != "" {
 			sizeScript := fmt.Sprintf(`stat -c%%s %q 2>/dev/null || echo 0`, foundFile)
-			out, err := execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, sizeScript)
+			out, err := cfg.podOps().Exec(ctx, ns, pod, backstageContainer, sizeScript)
 			if err == nil {
 				currentSize, _ := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 				if currentSize > 0 {
@@ -682,13 +684,13 @@ func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, cont
 
 	localPath := filepath.Join(containerDir, heapFile)
 	copyScript := fmt.Sprintf("cat %q", foundFile)
-	if err := execInPodToFile(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, copyScript, localPath); err != nil {
+	if err := cfg.podOps().ExecToFile(ctx, ns, pod, backstageContainer, copyScript, localPath); err != nil {
 		appendLog(logFile, "Failed to copy heap dump: %v\n", err)
 		return false
 	}
 
 	cleanupScript := fmt.Sprintf("rm -f %q", foundFile)
-	_, _ = execInPod(ctx, cfg.Client.Config, cfg.Client.Clientset, ns, pod, backstageContainer, cleanupScript)
+	_, _ = cfg.podOps().Exec(ctx, ns, pod, backstageContainer, cleanupScript)
 
 	fi, _ := os.Stat(localPath)
 	if fi != nil {

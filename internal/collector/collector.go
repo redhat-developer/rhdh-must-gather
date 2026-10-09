@@ -2,15 +2,24 @@ package collector
 
 import (
 	"context"
+	"io"
 	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"helm.sh/helm/v4/pkg/action"
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 	"github.com/redhat-developer/rhdh-must-gather/internal/namespace"
 )
+
+// PodOps abstracts pod operations that require a live API server.
+type PodOps interface {
+	Exec(ctx context.Context, ns, podName, container, script string) (string, error)
+	ExecToFile(ctx context.Context, ns, podName, container, script, destPath string) error
+	GetLogStream(ctx context.Context, ns, podName string, opts *corev1.PodLogOptions) (io.ReadCloser, error)
+}
 
 type Config struct {
 	Client            *kube.Client
@@ -23,6 +32,8 @@ type Config struct {
 	TargetNamespaces  []string
 	HeapDumpMethod    string
 	HeapDumpInstances string
+	PodOps            PodOps
+	HelmConfigFactory func(namespace string) (*action.Configuration, error)
 }
 
 type Collector interface {
@@ -58,6 +69,20 @@ func (c *Config) ApplyLogSince(opts *corev1.PodLogOptions) {
 			opts.SinceTime = &mt
 		}
 	}
+}
+
+func (c *Config) podOps() PodOps {
+	if c.PodOps != nil {
+		return c.PodOps
+	}
+	return &kubePodOps{config: c.Client.Config, client: c.Client.Clientset}
+}
+
+func (c *Config) helmActionConfig(namespace string) (*action.Configuration, error) {
+	if c.HelmConfigFactory != nil {
+		return c.HelmConfigFactory(namespace)
+	}
+	return newHelmActionConfig(c, namespace)
 }
 
 var Registry = map[string]Collector{

@@ -1,0 +1,442 @@
+package collector
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+func TestSetGVK(t *testing.T) {
+	pod := &corev1.Pod{}
+	setGVK(pod, "Pod", "v1")
+
+	gvk := pod.GetObjectKind().GroupVersionKind()
+	if gvk.Kind != "Pod" {
+		t.Errorf("Kind = %q, want Pod", gvk.Kind)
+	}
+	if gvk.Version != "v1" {
+		t.Errorf("Version = %q, want v1", gvk.Version)
+	}
+}
+
+func TestWriteResource(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "resource.yaml")
+
+	data := map[string]string{"name": "test"}
+	writeResource(path, data)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	if !strings.Contains(string(content), "name: test") {
+		t.Errorf("content = %q, want 'name: test'", string(content))
+	}
+}
+
+func TestWriteCollectError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "error.txt")
+
+	writeCollectError(path, "list pods", os.ErrPermission)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading file: %v", err)
+	}
+	s := string(content)
+	if !strings.Contains(s, "list pods") {
+		t.Error("expected description in output")
+	}
+	if !strings.Contains(s, "permission denied") {
+		t.Error("expected error message in output")
+	}
+}
+
+func TestKnownGroupKinds(t *testing.T) {
+	tests := []struct {
+		input string
+		kind  string
+		group string
+	}{
+		{"pod", "Pod", ""},
+		{"pods", "Pod", ""},
+		{"deployment", "Deployment", "apps"},
+		{"deployments", "Deployment", "apps"},
+		{"statefulset", "StatefulSet", "apps"},
+		{"replicaset", "ReplicaSet", "apps"},
+		{"configmap", "ConfigMap", ""},
+		{"configmaps", "ConfigMap", ""},
+		{"crd", "CustomResourceDefinition", "apiextensions.k8s.io"},
+		{"controllerrevision", "ControllerRevision", "apps"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			gk, ok := knownGroupKinds[tt.input]
+			if !ok {
+				t.Fatalf("knownGroupKinds missing %q", tt.input)
+			}
+			if gk.Kind != tt.kind {
+				t.Errorf("Kind = %q, want %q", gk.Kind, tt.kind)
+			}
+			if gk.Group != tt.group {
+				t.Errorf("Group = %q, want %q", gk.Group, tt.group)
+			}
+		})
+	}
+}
+
+func TestListResourceNames(t *testing.T) {
+	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns1"}}
+	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "ns1"}}
+	pod3 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-c", Namespace: "ns2"}}
+	dep1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "ns1"}}
+
+	cfg := newTestConfig(t, "", withTypedObjs(pod1, pod2, pod3, dep1))
+
+	t.Run("pods in namespace", func(t *testing.T) {
+		names, err := listResourceNames(context.Background(), cfg,
+			schema.GroupKind{Kind: "Pod"}, "ns1", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 2 {
+			t.Fatalf("got %d names, want 2", len(names))
+		}
+	})
+
+	t.Run("deployments in namespace", func(t *testing.T) {
+		names, err := listResourceNames(context.Background(), cfg,
+			schema.GroupKind{Group: "apps", Kind: "Deployment"}, "ns1", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 1 || names[0] != "dep-a" {
+			t.Errorf("got %v, want [dep-a]", names)
+		}
+	})
+
+	t.Run("empty namespace", func(t *testing.T) {
+		names, err := listResourceNames(context.Background(), cfg,
+			schema.GroupKind{Kind: "Pod"}, "ns-empty", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 0 {
+			t.Errorf("got %d names, want 0", len(names))
+		}
+	})
+
+	t.Run("unknown kind", func(t *testing.T) {
+		_, err := listResourceNames(context.Background(), cfg,
+			schema.GroupKind{Kind: "Unknown"}, "ns1", "")
+		if err == nil {
+			t.Error("expected error for unknown kind")
+		}
+	})
+}
+
+func TestListResourceNames_StatefulSet(t *testing.T) {
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "db-sts", Namespace: "ns1"}}
+	cfg := newTestConfig(t, "", withTypedObjs(sts))
+
+	names, err := listResourceNames(context.Background(), cfg,
+		schema.GroupKind{Group: "apps", Kind: "StatefulSet"}, "ns1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "db-sts" {
+		t.Errorf("got %v, want [db-sts]", names)
+	}
+}
+
+func TestListResourceNames_ReplicaSet(t *testing.T) {
+	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "dep-abc123", Namespace: "ns1"}}
+	cfg := newTestConfig(t, "", withTypedObjs(rs))
+
+	names, err := listResourceNames(context.Background(), cfg,
+		schema.GroupKind{Group: "apps", Kind: "ReplicaSet"}, "ns1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "dep-abc123" {
+		t.Errorf("got %v, want [dep-abc123]", names)
+	}
+}
+
+func TestListResourceNames_ControllerRevision(t *testing.T) {
+	cr := &appsv1.ControllerRevision{
+		ObjectMeta: metav1.ObjectMeta{Name: "sts-rev-1", Namespace: "ns1"},
+	}
+	cfg := newTestConfig(t, "", withTypedObjs(cr))
+
+	names, err := listResourceNames(context.Background(), cfg,
+		schema.GroupKind{Group: "apps", Kind: "ControllerRevision"}, "ns1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "sts-rev-1" {
+		t.Errorf("got %v, want [sts-rev-1]", names)
+	}
+}
+
+func TestListResourceNames_ConfigMap(t *testing.T) {
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: "ns1"}}
+	cfg := newTestConfig(t, "", withTypedObjs(cm))
+
+	names, err := listResourceNames(context.Background(), cfg,
+		schema.GroupKind{Kind: "ConfigMap"}, "ns1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "app-config" {
+		t.Errorf("got %v, want [app-config]", names)
+	}
+}
+
+func TestListResourceNames_WithLabelSelector(t *testing.T) {
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-match", Namespace: "ns1",
+			Labels: map[string]string{"app": "rhdh"},
+		},
+	}
+	pod2 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-no-match", Namespace: "ns1",
+			Labels: map[string]string{"app": "other"},
+		},
+	}
+	cfg := newTestConfig(t, "", withTypedObjs(pod1, pod2))
+
+	names, err := listResourceNames(context.Background(), cfg,
+		schema.GroupKind{Kind: "Pod"}, "ns1", "app=rhdh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "pod-match" {
+		t.Errorf("got %v, want [pod-match]", names)
+	}
+}
+
+func TestDescribeCRD(t *testing.T) {
+	dir := t.TempDir()
+
+	backstageGVR := schema.GroupVersionResource{
+		Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages",
+	}
+	backstage := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "rhdh.redhat.com/v1alpha5",
+			"kind":       "Backstage",
+			"metadata": map[string]any{
+				"name":      "my-backstage",
+				"namespace": "rhdh",
+			},
+			"spec": map[string]any{"replicas": int64(1)},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{backstageGVR: "BackstageList"},
+			backstage,
+		),
+	)
+
+	path := filepath.Join(dir, "backstage.describe.txt")
+	describeCRD(context.Background(), cfg, path, "backstages.rhdh.redhat.com", "rhdh", "my-backstage")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "my-backstage") {
+		t.Errorf("expected backstage name in output, got %q", content)
+	}
+}
+
+func TestDescribeCRD_NoName(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	path := filepath.Join(dir, "describe.txt")
+	describeCRD(context.Background(), cfg, path, "backstages.rhdh.redhat.com", "rhdh", "")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "name required") {
+		t.Error("expected 'name required' message")
+	}
+}
+
+func TestResolveCRDType(t *testing.T) {
+	cfg := newTestConfig(t, "",
+		withAPIGroups("rhdh.redhat.com/v1alpha5", "sonataflow.org/v1alpha08"),
+	)
+
+	t.Run("fully qualified", func(t *testing.T) {
+		gvr, err := resolveCRDType(cfg, "sonataflow.sonataflow.org")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gvr.Group != "sonataflow.org" {
+			t.Errorf("Group = %q, want sonataflow.org", gvr.Group)
+		}
+		if gvr.Version != "v1alpha08" {
+			t.Errorf("Version = %q, want v1alpha08", gvr.Version)
+		}
+		if gvr.Resource != "sonataflows" {
+			t.Errorf("Resource = %q, want sonataflows", gvr.Resource)
+		}
+	})
+
+	t.Run("short name backstage", func(t *testing.T) {
+		gvr, err := resolveCRDType(cfg, "backstage")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gvr.Group != "rhdh.redhat.com" {
+			t.Errorf("Group = %q, want rhdh.redhat.com", gvr.Group)
+		}
+		if gvr.Version != "v1alpha5" {
+			t.Errorf("Version = %q, want v1alpha5", gvr.Version)
+		}
+		if gvr.Resource != "backstages" {
+			t.Errorf("Resource = %q, want backstages", gvr.Resource)
+		}
+	})
+
+	t.Run("unknown short name", func(t *testing.T) {
+		_, err := resolveCRDType(cfg, "unknown")
+		if err == nil {
+			t.Error("expected error for unknown CRD type")
+		}
+		if !strings.Contains(err.Error(), "unknown CRD resource type") {
+			t.Errorf("expected 'unknown CRD resource type' in error, got %v", err)
+		}
+	})
+
+	t.Run("singular with group gets pluralized", func(t *testing.T) {
+		gvr, err := resolveCRDType(cfg, "backstage.rhdh.redhat.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gvr.Resource != "backstages" {
+			t.Errorf("Resource = %q, want backstages (should pluralize singular)", gvr.Resource)
+		}
+	})
+}
+
+func TestDescribeCRD_ClusterScoped(t *testing.T) {
+	dir := t.TempDir()
+
+	cvGVR := schema.GroupVersionResource{
+		Group: "config.openshift.io", Version: "v1", Resource: "clusterversions",
+	}
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{"version": "4.16.0"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{cvGVR: "ClusterVersionList"},
+			cv,
+		),
+	)
+
+	path := filepath.Join(dir, "cv.describe.txt")
+	describeCRD(context.Background(), cfg, path, "clusterversions.config.openshift.io", "", "version")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "version") {
+		t.Errorf("expected cluster version name in output, got %q", string(data))
+	}
+}
+
+func TestDescribeCRD_GetFails(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("rhdh.redhat.com/v1alpha5"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				{Group: "rhdh.redhat.com", Version: "v1alpha5", Resource: "backstages"}: "BackstageList",
+			},
+		),
+	)
+
+	path := filepath.Join(dir, "describe.txt")
+	describeCRD(context.Background(), cfg, path, "backstages.rhdh.redhat.com", "rhdh", "nonexistent")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "failed") {
+		t.Errorf("expected 'failed' in output for missing resource, got %q", string(data))
+	}
+}
+
+func TestWriteResource_Unmarshalable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yaml")
+
+	writeResource(path, func() {})
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("expected no file when marshal fails")
+	}
+}
+
+func TestDescribeCRD_ResolveFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir, withAPIGroups("apps/v1"))
+
+	path := filepath.Join(dir, "describe.txt")
+	describeCRD(context.Background(), cfg, path, "unknowntype.missing.io", "ns", "name")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), "failed") {
+		t.Error("expected 'failed' for unresolvable type")
+	}
+}
+
+func TestListResourceNames_UnknownKind(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	gk := schema.GroupKind{Group: "unknown.io", Kind: "Unknown"}
+	_, err := listResourceNames(context.Background(), cfg, gk, "ns", "")
+	if err == nil {
+		t.Error("expected error for unknown kind")
+	}
+}

@@ -16,6 +16,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Orchestrator)(nil)
+
 type Orchestrator struct{}
 
 func (o *Orchestrator) Name() string { return "orchestrator" }
