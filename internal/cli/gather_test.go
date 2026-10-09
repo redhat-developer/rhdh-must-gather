@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	fakedynamic "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
@@ -393,6 +396,12 @@ func TestCollectPodLogs_NotInPod(t *testing.T) {
 	client, _ := fakeClientFactory()
 	dir := t.TempDir()
 
+	orig := serviceAccountNSFile
+	serviceAccountNSFile = filepath.Join(t.TempDir(), "nonexistent")
+	defer func() { serviceAccountNSFile = orig }()
+
+	t.Setenv("POD_NAME", "")
+
 	collectPodLogs(t.Context(), client, dir)
 
 	if _, err := os.Stat(filepath.Join(dir, "must-gather.log")); !os.IsNotExist(err) {
@@ -421,9 +430,22 @@ func TestCollectPodLogs_NoPodName(t *testing.T) {
 }
 
 func TestCollectPodLogs_Success(t *testing.T) {
-	client, _ := fakeClientFactory()
-	dir := t.TempDir()
+	logContent := "2024-01-01T00:00:00Z test log line\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(logContent))
+	}))
+	defer srv.Close()
 
+	clientset, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &kube.Client{
+		Clientset: clientset,
+		Config:    &rest.Config{Host: srv.URL},
+	}
+
+	dir := t.TempDir()
 	nsFile := filepath.Join(dir, "namespace")
 	_ = os.WriteFile(nsFile, []byte("test-ns"), 0o644)
 	orig := serviceAccountNSFile
@@ -435,7 +457,11 @@ func TestCollectPodLogs_Success(t *testing.T) {
 	outDir := t.TempDir()
 	collectPodLogs(t.Context(), client, outDir)
 
-	if _, err := os.Stat(filepath.Join(outDir, "must-gather.log")); err != nil {
-		t.Error("expected must-gather.log to be created")
+	data, err := os.ReadFile(filepath.Join(outDir, "must-gather.log"))
+	if err != nil {
+		t.Fatal("expected must-gather.log to be created")
+	}
+	if string(data) != logContent {
+		t.Errorf("log content = %q, want %q", data, logContent)
 	}
 }

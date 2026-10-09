@@ -948,8 +948,7 @@ func TestTakeHeapSnapshot_Timeout(t *testing.T) {
 
 		_ = conn.ReadJSON(new(cdpMessage))
 		_ = conn.ReadJSON(new(cdpMessage))
-		// Never respond — let timeout expire
-		time.Sleep(2 * time.Second)
+		<-r.Context().Done()
 	}))
 	defer s.Close()
 

@@ -76,8 +76,15 @@ func TestIngress_Run_NamespaceFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "ing-1") {
+	content := string(data)
+	if !strings.Contains(content, "ing-1") {
 		t.Error("expected ing-1 in output")
+	}
+	if strings.Contains(content, "ing-2") {
+		t.Error("excluded namespace ns2 ingress should not appear in output")
+	}
+	if strings.Contains(content, "b.example.com") {
+		t.Error("excluded namespace ns2 ingress host should not appear in output")
 	}
 }
 

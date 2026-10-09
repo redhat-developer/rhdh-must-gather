@@ -123,7 +123,7 @@ func TestRoute_Run_WithRoutes(t *testing.T) {
 func TestRoute_Run_WithNamespaceFilter(t *testing.T) {
 	dir := t.TempDir()
 
-	route := &unstructured.Unstructured{
+	includedRoute := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "route.openshift.io/v1",
 			"kind":       "Route",
@@ -136,12 +136,25 @@ func TestRoute_Run_WithNamespaceFilter(t *testing.T) {
 			},
 		},
 	}
+	excludedRoute := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "route.openshift.io/v1",
+			"kind":       "Route",
+			"metadata": map[string]any{
+				"name":      "other-app",
+				"namespace": "other-ns",
+			},
+			"spec": map[string]any{
+				"host": "other.apps.example.com",
+			},
+		},
+	}
 
 	cfg := newTestConfig(t, dir,
 		withAPIGroups("route.openshift.io/v1"),
 		withDynamicObjs(
 			map[schema.GroupVersionResource]string{routeGVR: "RouteList"},
-			route,
+			includedRoute, excludedRoute,
 		),
 	)
 	cfg.TargetNamespaces = []string{"rhdh"}
@@ -155,8 +168,15 @@ func TestRoute_Run_WithNamespaceFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "backstage") {
+	content := string(data)
+	if !strings.Contains(content, "backstage") {
 		t.Error("expected route name in output")
+	}
+	if strings.Contains(content, "other-app") {
+		t.Error("excluded namespace route should not appear in output")
+	}
+	if strings.Contains(content, "other.apps.example.com") {
+		t.Error("excluded namespace route host should not appear in output")
 	}
 }
 
