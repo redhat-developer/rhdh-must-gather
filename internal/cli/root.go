@@ -15,6 +15,7 @@ var mandatoryScripts = []string{
 	"route",
 	"ingress",
 	"namespace-inspect",
+	"network-policies",
 }
 
 type gatherOptions struct {

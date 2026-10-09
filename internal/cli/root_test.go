@@ -19,7 +19,7 @@ func TestBuildScriptList_Default(t *testing.T) {
 	opts := &gatherOptions{}
 	scripts := buildScriptList(cmd, opts)
 
-	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect"}
+	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect", "network-policies"}
 	if len(scripts) != len(expected) {
 		t.Fatalf("got %d scripts, want %d: %v", len(scripts), len(expected), scripts)
 	}

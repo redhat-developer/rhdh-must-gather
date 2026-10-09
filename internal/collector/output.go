@@ -39,14 +39,16 @@ var knownGroupKinds = map[string]schema.GroupKind{
 	"deployment":                {Group: "apps", Kind: "Deployment"},
 	"deployments":               {Group: "apps", Kind: "Deployment"},
 	"statefulset":               {Group: "apps", Kind: "StatefulSet"},
-	"statefulsets":               {Group: "apps", Kind: "StatefulSet"},
+	"statefulsets":              {Group: "apps", Kind: "StatefulSet"},
 	"replicaset":                {Group: "apps", Kind: "ReplicaSet"},
-	"replicasets":                {Group: "apps", Kind: "ReplicaSet"},
+	"replicasets":               {Group: "apps", Kind: "ReplicaSet"},
 	"controllerrevision":        {Group: "apps", Kind: "ControllerRevision"},
 	"controllerrevisions":       {Group: "apps", Kind: "ControllerRevision"},
 	"crd":                       {Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"},
 	"customresourcedefinition":  {Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"},
 	"customresourcedefinitions": {Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"},
+	"networkpolicy":             {Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+	"networkpolicies":           {Group: "networking.k8s.io", Kind: "NetworkPolicy"},
 }
 
 // describeResource uses the kubectl describe library to produce
@@ -235,6 +237,16 @@ func listResourceNames(ctx context.Context, cfg *Config, gk schema.GroupKind, na
 		return names, nil
 	case "ConfigMap":
 		list, err := client.CoreV1().ConfigMaps(namespace).List(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, len(list.Items))
+		for i, item := range list.Items {
+			names[i] = item.Name
+		}
+		return names, nil
+	case "NetworkPolicy":
+		list, err := client.NetworkingV1().NetworkPolicies(namespace).List(ctx, opts)
 		if err != nil {
 			return nil, err
 		}

@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/release"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/klog/v2"
 	kcmdutil "k8s.io/kubectl/pkg/cmd/util"
-	"helm.sh/helm/v4/pkg/action"
-	"helm.sh/helm/v4/pkg/release"
 
 	"github.com/openshift/oc/pkg/cli/admin/inspect"
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
@@ -77,6 +77,9 @@ func (n *NamespaceInspect) resolveNamespaces(ctx context.Context, cfg *Config) [
 }
 
 func (n *NamespaceInspect) detectHelmNamespaces(_ context.Context, cfg *Config, nsSet map[string]struct{}) {
+	if cfg.Client == nil || cfg.Client.Config == nil {
+		return
+	}
 	actionCfg, err := newHelmActionConfig(cfg, "")
 	if err != nil {
 		return
