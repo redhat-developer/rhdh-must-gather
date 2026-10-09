@@ -14,6 +14,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Platform)(nil)
+
 type Platform struct{}
 
 func (p *Platform) Name() string { return "platform" }

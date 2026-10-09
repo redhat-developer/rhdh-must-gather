@@ -25,6 +25,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*NamespaceInspect)(nil)
+
 type NamespaceInspect struct{}
 
 func (n *NamespaceInspect) Name() string { return "namespace-inspect" }
@@ -77,7 +79,7 @@ func (n *NamespaceInspect) resolveNamespaces(ctx context.Context, cfg *Config) [
 }
 
 func (n *NamespaceInspect) detectHelmNamespaces(_ context.Context, cfg *Config, nsSet map[string]struct{}) {
-	actionCfg, err := newHelmActionConfig(cfg, "")
+	actionCfg, err := cfg.helmActionConfig("")
 	if err != nil {
 		return
 	}

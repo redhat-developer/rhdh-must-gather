@@ -5,27 +5,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	fakediscovery "k8s.io/client-go/discovery/fake"
-	fakedynamic "k8s.io/client-go/dynamic/fake"
-	fakeclientset "k8s.io/client-go/kubernetes/fake"
-
-	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
 
 func TestPlatform_VanillaK8s(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newTestConfig(t, dir,
-		[]string{"apps/v1"},
-		[]*corev1.Node{testNode("node1", "", nil)},
-		nil,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "", nil)),
 	)
 
 	p := &Platform{}
@@ -42,11 +32,10 @@ func TestPlatform_VanillaK8s(t *testing.T) {
 func TestPlatform_EKS(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newTestConfig(t, dir,
-		[]string{"apps/v1"},
-		[]*corev1.Node{testNode("node1", "aws://us-east-1/i-123", map[string]string{
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "aws://us-east-1/i-123", map[string]string{
 			"eks.amazonaws.com/nodegroup": "my-nodegroup",
-		})},
-		nil,
+		})),
 	)
 
 	p := &Platform{}
@@ -66,11 +55,10 @@ func TestPlatform_EKS(t *testing.T) {
 func TestPlatform_GKE(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newTestConfig(t, dir,
-		[]string{"apps/v1"},
-		[]*corev1.Node{testNode("node1", "gce://project/zone/instance", map[string]string{
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "gce://project/zone/instance", map[string]string{
 			"cloud.google.com/gke-nodepool": "default-pool",
-		})},
-		nil,
+		})),
 	)
 
 	p := &Platform{}
@@ -115,9 +103,14 @@ func TestPlatform_OCP(t *testing.T) {
 	}
 
 	cfg := newTestConfig(t, dir,
-		[]string{"config.openshift.io/v1"},
-		nil,
-		[]runtime.Object{cv, infra},
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
 	)
 
 	p := &Platform{}
@@ -140,12 +133,176 @@ func TestPlatform_OCP(t *testing.T) {
 	}
 }
 
+func TestPlatform_AKS(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "azure:///subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0", map[string]string{
+			"agentpool": "default",
+		})),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "AKS" {
+		t.Errorf("platform = %q, want AKS", info.Platform)
+	}
+	if info.Underlying != "Azure" {
+		t.Errorf("underlying = %q, want Azure", info.Underlying)
+	}
+}
+
+func TestPlatform_ROSA(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{
+					"version": "4.16.0",
+				},
+			},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{
+					"type": "AWS",
+					"aws": map[string]any{
+						"resourceTags": []any{
+							map[string]any{"key": "rosa.openshift.io/cluster-id"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "ROSA" {
+		t.Errorf("platform = %q, want ROSA", info.Platform)
+	}
+}
+
+func TestPlatform_ROKS(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status":     map[string]any{"desired": map[string]any{"version": "4.16.0"}},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{
+					"type": "IBMCloud",
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "ROKS" {
+		t.Errorf("platform = %q, want ROKS", info.Platform)
+	}
+	if info.Underlying != "IBMCloud" {
+		t.Errorf("underlying = %q, want IBMCloud", info.Underlying)
+	}
+}
+
+func TestPlatform_vSphere(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "vsphere://vm-123", nil)),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Underlying != "vSphere" {
+		t.Errorf("underlying = %q, want vSphere", info.Underlying)
+	}
+}
+
+func TestPlatform_IBMCloud(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "ibm://instance-1", nil)),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Underlying != "IBMCloud" {
+		t.Errorf("underlying = %q, want IBMCloud", info.Underlying)
+	}
+}
+
 func TestPlatform_OutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newTestConfig(t, dir,
-		[]string{"apps/v1"},
-		[]*corev1.Node{testNode("node1", "", nil)},
-		nil,
+		withAPIGroups("apps/v1"),
+		withTypedObjs(testNode("node1", "", nil)),
 	)
 
 	p := &Platform{}
@@ -181,6 +338,250 @@ func TestNestedString(t *testing.T) {
 	}
 }
 
+func TestPlatform_ARO(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{"version": "4.16.0"},
+			},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{
+					"type": "Azure",
+					"azure": map[string]any{
+						"resourceTags": []any{
+							map[string]any{"key": "aro.openshift.io/cluster-id"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "ARO" {
+		t.Errorf("platform = %q, want ARO", info.Platform)
+	}
+	if info.Underlying != "Azure" {
+		t.Errorf("underlying = %q, want Azure", info.Underlying)
+	}
+}
+
+func TestPlatform_OCP_NoClusterVersion(t *testing.T) {
+	dir := t.TempDir()
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platformStatus": map[string]any{"type": "AWS"},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "OCP" {
+		t.Errorf("platform = %q, want OCP", info.Platform)
+	}
+	if info.OCPVersion != "" {
+		t.Errorf("ocpVersion = %q, want empty when ClusterVersion not available", info.OCPVersion)
+	}
+}
+
+func TestPlatform_K8s_NoNodes(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("apps/v1"),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "Vanilla K8s" {
+		t.Errorf("platform = %q, want Vanilla K8s", info.Platform)
+	}
+}
+
+func TestPlatform_OCP_FallbackK8sVersion(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status": map[string]any{
+				"desired": map[string]any{
+					"version": "4.16.0",
+				},
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Platform != "OCP" {
+		t.Errorf("platform = %q, want OCP", info.Platform)
+	}
+	if info.OCPVersion != "4.16.0" {
+		t.Errorf("ocpVersion = %q, want 4.16.0", info.OCPVersion)
+	}
+}
+
+func TestPlatform_OCP_InfraPlatformFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	cv := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "ClusterVersion",
+			"metadata":   map[string]any{"name": "version"},
+			"status":     map[string]any{"desired": map[string]any{"version": "4.16.0"}},
+		},
+	}
+
+	infra := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "config.openshift.io/v1",
+			"kind":       "Infrastructure",
+			"metadata":   map[string]any{"name": "cluster"},
+			"status": map[string]any{
+				"platform": "BareMetal",
+			},
+		},
+	}
+
+	cfg := newTestConfig(t, dir,
+		withAPIGroups("config.openshift.io/v1"),
+		withDynamicObjs(
+			map[schema.GroupVersionResource]string{
+				clusterVersionGVR: "ClusterVersionList",
+				infrastructureGVR: "InfrastructureList",
+			},
+			cv, infra,
+		),
+	)
+
+	p := &Platform{}
+	if err := p.Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	info := readPlatformJSON(t, dir)
+	if info.Underlying != "BareMetal" {
+		t.Errorf("underlying = %q, want BareMetal (fallback to status.platform)", info.Underlying)
+	}
+}
+
+func TestNestedString_NonMapIntermediate(t *testing.T) {
+	obj := map[string]any{
+		"status": "not-a-map",
+	}
+	val, found, err := nestedString(obj, "status", "version")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if found {
+		t.Error("expected found=false for non-map intermediate")
+	}
+	if val != "" {
+		t.Errorf("val = %q, want empty", val)
+	}
+}
+
+func TestNestedString_NonStringFinalValue(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"replicas": int64(3),
+		},
+	}
+	val, found, err := nestedString(obj, "spec", "replicas")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if found {
+		t.Error("expected found=false for non-string value")
+	}
+	if val != "" {
+		t.Errorf("val = %q, want empty", val)
+	}
+}
+
+func TestGetServerVersion_VanillaK8s(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newTestConfig(t, dir)
+
+	p := &Platform{}
+	ver := p.getServerVersion(cfg)
+	if ver == "" {
+		t.Log("FakeDiscovery.ServerVersion returns empty by default, expected")
+	}
+}
+
 func readPlatformJSON(t *testing.T, dir string) platformInfo {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "platform", "platform.json"))
@@ -192,54 +593,4 @@ func readPlatformJSON(t *testing.T, dir string) platformInfo {
 		t.Fatalf("parsing platform.json: %v", err)
 	}
 	return info
-}
-
-func newTestConfig(t *testing.T, basePath string, apiGroupVersions []string, nodes []*corev1.Node, dynamicObjs []runtime.Object) *Config {
-	t.Helper()
-
-	var typedObjs []runtime.Object
-	for _, n := range nodes {
-		typedObjs = append(typedObjs, n)
-	}
-	fakeClient := fakeclientset.NewSimpleClientset(typedObjs...)
-
-	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
-	resources := make([]*metav1.APIResourceList, len(apiGroupVersions))
-	for i, gv := range apiGroupVersions {
-		resources[i] = &metav1.APIResourceList{GroupVersion: gv}
-	}
-	fd.Resources = resources
-
-	scheme := runtime.NewScheme()
-	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{
-			clusterVersionGVR: "ClusterVersionList",
-			infrastructureGVR: "InfrastructureList",
-		},
-		dynamicObjs...)
-
-	return &Config{
-		BasePath:    basePath,
-		Interrupted: new(atomic.Bool),
-		Client: &kube.Client{
-			Clientset: fakeClient,
-			Discovery: fd,
-			Dynamic:   dynClient,
-		},
-	}
-}
-
-func testNode(name, providerID string, labels map[string]string) *corev1.Node {
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	return &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: labels,
-		},
-		Spec: corev1.NodeSpec{
-			ProviderID: providerID,
-		},
-	}
 }

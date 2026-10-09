@@ -15,6 +15,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Ingress)(nil)
+
 type Ingress struct{}
 
 func (i *Ingress) Name() string { return "ingress" }

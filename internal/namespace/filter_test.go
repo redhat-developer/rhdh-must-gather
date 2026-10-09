@@ -1,98 +1,93 @@
 package namespace
 
 import (
+	"reflect"
 	"testing"
 )
 
-func TestParseNamespaces_Empty(t *testing.T) {
-	if ns := ParseNamespaces(""); ns != nil {
-		t.Errorf("got %v, want nil", ns)
+func TestParseNamespaces(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"empty", "", nil},
+		{"single", "rhdh-prod", []string{"rhdh-prod"}},
+		{"multiple with spaces", "ns1, ns2 ,ns3", []string{"ns1", "ns2", "ns3"}},
+		{"whitespace only", " , , ", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseNamespaces(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ParseNamespaces(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestParseNamespaces_Single(t *testing.T) {
-	ns := ParseNamespaces("rhdh-prod")
-	if len(ns) != 1 || ns[0] != "rhdh-prod" {
-		t.Errorf("got %v, want [rhdh-prod]", ns)
+func TestIncludes(t *testing.T) {
+	tests := []struct {
+		name    string
+		targets []string
+		ns      string
+		want    bool
+	}{
+		{"no filter includes all", nil, "any-ns", true},
+		{"match first", []string{"ns1", "ns2"}, "ns1", true},
+		{"match second", []string{"ns1", "ns2"}, "ns2", true},
+		{"no match", []string{"ns1", "ns2"}, "ns3", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Includes(tt.targets, tt.ns); got != tt.want {
+				t.Errorf("Includes(%v, %q) = %v, want %v", tt.targets, tt.ns, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestParseNamespaces_Multiple(t *testing.T) {
-	ns := ParseNamespaces("ns1, ns2 ,ns3")
-	expected := []string{"ns1", "ns2", "ns3"}
-	if len(ns) != len(expected) {
-		t.Fatalf("got %v, want %v", ns, expected)
+func TestTargetNamespaces(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "rhdh-prod", []string{"rhdh-prod"}},
 	}
-	for i, want := range expected {
-		if ns[i] != want {
-			t.Errorf("ns[%d] = %q, want %q", i, ns[i], want)
-		}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("RHDH_TARGET_NAMESPACES", tt.env)
+			got := TargetNamespaces()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("TargetNamespaces() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestParseNamespaces_WhitespaceOnly(t *testing.T) {
-	if ns := ParseNamespaces(" , , "); ns != nil {
-		t.Errorf("got %v, want nil", ns)
+func TestShouldInclude(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		ns   string
+		want bool
+	}{
+		{"no filter", "", "any-ns", true},
+		{"match", "ns1,ns2", "ns1", true},
+		{"no match", "ns1,ns2", "ns3", false},
 	}
-}
 
-func TestIncludes_NoFilter(t *testing.T) {
-	if !Includes(nil, "any-ns") {
-		t.Error("should include all namespaces when no filter set")
-	}
-}
-
-func TestIncludes_Match(t *testing.T) {
-	targets := []string{"ns1", "ns2"}
-	if !Includes(targets, "ns1") {
-		t.Error("ns1 should be included")
-	}
-	if !Includes(targets, "ns2") {
-		t.Error("ns2 should be included")
-	}
-}
-
-func TestIncludes_NoMatch(t *testing.T) {
-	targets := []string{"ns1", "ns2"}
-	if Includes(targets, "ns3") {
-		t.Error("ns3 should not be included")
-	}
-}
-
-// Tests for the env-based wrappers.
-
-func TestTargetNamespaces_Empty(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "")
-	if ns := TargetNamespaces(); ns != nil {
-		t.Errorf("got %v, want nil", ns)
-	}
-}
-
-func TestTargetNamespaces_Single(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "rhdh-prod")
-	ns := TargetNamespaces()
-	if len(ns) != 1 || ns[0] != "rhdh-prod" {
-		t.Errorf("got %v, want [rhdh-prod]", ns)
-	}
-}
-
-func TestShouldInclude_NoFilter(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "")
-	if !ShouldInclude("any-ns") {
-		t.Error("should include all namespaces when no filter set")
-	}
-}
-
-func TestShouldInclude_Match(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "ns1,ns2")
-	if !ShouldInclude("ns1") {
-		t.Error("ns1 should be included")
-	}
-}
-
-func TestShouldInclude_NoMatch(t *testing.T) {
-	t.Setenv("RHDH_TARGET_NAMESPACES", "ns1,ns2")
-	if ShouldInclude("ns3") {
-		t.Error("ns3 should not be included")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("RHDH_TARGET_NAMESPACES", tt.env)
+			if got := ShouldInclude(tt.ns); got != tt.want {
+				t.Errorf("ShouldInclude(%q) = %v, want %v", tt.ns, got, tt.want)
+			}
+		})
 	}
 }
