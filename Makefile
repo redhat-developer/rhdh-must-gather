@@ -21,6 +21,17 @@ BUILD_ARGS ?=
 LABELS ?=
 BASE_COLLECTION_PATH ?= ./out
 
+# Tool Binaries
+LOCALBIN ?= $(shell pwd)/bin
+GOSEC ?= $(LOCALBIN)/gosec
+
+# Tool Versions
+GOSEC_VERSION ?= v2.27.1
+
+# Gosec options - default format is sarif so we can integrate with Github code scanning
+GOSEC_FMT ?= sarif  # for other options, see https://github.com/securego/gosec#output-formats
+GOSEC_OUTPUT_FILE ?= gosec.sarif
+
 # Go configuration
 GO ?= go
 GO_MODULE := github.com/redhat-developer/rhdh-must-gather
@@ -86,6 +97,11 @@ test: ## Run unit tests
 lint: ## Run linter (golangci-lint)
 	golangci-lint run ./...
 
+.PHONY: gosec
+gosec: addgosec ## Run the gosec scanner for non-test files in this repo
+	# we let the report content trigger a failure using the GitHub Security features.
+	$(GOSEC) -no-fail -exclude-generated -fmt $(GOSEC_FMT) -out $(GOSEC_OUTPUT_FILE) ./...
+
 ##@ Build
 
 .PHONY: image-build
@@ -146,6 +162,32 @@ clean: clean-out ## Remove built images, binary, and test output
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
 	-rm -rf "$(TEST_RESULTS_DIR)"
 	@echo "Cleanup complete"
+
+##@ Dependencies
+
+.PHONY: addgosec
+addgosec: $(GOSEC) ## Download gosec locally if necessary.
+$(GOSEC): $(LOCALBIN)
+	$(call go-install-tool,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec,$(GOSEC_VERSION))
+
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# $1 - target path with name of binary (ideally with version)
+# $2 - package url which can be installed
+# $3 - specific version of package
+define go-install-tool
+@[ -f "$(1)-$(3)" ] || { \
+set -e; \
+package=$(2)@$(3) ;\
+echo "Downloading $${package}" ;\
+rm -f $(1) || true ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3) ;\
+} ;\
+ln -sf $(1)-$(3) $(1)
+endef
 
 ##@ General
 

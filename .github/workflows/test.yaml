@@ -66,6 +66,12 @@ jobs:
         with:
           version: v2.14.0
 
+      - name: Run Gosec Security Scanner
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: make gosec
+        # Gosec results are available in workflow logs
+        # SonarCloud provides Code Scanning integration in the Security tab
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest

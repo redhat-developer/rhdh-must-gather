@@ -47,3 +47,6 @@ rhdh-must-gather-output.tar.gz
 *.test
 cover.out
 
+# Security scanning reports
+gosec.sarif
+
