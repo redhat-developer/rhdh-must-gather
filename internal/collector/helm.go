@@ -28,6 +28,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Helm)(nil)
+
 type Helm struct{}
 
 func (h *Helm) Name() string { return "helm" }
@@ -67,7 +69,7 @@ func (h *Helm) Run(ctx context.Context, cfg *Config) error {
 }
 
 func (h *Helm) gatherNativeReleases(ctx context.Context, cfg *Config, helmDir string, processedNS map[string]bool, processedWorkloads map[string]bool) int {
-	actionCfg, err := newHelmActionConfig(cfg, "")
+	actionCfg, err := cfg.helmActionConfig("")
 	if err != nil {
 		log.Warn("Failed to initialize Helm action config: %v", err)
 		_ = os.WriteFile(filepath.Join(helmDir, "all-rhdh-releases.txt"),
@@ -139,7 +141,7 @@ func (h *Helm) gatherNativeReleases(ctx context.Context, cfg *Config, helmDir st
 }
 
 func (h *Helm) collectReleaseData(ctx context.Context, cfg *Config, ns, name, releaseDir string, processedWorkloads map[string]bool) {
-	nsCfg, err := newHelmActionConfig(cfg, ns)
+	nsCfg, err := cfg.helmActionConfig(ns)
 	if err != nil {
 		writeCollectError(filepath.Join(releaseDir, "error.txt"), "init helm config for "+ns, err)
 		return

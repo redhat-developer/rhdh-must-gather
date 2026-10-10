@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
 
 var mandatoryScripts = []string{
@@ -26,6 +28,8 @@ type gatherOptions struct {
 	clusterInfo       bool
 	since             string
 	sinceTime         string
+	clientFactory     func() (*kube.Client, error)
+	cleanFunc         func(configPath, inputPath, outputPath, reportDir string) error
 }
 
 func newRootCmd() *cobra.Command {

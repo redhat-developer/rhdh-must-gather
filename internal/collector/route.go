@@ -14,6 +14,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*Route)(nil)
+
 type Route struct{}
 
 func (r *Route) Name() string { return "route" }

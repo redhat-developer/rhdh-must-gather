@@ -12,6 +12,8 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
+var _ Collector = (*ClusterInfo)(nil)
+
 type ClusterInfo struct{}
 
 func (c *ClusterInfo) Name() string { return "cluster-info" }

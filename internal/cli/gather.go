@@ -57,7 +57,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 			err = errors.Join(err, fmt.Errorf("sanitization aborted"))
 		default:
 			log.Info("Obfuscating data...")
-			if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), runCleanSubprocess); oerr != nil {
+			clean := opts.cleanFunc
+			if clean == nil {
+				clean = runCleanSubprocess
+			}
+			if oerr := obfuscate.Run(context.Background(), kubeClient, basePath, resolveNamespaces(opts), clean); oerr != nil {
 				log.Warn("Obfuscation failed: %v. Review carefully before sharing externally.", oerr)
 			} else {
 				log.Info("Post-processing complete")
@@ -89,7 +93,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		return fmt.Errorf("writing version file: %w", err)
 	}
 
-	kubeClient, err = kube.NewClient()
+	newClient := opts.clientFactory
+	if newClient == nil {
+		newClient = kube.NewClient
+	}
+	kubeClient, err = newClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
@@ -155,10 +163,12 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 	return nil
 }
 
+var serviceAccountNSFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 // collectPodLogs collects logs from the must-gather pod itself when running
 // inside a pod (replaces logs.sh).
 func collectPodLogs(ctx context.Context, client *kube.Client, basePath string) {
-	nsFile := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	nsFile := serviceAccountNSFile
 	nsBytes, err := os.ReadFile(nsFile)
 	if err != nil {
 		return
