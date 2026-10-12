@@ -19,7 +19,7 @@ func TestBuildScriptList_Default(t *testing.T) {
 	opts := &gatherOptions{}
 	scripts := buildScriptList(cmd, opts)
 
-	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect"}
+	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect", "network-policies"}
 	if len(scripts) != len(expected) {
 		t.Fatalf("got %d scripts, want %d: %v", len(scripts), len(expected), scripts)
 	}
@@ -80,8 +80,8 @@ func TestBuildScriptList_ExcludeAll(t *testing.T) {
 	opts := &gatherOptions{}
 	scripts := buildScriptList(cmd, opts)
 
-	if len(scripts) != 0 {
-		t.Errorf("got %d scripts, want 0: %v", len(scripts), scripts)
+	if len(scripts) != 1 || scripts[0] != "network-policies" {
+		t.Errorf("got %v, want [network-policies]", scripts)
 	}
 }
 

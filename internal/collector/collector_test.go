@@ -156,6 +156,7 @@ func TestRegistry(t *testing.T) {
 	expected := []string{
 		"platform", "route", "ingress", "cluster-info",
 		"operator", "orchestrator", "helm", "namespace-inspect",
+		"network-policies",
 	}
 
 	for _, name := range expected {

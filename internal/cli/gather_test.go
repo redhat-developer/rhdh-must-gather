@@ -211,16 +211,18 @@ func fakeClientFactory() (*kube.Client, error) {
 	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
 	scheme := runtime.NewScheme()
 	dynClient := fakedynamic.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
-		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}:                 "IngressList",
-		{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}:                   "DNSList",
-		{Group: "operator.openshift.io", Version: "v1", Resource: "ingresscontrollers"}:     "IngressControllerList",
-		{Group: "route.openshift.io", Version: "v1", Resource: "routes"}:                    "RouteList",
-		{Group: "apps", Version: "v1", Resource: "deployments"}:                             "DeploymentList",
-		{Group: "apps", Version: "v1", Resource: "statefulsets"}:                             "StatefulSetList",
-		{Group: "apps", Version: "v1", Resource: "replicasets"}:                              "ReplicaSetList",
-		{Group: "rhdh.redhat.com", Version: "v1alpha3", Resource: "backstages"}:              "BackstageList",
-		{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}:             "NetworkPolicyList",
-		{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}:                           "IngressList",
+		{Group: "config.openshift.io", Version: "v1", Resource: "dnses"}:                             "DNSList",
+		{Group: "operator.openshift.io", Version: "v1", Resource: "ingresscontrollers"}:              "IngressControllerList",
+		{Group: "route.openshift.io", Version: "v1", Resource: "routes"}:                             "RouteList",
+		{Group: "apps", Version: "v1", Resource: "deployments"}:                                      "DeploymentList",
+		{Group: "apps", Version: "v1", Resource: "statefulsets"}:                                     "StatefulSetList",
+		{Group: "apps", Version: "v1", Resource: "replicasets"}:                                      "ReplicaSetList",
+		{Group: "rhdh.redhat.com", Version: "v1alpha3", Resource: "backstages"}:                      "BackstageList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}:                     "NetworkPolicyList",
+		{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "adminnetworkpolicies"}:   "AdminNetworkPolicyList",
+		{Group: "policy.networking.k8s.io", Version: "v1alpha1", Resource: "clusternetworkpolicies"}: "ClusterNetworkPolicyList",
+		{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}:        "CustomResourceDefinitionList",
 	})
 
 	return &kube.Client{
