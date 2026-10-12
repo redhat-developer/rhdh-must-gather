@@ -1,15 +1,148 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:best-practices",
+    ":gitSignOff",
+    ":rebaseStalePrs",
+    "docker:disableMajor",
+    "default:pinDigestsDisabled",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "labels": [
+    "kind/dependency upgrade"
+  ],
   "baseBranchPatterns": ["main", "/^release-.*/"],
+  "constraints": {
+    "go": "1.26"
+  },
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "packageRules": [
     {
       "description": "Disable major updates on release branches",
       "matchBaseBranches": ["/^release-.*/"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "enabled": false,
+      "groupName": "all minor dependencies",
+      "groupSlug": "all-minor",
+      "matchPackageNames": [
+        "*"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ]
+    },
+    {
+      "groupName": "all patch dependencies",
+      "groupSlug": "all-patch",
+      "matchPackageNames": [
+        "*"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ]
+    },
+    {
+      "description": "Do NOT generate PRs to pin or apply digests to dockerfiles",
+      "enabled": false,
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Do generate PRs for minor dockerfile updates",
+      "enabled": true,
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "matchBaseBranches": [
+        "main",
+        "/^release-\\d+\\..*/"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Do automerge patch updates to dockerfiles",
+      "enabled": true,
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "additionalBranchPrefix": "dockerfile ",
+      "groupName": "All dockerfile images",
+      "automerge": true,
+      "pinDigests": false
+    },
+    {
+      "description": "Do NOT generate PRs for major go dependency updates",
+      "enabled": false,
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Do automerge go dependency patch updates, except for versions starting with 0",
+      "enabled": true,
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "description": "Do generate PRs for golang version patch bumps, keeping x.yy version the same",
+      "enabled": true,
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Do automerge and pin actions in GH workflows, except for versions starting with 0",
+      "enabled": true,
+      "matchDatasources": [
+        "github-runners"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
     }
   ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "addLabels": [
+      "kind/security"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
   "customManagers": [
     {
       "customType": "regex",
