@@ -124,6 +124,7 @@ Usage: ./must_gather [params...]
   > - route
   > - ingress
   > - namespace-inspect
+  > - network-policies
 
   > You can exclude specific data collection types:
   --without-operator            Skip operator-based RHDH deployment data collection
@@ -134,6 +135,7 @@ Usage: ./must_gather [params...]
   --without-route               Skip OpenShift route collection
   --without-ingress             Skip Kubernetes ingress collection
   --without-namespace-inspect   Skip deep Namespace inspect
+
 
   > You can also choose to enable optional collectors:
   --cluster-info                Collect cluster-wide diagnostic information
@@ -255,6 +257,22 @@ Usage: ./must_gather [params...]
 ├── must-gather.log                 # Must-gather container logs (if running in pod)
 ├── cluster-info/                   # Cluster-wide information (if --cluster-info used)
 │   └── [cluster-info dump output]
+├── network-policies/               # NetworkPolicy diagnostics (collected by default)
+│   ├── detected-namespaces.txt
+│   ├── summary.txt
+│   ├── cluster/                    # Cluster-scoped AdminNetworkPolicy / ClusterNetworkPolicy if present
+│   │   ├── adminnetworkpolicies.yaml
+│   │   └── clusternetworkpolicies.yaml
+│   ├── peer-namespaces/
+│   └── ns=[namespace]/
+│       ├── networkpolicies.yaml
+│       ├── networkpolicies.json
+│       ├── networkpolicies.txt
+│       ├── networkpolicies.labels.txt
+│       ├── networkpolicies.describe.txt
+│       ├── namespace.yaml
+│       ├── pods-show-labels.txt
+│       └── services.yaml
 ├── namespace-inspect/              # Deep Namespace inspect (collected by default)
 │   ├── inspect.log                 # Inspection command logs
 │   ├── inspection-summary.txt      # Summary of inspected namespaces and data collected

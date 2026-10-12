@@ -86,12 +86,13 @@ func (c *Config) helmActionConfig(namespace string) (*action.Configuration, erro
 }
 
 var Registry = map[string]Collector{
-	"platform":     &Platform{},
-	"route":        &Route{},
-	"ingress":      &Ingress{},
-	"cluster-info": &ClusterInfo{},
-	"operator":     &Operator{},
-	"orchestrator": &Orchestrator{},
+	"platform":          &Platform{},
+	"route":             &Route{},
+	"ingress":           &Ingress{},
+	"cluster-info":      &ClusterInfo{},
+	"operator":          &Operator{},
+	"orchestrator":      &Orchestrator{},
 	"helm":              &Helm{},
 	"namespace-inspect": &NamespaceInspect{},
+	"network-policies":  &NetworkPolicies{},
 }

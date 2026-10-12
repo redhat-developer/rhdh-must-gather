@@ -17,6 +17,7 @@ var mandatoryScripts = []string{
 	"route",
 	"ingress",
 	"namespace-inspect",
+	"network-policies",
 }
 
 type gatherOptions struct {
@@ -89,6 +90,9 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.StringVar(&opts.sinceTime, "since-time", "", "Only collect logs after a specific date (RFC3339, e.g. 2006-01-02T15:04:05Z)")
 
 	for _, script := range mandatoryScripts {
+		if script == "network-policies" {
+			continue
+		}
 		flags.Bool("without-"+script, false, "Skip "+script+" data collection")
 	}
 
@@ -104,6 +108,10 @@ from both Helm-based and Operator-managed RHDH instances.`,
 func buildScriptList(cmd *cobra.Command, opts *gatherOptions) []string {
 	scripts := make([]string, 0, len(mandatoryScripts)+1)
 	for _, s := range mandatoryScripts {
+		if s == "network-policies" {
+			scripts = append(scripts, s)
+			continue
+		}
 		excluded, _ := cmd.Flags().GetBool("without-" + s)
 		if !excluded {
 			scripts = append(scripts, s)
