@@ -1,6 +1,6 @@
 # Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
-FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1791362847@sha256:f6b33401d7dc17d32bed91be97ba14c642646031ef2e89630b035a822d1755bf AS go-builder
+FROM registry.access.redhat.com/ubi10/go-toolset:10.2-1791865085@sha256:dc8fa0b4f60cdb933ffb269ef4ca7212ae4b4ba6f8747b23cf0f48d0458564a5 AS go-builder
 COPY go.mod go.sum /opt/app-root/src/
 WORKDIR /opt/app-root/src
 RUN go mod download
@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 # Stage 2: Final image
 # https://registry.access.redhat.com/ubi10-minimal
-FROM registry.access.redhat.com/ubi10-minimal:10.2-1791444377@sha256:bcecd3e74c9d03eb1a596c6c8f366775a289d422ac5925ec1539924d762ebf23
+FROM registry.access.redhat.com/ubi10-minimal:10.2-1791784796@sha256:9712ae522acef7e90c571280b4faf69614b59395448d6bfb1c780c3bbf168218
 
 ARG RHDH_MUST_GATHER_VERSION="0.0.0-unknown"
 
