@@ -60,7 +60,7 @@
       "automerge": false
     },
     {
-      "description": "Weekly maintenance owns Containerfile base image and RPM lock updates on main and release-*",
+      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
       "enabled": false,
       "matchManagers": [
         "dockerfile"
@@ -78,7 +78,7 @@
       "automerge": false
     },
     {
-      "description": "Weekly maintenance owns Containerfile base image and RPM lock updates on main and release-*",
+      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
       "enabled": false,
       "matchManagers": [
         "dockerfile"
