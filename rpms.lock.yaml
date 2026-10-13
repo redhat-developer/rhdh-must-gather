@@ -452,13 +452,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/5.1-el9-beta/openshift-clients-5.1.0-202610131455.p2.g758dbfa.assembly.stream.el9.aarch64.rpm
-    repoid: rhocp-5.1-for-rhel-9-aarch64-rpms
-    size: 28002889
-    checksum: sha256:5d42cb1ae1a4450e1b7df95ac981c3ad6d95e3b5ca26467d8e96b1a10fb75293
+  - url: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.23-el9-beta/openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.aarch64.rpm
+    repoid: rhocp-4.23-for-rhel-9-aarch64-rpms
+    size: 27998243
+    checksum: sha256:dbfcf116eeba5c7e9c1e84bc93dd53e51c2e53980e57d95e67c7aa99986a9812
     name: openshift-clients
-    evr: 5.1.0-202610131455.p2.g758dbfa.assembly.stream.el9
-    sourcerpm: openshift-clients-5.1.0-202610131455.p2.g758dbfa.assembly.stream.el9.src.rpm
+    evr: 4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9
+    sourcerpm: openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.aarch64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-aarch64-rpms
     size: 11909643
@@ -1139,13 +1139,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rpms/5.1-el9-beta/openshift-clients-5.1.0-202609291809.p2.gfeed560.assembly.stream.el9.x86_64.rpm
-    repoid: rhocp-5.1-for-rhel-9-x86_64-rpms
-    size: 31247633
-    checksum: sha256:ab7db58d1ecd68370d365df60fc7eaec39c6cfa66e126967fbacab5457ba4103
+  - url: https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rpms/4.23-el9-beta/openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.x86_64.rpm
+    repoid: rhocp-4.23-for-rhel-9-x86_64-rpms
+    size: 31219762
+    checksum: sha256:c7e085785fed01475ef9ccf00a0707cfea0a5ca2919ea6206c50bff8173c8a69
     name: openshift-clients
-    evr: 5.1.0-202609291809.p2.gfeed560.assembly.stream.el9
-    sourcerpm: openshift-clients-5.1.0-202609291809.p2.gfeed560.assembly.stream.el9.src.rpm
+    evr: 4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9
+    sourcerpm: openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.x86_64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-x86_64-rpms
     size: 13496216
