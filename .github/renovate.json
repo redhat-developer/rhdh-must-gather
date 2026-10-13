@@ -60,8 +60,11 @@
       "automerge": false
     },
     {
-      "description": "Do generate PRs for minor dockerfile updates",
-      "enabled": true,
+      "description": "Weekly maintenance owns Containerfile base image and RPM lock updates on main and release-*",
+      "enabled": false,
+      "matchManagers": [
+        "dockerfile"
+      ],
       "matchDatasources": [
         "docker"
       ],
@@ -70,22 +73,29 @@
       ],
       "matchBaseBranches": [
         "main",
-        "/^release-\\d+\\..*/"
+        "/^release-.*/"
       ],
       "automerge": false
     },
     {
-      "description": "Do automerge patch updates to dockerfiles",
-      "enabled": true,
+      "description": "Weekly maintenance owns Containerfile base image and RPM lock updates on main and release-*",
+      "enabled": false,
+      "matchManagers": [
+        "dockerfile"
+      ],
       "matchDatasources": [
         "docker"
       ],
       "matchUpdateTypes": [
         "patch"
       ],
+      "matchBaseBranches": [
+        "main",
+        "/^release-.*/"
+      ],
       "additionalBranchPrefix": "dockerfile ",
       "groupName": "All dockerfile images",
-      "automerge": true,
+      "automerge": false,
       "pinDigests": false
     },
     {
