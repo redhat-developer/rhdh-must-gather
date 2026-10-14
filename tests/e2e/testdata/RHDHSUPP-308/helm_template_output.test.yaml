@@ -1,4 +1,8 @@
 ---
+# NOTE: This test uses quay.io/asoro/rhdh:1.5 instead of quay.io/rhdh/rhdh-hub-rhel9:1.5
+# because the original image is periodically pruned for unsupported RHDH versions.
+# The copy is pinned to ensure E2E tests remain stable, as this test mimics
+# a valid support case scenario where the customer was running that specific version.
 # Source: backstage/charts/upstream/charts/postgresql/templates/secrets.yaml
 apiVersion: v1
 kind: Secret
@@ -230,7 +234,7 @@ spec:
           env:
           - name: NPM_CONFIG_USERCONFIG
             value: /opt/app-root/src/.npmrc.dynamic-plugins
-          image: 'quay.io/rhdh/rhdh-hub-rhel9:1.5'
+          image: 'quay.io/asoro/rhdh:1.5'
           imagePullPolicy: Always
           name: install-dynamic-plugins
           resources:
@@ -271,7 +275,7 @@ spec:
           workingDir: /opt/app-root/src
       containers:
         - name: backstage-backend
-          image: quay.io/rhdh/rhdh-hub-rhel9:1.5
+          image: quay.io/asoro/rhdh:1.5
           imagePullPolicy: "Always"
           securityContext:
             allowPrivilegeEscalation: false
