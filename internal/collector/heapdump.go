@@ -739,7 +739,8 @@ func writeCollectionFailedGuidance(containerDir, method, pid, pod, container, ns
 	fmt.Fprintf(&sb, "  Pod: %s\n", pod)
 	fmt.Fprintf(&sb, "  Namespace: %s\n\n", ns)
 
-	if method == "inspector" {
+	switch method {
+	case "inspector":
 		sb.WriteString("===================================================================\n")
 		sb.WriteString("Why Inspector Protocol Failed\n")
 		sb.WriteString("===================================================================\n\n")
@@ -750,7 +751,7 @@ func writeCollectionFailedGuidance(containerDir, method, pid, pod, container, ns
 		sb.WriteString("Check heap-dump.log for detailed error messages.\n\n")
 		sb.WriteString("Alternatively, try the SIGUSR2 method (deprecated, will be removed in a future release):\n\n")
 		sb.WriteString("  ./gather --with-heap-dumps --heap-dump-method sigusr2\n\n")
-	} else {
+	case "sigusr2":
 		sb.WriteString("===================================================================\n")
 		sb.WriteString("Why SIGUSR2 Method Failed (DEPRECATED)\n")
 		sb.WriteString("===================================================================\n\n")
@@ -761,6 +762,14 @@ func writeCollectionFailedGuidance(containerDir, method, pid, pod, container, ns
 		sb.WriteString("  - name: NODE_OPTIONS\n")
 		sb.WriteString("    value: \"--heapsnapshot-signal=SIGUSR2 --diagnostic-dir=/tmp\"\n\n")
 		sb.WriteString("Alternatively, try the inspector method (default):\n\n")
+		sb.WriteString("  ./gather --with-heap-dumps --heap-dump-method inspector\n\n")
+	default:
+		fmt.Fprintf(&sb, "===================================================================\n")
+		fmt.Fprintf(&sb, "Unknown Method: %s\n", method)
+		fmt.Fprintf(&sb, "===================================================================\n\n")
+		fmt.Fprintf(&sb, "The heap dump method %q is not recognized.\n", method)
+		sb.WriteString("Valid methods are: inspector (default), sigusr2 (deprecated).\n\n")
+		sb.WriteString("Try the default inspector method:\n\n")
 		sb.WriteString("  ./gather --with-heap-dumps --heap-dump-method inspector\n\n")
 	}
 

@@ -104,6 +104,11 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 
 	since, sinceTime := resolveSince(opts)
 
+	heapDumpMethod, err := resolveHeapDumpMethod(cmd, opts)
+	if err != nil {
+		return err
+	}
+
 	collectorCfg := &collector.Config{
 		Client:            kubeClient,
 		BasePath:          basePath,
@@ -113,7 +118,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		Since:             since,
 		SinceTime:         sinceTime,
 		TargetNamespaces:  resolveNamespaces(opts),
-		HeapDumpMethod:    resolveHeapDumpMethod(cmd, opts),
+		HeapDumpMethod:    heapDumpMethod,
 		HeapDumpInstances: resolveHeapDumpInstances(opts),
 	}
 
@@ -264,14 +269,19 @@ func resolveNamespaces(opts *gatherOptions) []string {
 	return namespace.ParseNamespaces(raw)
 }
 
-func resolveHeapDumpMethod(cmd *cobra.Command, opts *gatherOptions) string {
+func resolveHeapDumpMethod(cmd *cobra.Command, opts *gatherOptions) (string, error) {
+	var method string
 	if cmd.Flags().Changed("heap-dump-method") {
-		return opts.heapDumpMethod
+		method = opts.heapDumpMethod
+	} else if m := os.Getenv("RHDH_HEAP_DUMP_METHOD"); m != "" {
+		method = m
+	} else {
+		method = opts.heapDumpMethod
 	}
-	if m := os.Getenv("RHDH_HEAP_DUMP_METHOD"); m != "" {
-		return m
+	if method != "inspector" && method != "sigusr2" {
+		return "", fmt.Errorf("heap-dump-method must be 'inspector' or 'sigusr2', got %q", method)
 	}
-	return opts.heapDumpMethod
+	return method, nil
 }
 
 func resolveHeapDumpInstances(opts *gatherOptions) string {
