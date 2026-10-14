@@ -605,6 +605,9 @@ func fallbackHeapDump(wsURL string, cfg *Config, ns, pod, container, outPath, lo
 }
 
 func collectHeapDumpSIGUSR2(ctx context.Context, cfg *Config, ns, pod, pid, containerDir, heapFile, logFile string, timeout time.Duration) bool {
+	log.Warn("The SIGUSR2 heap dump method is deprecated and will be removed in a future release. Use --heap-dump-method=inspector (the default) instead.")
+	appendLog(logFile, "WARNING: The SIGUSR2 heap dump method is deprecated and will be removed in a future release. Use --heap-dump-method=inspector instead.\n")
+
 	log.Info("Sending SIGUSR2 signal to trigger heap dump...")
 	appendLog(logFile, "Sending SIGUSR2 signal to Node.js process (PID: %s)...\n", pid)
 
@@ -745,12 +748,14 @@ func writeCollectionFailedGuidance(containerDir, method, pid, pod, container, ns
 		sb.WriteString("  - Security policies blocking the inspector port\n")
 		sb.WriteString("  - Container doesn't have write access to /tmp\n\n")
 		sb.WriteString("Check heap-dump.log for detailed error messages.\n\n")
-		sb.WriteString("Alternatively, try the SIGUSR2 method:\n\n")
+		sb.WriteString("Alternatively, try the SIGUSR2 method (deprecated, will be removed in a future release):\n\n")
 		sb.WriteString("  ./gather --with-heap-dumps --heap-dump-method sigusr2\n\n")
 	} else {
 		sb.WriteString("===================================================================\n")
-		sb.WriteString("Why SIGUSR2 Method Failed\n")
+		sb.WriteString("Why SIGUSR2 Method Failed (DEPRECATED)\n")
 		sb.WriteString("===================================================================\n\n")
+		sb.WriteString("NOTE: The SIGUSR2 method is deprecated and will be removed in a\n")
+		sb.WriteString("future release. Use --heap-dump-method=inspector (the default) instead.\n\n")
 		sb.WriteString("SIGUSR2 method requires NODE_OPTIONS configuration:\n\n")
 		sb.WriteString("  env:\n")
 		sb.WriteString("  - name: NODE_OPTIONS\n")
