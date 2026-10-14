@@ -60,8 +60,11 @@
       "automerge": false
     },
     {
-      "description": "Do generate PRs for minor dockerfile updates",
-      "enabled": true,
+      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
+      "enabled": false,
+      "matchManagers": [
+        "dockerfile"
+      ],
       "matchDatasources": [
         "docker"
       ],
@@ -70,22 +73,29 @@
       ],
       "matchBaseBranches": [
         "main",
-        "/^release-\\d+\\..*/"
+        "/^release-.*/"
       ],
       "automerge": false
     },
     {
-      "description": "Do automerge patch updates to dockerfiles",
-      "enabled": true,
+      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
+      "enabled": false,
+      "matchManagers": [
+        "dockerfile"
+      ],
       "matchDatasources": [
         "docker"
       ],
       "matchUpdateTypes": [
         "patch"
       ],
+      "matchBaseBranches": [
+        "main",
+        "/^release-.*/"
+      ],
       "additionalBranchPrefix": "dockerfile ",
       "groupName": "All dockerfile images",
-      "automerge": true,
+      "automerge": false,
       "pinDigests": false
     },
     {
