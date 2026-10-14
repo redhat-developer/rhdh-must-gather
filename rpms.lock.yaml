@@ -452,13 +452,6 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.23-el9-beta/openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.aarch64.rpm
-    repoid: rhocp-4.23-for-rhel-9-aarch64-rpms
-    size: 27998243
-    checksum: sha256:dbfcf116eeba5c7e9c1e84bc93dd53e51c2e53980e57d95e67c7aa99986a9812
-    name: openshift-clients
-    evr: 4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9
-    sourcerpm: openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.aarch64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-aarch64-rpms
     size: 11909643
@@ -466,6 +459,13 @@ arches:
     name: helm
     evr: 3.19.5.1-71.el9
     sourcerpm: helm-3.19.5.1-71.el9.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/rhocp/4.22/os/Packages/o/openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.aarch64.rpm
+    repoid: rhocp-4.22-for-rhel-9-aarch64-rpms
+    size: 27501568
+    checksum: sha256:4661d1d861a6c3acfdafd176cb890a5347dc5cf0fe36058d1f2d8713cd933ccc
+    name: openshift-clients
+    evr: 4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9
+    sourcerpm: openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.src.rpm
   source:
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-aarch64-appstream-source-rpms
@@ -1139,13 +1139,6 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rpms/4.23-el9-beta/openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.x86_64.rpm
-    repoid: rhocp-4.23-for-rhel-9-x86_64-rpms
-    size: 31219762
-    checksum: sha256:c7e085785fed01475ef9ccf00a0707cfea0a5ca2919ea6206c50bff8173c8a69
-    name: openshift-clients
-    evr: 4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9
-    sourcerpm: openshift-clients-4.23.0-202609250927.p2.g4b0a124.assembly.stream.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.x86_64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-x86_64-rpms
     size: 13496216
@@ -1153,6 +1146,13 @@ arches:
     name: helm
     evr: 3.19.5.1-71.el9
     sourcerpm: helm-3.19.5.1-71.el9.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhocp/4.22/os/Packages/o/openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.x86_64.rpm
+    repoid: rhocp-4.22-for-rhel-9-x86_64-rpms
+    size: 30598441
+    checksum: sha256:5ce5d9f6a2be54c81202086b9a45d699d842a138041e1abf939f068dfb78f8b6
+    name: openshift-clients
+    evr: 4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9
+    sourcerpm: openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.src.rpm
   source:
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/source/SRPMS/Packages/l/libmpc-1.2.1-4.el9.src.rpm
     repoid: ubi-9-for-x86_64-appstream-source-rpms
