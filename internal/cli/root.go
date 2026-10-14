@@ -83,7 +83,7 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.StringVar(&opts.namespaces, "namespaces", "", "Collect data only from specified comma-separated namespaces")
 	flags.BoolVar(&opts.withSecrets, "with-secrets", false, "Include Kubernetes Secrets in collection (opt-in, disabled by default)")
 	flags.BoolVar(&opts.withHeapDumps, "with-heap-dumps", false, "Collect heap dumps from running backstage-backend processes")
-	flags.StringVar(&opts.heapDumpMethod, "heap-dump-method", "inspector", "Heap dump collection method: inspector or sigusr2")
+	flags.StringVar(&opts.heapDumpMethod, "heap-dump-method", "inspector", "Heap dump collection method: inspector or sigusr2 (sigusr2 is deprecated and will be removed in a future release)")
 	flags.StringVar(&opts.heapDumpInstances, "heap-dump-instances", "", "Comma-separated list of instance names to collect heap dumps from")
 	flags.BoolVar(&opts.clusterInfo, "cluster-info", false, "Collect cluster-wide diagnostic information")
 	flags.StringVar(&opts.since, "since", "", "Only collect logs newer than a relative duration (e.g. 5s, 2m, 3h)")

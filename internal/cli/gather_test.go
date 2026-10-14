@@ -162,7 +162,10 @@ func TestResolveHeapDumpMethod_CLIExplicit(t *testing.T) {
 	t.Setenv("RHDH_HEAP_DUMP_METHOD", "sigusr2")
 	cmd := newRootCmd()
 	_ = cmd.ParseFlags([]string{"--heap-dump-method", "inspector"})
-	got := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	got, err := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	if err != nil {
+		t.Fatalf("resolveHeapDumpMethod() unexpected error: %v", err)
+	}
 	if got != "inspector" {
 		t.Errorf("resolveHeapDumpMethod() = %q, want inspector (CLI explicit)", got)
 	}
@@ -172,7 +175,10 @@ func TestResolveHeapDumpMethod_EnvFallback(t *testing.T) {
 	t.Setenv("RHDH_HEAP_DUMP_METHOD", "sigusr2")
 	cmd := newRootCmd()
 	_ = cmd.ParseFlags([]string{})
-	got := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	got, err := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	if err != nil {
+		t.Fatalf("resolveHeapDumpMethod() unexpected error: %v", err)
+	}
 	if got != "sigusr2" {
 		t.Errorf("resolveHeapDumpMethod() = %q, want sigusr2 (env fallback)", got)
 	}
@@ -182,9 +188,22 @@ func TestResolveHeapDumpMethod_Default(t *testing.T) {
 	t.Setenv("RHDH_HEAP_DUMP_METHOD", "")
 	cmd := newRootCmd()
 	_ = cmd.ParseFlags([]string{})
-	got := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	got, err := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	if err != nil {
+		t.Fatalf("resolveHeapDumpMethod() unexpected error: %v", err)
+	}
 	if got != "inspector" {
 		t.Errorf("resolveHeapDumpMethod() = %q, want inspector (default)", got)
+	}
+}
+
+func TestResolveHeapDumpMethod_InvalidEnv(t *testing.T) {
+	t.Setenv("RHDH_HEAP_DUMP_METHOD", "invalid")
+	cmd := newRootCmd()
+	_ = cmd.ParseFlags([]string{})
+	_, err := resolveHeapDumpMethod(cmd, &gatherOptions{heapDumpMethod: "inspector"})
+	if err == nil {
+		t.Error("resolveHeapDumpMethod() expected error for invalid env value, got nil")
 	}
 }
 
