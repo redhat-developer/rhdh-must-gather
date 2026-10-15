@@ -66,7 +66,7 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("obfuscation input %s is not a directory", basePath)
 	}
 
-	work, err := os.MkdirTemp("", "rhdh-must-gather-obfuscate-")
+	work, err := mkdirSameFS(basePath, "rhdh-must-gather-obfuscate-")
 	if err != nil {
 		return fmt.Errorf("creating obfuscation work directory: %w", err)
 	}
@@ -394,6 +394,16 @@ func writeObfuscation(b *strings.Builder, kind string) {
 	fmt.Fprintf(b, "    - type: %s\n      replacementType: Consistent\n      target: All\n", kind)
 }
 
+// mkdirSameFS creates a temp directory on the same filesystem as anchor so that
+// hard links between the two succeed. It falls back to the default temp dir.
+func mkdirSameFS(anchor, prefix string) (string, error) {
+	dir, err := os.MkdirTemp(filepath.Dir(anchor), prefix)
+	if err != nil {
+		dir, err = os.MkdirTemp("", prefix)
+	}
+	return dir, err
+}
+
 // reportStaysOutside rejects a report directory that would be copied into the
 // published gather. Collected files named report.yaml are ordinary resources
 // and are left in place. The reversible map is the report written under reportDir.
@@ -424,7 +434,7 @@ func dirInside(parent, child string) bool {
 func copyOmittedFiles(inputDir, outputDir string) error {
 	var count int
 	err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
 			return err
 		}
 		for _, pattern := range omitPatterns {

@@ -631,6 +631,27 @@ func TestCopyOmittedFiles_NoHeapSnapshots(t *testing.T) {
 	}
 }
 
+func TestCopyOmittedFiles_SkipsSymlinks(t *testing.T) {
+	input := t.TempDir()
+	snapshotDir := filepath.Join(input, "heap-dumps", "pod=x", "container=c")
+	mustWrite(t, filepath.Join(snapshotDir, "real.heapsnapshot"), "real-data")
+	if err := os.Symlink("real.heapsnapshot", filepath.Join(snapshotDir, "link.heapsnapshot")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	output := t.TempDir()
+	if err := copyOmittedFiles(input, output); err != nil {
+		t.Fatalf("copyOmittedFiles() error = %v", err)
+	}
+
+	if got := mustRead(t, filepath.Join(output, "heap-dumps", "pod=x", "container=c", "real.heapsnapshot")); got != "real-data" {
+		t.Errorf("real snapshot = %q, want 'real-data'", got)
+	}
+	if _, err := os.Lstat(filepath.Join(output, "heap-dumps", "pod=x", "container=c", "link.heapsnapshot")); err == nil {
+		t.Error("symlink should not have been copied to output")
+	}
+}
+
 func TestApplyPreservesHeapSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "logs", "app.log"), "node 10.20.30.40\n")
