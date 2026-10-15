@@ -163,3 +163,4 @@ Assisted-by: Claude
 | `RHDH_WITH_HEAP_DUMPS` | `false` | Collect heap dumps from Node.js processes |
 | `HEAP_DUMP_TIMEOUT` | `600` | Timeout for heap dump collection (seconds) |
 | `HEAP_DUMP_REMOTE_DIR` | `/tmp` | Directory in container where heap dumps are written |
+| `RHDH_OBFUSCATE_WORKERS` | `2` | Obfuscation workers: N = count, 0 = skip, "all" = all CPUs |
