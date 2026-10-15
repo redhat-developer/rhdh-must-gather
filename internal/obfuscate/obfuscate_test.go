@@ -588,6 +588,72 @@ func TestPublish(t *testing.T) {
 	}
 }
 
+func TestCopyOmittedFiles(t *testing.T) {
+	input := t.TempDir()
+	mustWrite(t, filepath.Join(input, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "snapshot-data")
+	mustWrite(t, filepath.Join(input, "helm", "heap-dumps", "pod=x", "container=c", "heap.fallback.heapsnapshot"), "fallback-data")
+	mustWrite(t, filepath.Join(input, "operator", "heap-dumps", "pod=y", "container=c", "dump.PARTIAL.heapsnapshot"), "partial-data")
+	mustWrite(t, filepath.Join(input, "logs", "app.log"), "keep me")
+
+	output := t.TempDir()
+	// Simulate must-gather-clean output: only non-omitted files present
+	mustWrite(t, filepath.Join(output, "logs", "app.log"), "obfuscated")
+
+	if err := copyOmittedFiles(input, output); err != nil {
+		t.Fatalf("copyOmittedFiles() error = %v", err)
+	}
+
+	// Heap snapshots should be copied to output
+	if got := mustRead(t, filepath.Join(output, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); got != "snapshot-data" {
+		t.Errorf("heapsnapshot = %q, want 'snapshot-data'", got)
+	}
+	if got := mustRead(t, filepath.Join(output, "helm", "heap-dumps", "pod=x", "container=c", "heap.fallback.heapsnapshot")); got != "fallback-data" {
+		t.Errorf("fallback = %q, want 'fallback-data'", got)
+	}
+	if got := mustRead(t, filepath.Join(output, "operator", "heap-dumps", "pod=y", "container=c", "dump.PARTIAL.heapsnapshot")); got != "partial-data" {
+		t.Errorf("partial = %q, want 'partial-data'", got)
+	}
+}
+
+func TestCopyOmittedFiles_NoHeapSnapshots(t *testing.T) {
+	input := t.TempDir()
+	mustWrite(t, filepath.Join(input, "logs", "app.log"), "log data")
+
+	output := t.TempDir()
+	mustWrite(t, filepath.Join(output, "logs", "app.log"), "obfuscated")
+
+	if err := copyOmittedFiles(input, output); err != nil {
+		t.Fatalf("copyOmittedFiles() error = %v", err)
+	}
+	// Output should be unchanged
+	if got := mustRead(t, filepath.Join(output, "logs", "app.log")); got != "obfuscated" {
+		t.Errorf("app.log = %q, want 'obfuscated'", got)
+	}
+}
+
+func TestApplyPreservesHeapSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "logs", "app.log"), "node 10.20.30.40\n")
+	mustWrite(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "v8-snapshot-binary-data")
+
+	if err := Apply(dir, nil, func(config, input, output, report string) error {
+		return Clean(config, input, output, report, 1)
+	}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	// Heap snapshot should be preserved with original content (not obfuscated)
+	got := mustRead(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"))
+	if got != "v8-snapshot-binary-data" {
+		t.Errorf("heapsnapshot = %q, want 'v8-snapshot-binary-data'", got)
+	}
+	// IP in log should be obfuscated
+	logBody := mustRead(t, filepath.Join(dir, "logs", "app.log"))
+	if strings.Contains(logBody, "10.20.30.40") {
+		t.Errorf("IP still present in log: %s", logBody)
+	}
+}
+
 func ipToken(body string) string {
 	const prefix = "x-ipv4-"
 	i := strings.Index(body, prefix)

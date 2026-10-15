@@ -92,6 +92,9 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	if _, err := os.Stat(reportPath); err != nil {
 		return fmt.Errorf("obfuscation report was not written outside the gather: %w", err)
 	}
+	if err := copyOmittedFiles(basePath, outputPath); err != nil {
+		return fmt.Errorf("restoring omitted files: %w", err)
+	}
 	return publish(outputPath, basePath)
 }
 
@@ -352,12 +355,26 @@ func usableDomain(d string) bool {
 	return true
 }
 
+// omitPatterns lists filepath.Match globs for files that must-gather-clean
+// should skip. These files are copied verbatim into the output by
+// copyOmittedFiles after the cleaner runs.
+var omitPatterns = []string{
+	"*.heapsnapshot",
+}
+
 // configYAML is the must-gather-clean config for RHDH gathers.
 // It obfuscates only. It does not omit ConfigMaps or Secrets: those resources
 // are the diagnostic payload, and secret values are already redacted.
+// Heap snapshot files are omitted because they are large binary blobs that
+// would cause must-gather-clean to OOM or time out.
 func configYAML(domains []string) string {
 	var b strings.Builder
-	b.WriteString("config:\n  obfuscate:\n")
+	b.WriteString("config:\n")
+	b.WriteString("  omit:\n")
+	for _, p := range omitPatterns {
+		fmt.Fprintf(&b, "    - type: File\n      pattern: %q\n", p)
+	}
+	b.WriteString("  obfuscate:\n")
 	writeObfuscation(&b, "IP")
 	writeObfuscation(&b, "MAC")
 	if len(domains) == 0 {
@@ -398,6 +415,53 @@ func dirInside(parent, child string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+// copyOmittedFiles links or copies files matching omitPatterns from inputDir
+// into outputDir, preserving relative paths. must-gather-clean drops omitted
+// files from its output, so this step restores them verbatim.
+// Hard links are preferred to avoid doubling disk usage for large files.
+func copyOmittedFiles(inputDir, outputDir string) error {
+	var count int
+	err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		for _, pattern := range omitPatterns {
+			matched, _ := filepath.Match(pattern, d.Name())
+			if !matched {
+				continue
+			}
+			rel, err := filepath.Rel(inputDir, path)
+			if err != nil {
+				return err
+			}
+			dst := filepath.Join(outputDir, rel)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			if err := linkOrCopy(path, dst); err != nil {
+				return fmt.Errorf("restoring omitted file %s: %w", rel, err)
+			}
+			count++
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		log.Info("Restored %d file(s) excluded from obfuscation", count)
+	}
+	return nil
+}
+
+func linkOrCopy(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return copyFile(src, dst)
 }
 
 func publish(cleaned, basePath string) error {
