@@ -16,7 +16,60 @@ import (
 const envObfuscateWorkers = "OBFUSCATE_WORKERS"
 
 func defaultObfuscateWorkers() int {
-	return max(1, runtime.GOMAXPROCS(0)/2)
+	return max(1, effectiveCPUs()/2)
+}
+
+// effectiveCPUs returns the container's CPU quota (cgroup v2 then v1),
+// falling back to runtime.GOMAXPROCS which reports host CPUs.
+func effectiveCPUs() int {
+	if n := cgroupCPUQuota(); n > 0 {
+		return n
+	}
+	return runtime.GOMAXPROCS(0)
+}
+
+func cgroupCPUQuota() int {
+	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
+		if n := parseCPUMax(strings.TrimSpace(string(data))); n > 0 {
+			return n
+		}
+	}
+	quota, err1 := os.ReadFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+	period, err2 := os.ReadFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+	if err1 == nil && err2 == nil {
+		return parseCPUQuotaPeriod(strings.TrimSpace(string(quota)), strings.TrimSpace(string(period)))
+	}
+	return 0
+}
+
+// parseCPUMax parses cgroup v2 cpu.max ("quota period" or "max period").
+func parseCPUMax(s string) int {
+	fields := strings.Fields(s)
+	if len(fields) != 2 || fields[0] == "max" {
+		return 0
+	}
+	quota, err := strconv.Atoi(fields[0])
+	if err != nil || quota <= 0 {
+		return 0
+	}
+	period, err := strconv.Atoi(fields[1])
+	if err != nil || period <= 0 {
+		return 0
+	}
+	return quota / period
+}
+
+// parseCPUQuotaPeriod parses cgroup v1 cpu.cfs_quota_us / cpu.cfs_period_us.
+func parseCPUQuotaPeriod(quotaStr, periodStr string) int {
+	quota, err := strconv.Atoi(quotaStr)
+	if err != nil || quota <= 0 {
+		return 0
+	}
+	period, err := strconv.Atoi(periodStr)
+	if err != nil || period <= 0 {
+		return 0
+	}
+	return quota / period
 }
 
 func newObfuscateCmd() *cobra.Command {

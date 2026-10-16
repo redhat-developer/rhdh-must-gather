@@ -651,7 +651,7 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
     fi
     # Heap snapshots are large (~150-180MB each); collecting from all instances
     # plus post-collection obfuscation needs more memory than the chart default.
-    GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi"
+    GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi resources.limits.cpu=1500m resources.requests.cpu=250m"
 
     # Allow overriding the number of obfuscation workers via env var.
     if [ -n "${OBFUSCATE_WORKERS:-}" ]; then
