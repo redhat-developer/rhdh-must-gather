@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 )
 
 func TestBuildScriptList_Default(t *testing.T) {
@@ -17,8 +19,7 @@ func TestBuildScriptList_Default(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect", "network-policies"}
 	if len(scripts) != len(expected) {
@@ -33,19 +34,18 @@ func TestBuildScriptList_Default(t *testing.T) {
 
 func TestBuildScriptList_WithClusterInfo(t *testing.T) {
 	cmd := newRootCmd()
-	if err := cmd.ParseFlags([]string{"--cluster-info"}); err != nil {
+	if err := cmd.ParseFlags([]string{"--with-cluster-info"}); err != nil {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{clusterInfo: true}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	last := scripts[len(scripts)-1]
 	if last != "cluster-info" {
 		t.Errorf("last script = %q, want %q", last, "cluster-info")
 	}
-	if len(scripts) != len(mandatoryScripts)+1 {
-		t.Errorf("got %d scripts, want %d", len(scripts), len(mandatoryScripts)+1)
+	if len(scripts) != len(collector.Registrations) {
+		t.Errorf("got %d scripts, want %d", len(scripts), len(collector.Registrations))
 	}
 }
 
@@ -55,31 +55,32 @@ func TestBuildScriptList_WithExclusions(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	for _, s := range scripts {
 		if s == "helm" || s == "operator" {
 			t.Errorf("excluded script %q still in list", s)
 		}
 	}
-	if len(scripts) != len(mandatoryScripts)-2 {
-		t.Errorf("got %d scripts, want %d", len(scripts), len(mandatoryScripts)-2)
+	// 7 Default - 2 excluded + 1 AlwaysOn = 6
+	if len(scripts) != 6 {
+		t.Errorf("got %d scripts, want 6", len(scripts))
 	}
 }
 
 func TestBuildScriptList_ExcludeAll(t *testing.T) {
 	cmd := newRootCmd()
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
+	var args []string
+	for _, r := range collector.Registrations {
+		if r.Mode == collector.Default {
+			args = append(args, "--without-"+r.Name)
+		}
 	}
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	if len(scripts) != 1 || scripts[0] != "network-policies" {
 		t.Errorf("got %v, want [network-policies]", scripts)
