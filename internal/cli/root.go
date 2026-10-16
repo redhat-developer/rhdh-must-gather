@@ -6,19 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
-
-var mandatoryScripts = []string{
-	"platform",
-	"helm",
-	"operator",
-	"orchestrator",
-	"route",
-	"ingress",
-	"namespace-inspect",
-	"network-policies",
-}
 
 type gatherOptions struct {
 	namespaces        string
@@ -26,7 +16,6 @@ type gatherOptions struct {
 	withHeapDumps     bool
 	heapDumpMethod    string
 	heapDumpInstances string
-	clusterInfo       bool
 	since             string
 	sinceTime         string
 	clientFactory     func() (*kube.Client, error)
@@ -85,15 +74,24 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.BoolVar(&opts.withHeapDumps, "with-heap-dumps", false, "Collect heap dumps from running backstage-backend processes")
 	flags.StringVar(&opts.heapDumpMethod, "heap-dump-method", "inspector", "Heap dump collection method: inspector or sigusr2 (sigusr2 is deprecated and will be removed in a future release)")
 	flags.StringVar(&opts.heapDumpInstances, "heap-dump-instances", "", "Comma-separated list of instance names to collect heap dumps from")
-	flags.BoolVar(&opts.clusterInfo, "cluster-info", false, "Collect cluster-wide diagnostic information")
 	flags.StringVar(&opts.since, "since", "", "Only collect logs newer than a relative duration (e.g. 5s, 2m, 3h)")
 	flags.StringVar(&opts.sinceTime, "since-time", "", "Only collect logs after a specific date (RFC3339, e.g. 2006-01-02T15:04:05Z)")
 
-	for _, script := range mandatoryScripts {
-		if script == "network-policies" {
-			continue
+	for _, r := range collector.Registrations {
+		switch r.Mode {
+		case collector.Default:
+			desc := r.FlagDesc
+			if desc == "" {
+				desc = "Skip " + r.Name + " data collection"
+			}
+			flags.Bool("without-"+r.Name, false, desc)
+		case collector.OptIn:
+			desc := r.FlagDesc
+			if desc == "" {
+				desc = "Include " + r.Name + " data collection"
+			}
+			flags.Bool("with-"+r.Name, false, desc)
 		}
-		flags.Bool("without-"+script, false, "Skip "+script+" data collection")
 	}
 
 	cmd.SetVersionTemplate("rhdh-must-gather {{.Version}}\n")
@@ -105,20 +103,23 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	return cmd
 }
 
-func buildScriptList(cmd *cobra.Command, opts *gatherOptions) []string {
-	scripts := make([]string, 0, len(mandatoryScripts)+1)
-	for _, s := range mandatoryScripts {
-		if s == "network-policies" {
-			scripts = append(scripts, s)
-			continue
+func buildScriptList(cmd *cobra.Command) []string {
+	scripts := make([]string, 0, len(collector.Registrations))
+	for _, r := range collector.Registrations {
+		switch r.Mode {
+		case collector.AlwaysOn:
+			scripts = append(scripts, r.Name)
+		case collector.Default:
+			excluded, _ := cmd.Flags().GetBool("without-" + r.Name)
+			if !excluded {
+				scripts = append(scripts, r.Name)
+			}
+		case collector.OptIn:
+			included, _ := cmd.Flags().GetBool("with-" + r.Name)
+			if included {
+				scripts = append(scripts, r.Name)
+			}
 		}
-		excluded, _ := cmd.Flags().GetBool("without-" + s)
-		if !excluded {
-			scripts = append(scripts, s)
-		}
-	}
-	if opts.clusterInfo {
-		scripts = append(scripts, "cluster-info")
 	}
 	return scripts
 }

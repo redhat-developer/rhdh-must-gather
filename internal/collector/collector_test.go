@@ -152,26 +152,66 @@ func TestConfig_ApplyLogSince(t *testing.T) {
 	})
 }
 
-func TestRegistry(t *testing.T) {
-	expected := []string{
-		"platform", "route", "ingress", "cluster-info",
-		"operator", "orchestrator", "helm", "namespace-inspect",
-		"network-policies",
+func TestRegistrations(t *testing.T) {
+	expected := map[string]bool{
+		"platform":         true,
+		"helm":             true,
+		"operator":         true,
+		"orchestrator":     true,
+		"route":            true,
+		"ingress":          true,
+		"namespace-inspect": true,
+		"cluster-info":     true,
+		"network-policies": true,
 	}
 
-	for _, name := range expected {
-		t.Run(name, func(t *testing.T) {
-			c, ok := Registry[name]
-			if !ok {
-				t.Fatalf("Registry missing collector %q", name)
+	for _, r := range Registrations {
+		t.Run(r.Name, func(t *testing.T) {
+			if r.Collector.Name() != r.Name {
+				t.Errorf("Name() = %q, want %q", r.Collector.Name(), r.Name)
 			}
-			if c.Name() != name {
-				t.Errorf("Name() = %q, want %q", c.Name(), name)
+			if !expected[r.Name] {
+				t.Errorf("unexpected collector %q in Registrations", r.Name)
 			}
+			delete(expected, r.Name)
 		})
 	}
 
-	if len(Registry) != len(expected) {
-		t.Errorf("Registry has %d collectors, want %d", len(Registry), len(expected))
+	for name := range expected {
+		t.Errorf("missing collector %q in Registrations", name)
+	}
+}
+
+func TestRegistrationModes(t *testing.T) {
+	modes := make(map[string]RunMode)
+	for _, r := range Registrations {
+		modes[r.Name] = r.Mode
+	}
+
+	if modes["network-policies"] != AlwaysOn {
+		t.Error("network-policies should be AlwaysOn")
+	}
+	if modes["cluster-info"] != OptIn {
+		t.Error("cluster-info should be OptIn")
+	}
+	for _, name := range []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect"} {
+		if modes[name] != Default {
+			t.Errorf("%s should be Default, got %d", name, modes[name])
+		}
+	}
+}
+
+func TestGet(t *testing.T) {
+	c, ok := Get("platform")
+	if !ok {
+		t.Fatal("Get(platform) returned false")
+	}
+	if c.Name() != "platform" {
+		t.Errorf("Get(platform).Name() = %q", c.Name())
+	}
+
+	_, ok = Get("nonexistent")
+	if ok {
+		t.Error("Get(nonexistent) should return false")
 	}
 }
