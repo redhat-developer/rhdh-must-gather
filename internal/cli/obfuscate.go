@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	envObfuscateWorkers     = "RHDH_OBFUSCATE_WORKERS"
+	envObfuscateWorkers     = "OBFUSCATE_WORKERS"
 	defaultObfuscateWorkers = 2
 )
 
@@ -97,7 +97,7 @@ func obfuscateCommandArgs(configPath, inputPath, outputPath, reportDir string, w
 // limit with the parent gather process, and each worker loads entire YAML/JSON
 // files into memory (os.ReadFile) for Kubernetes resource detection. Using
 // runtime.GOMAXPROCS (host CPU count, not the container limit) caused OOM
-// kills in the 512Mi init container. Override with RHDH_OBFUSCATE_WORKERS;
+// kills in the 512Mi init container. Override with OBFUSCATE_WORKERS;
 // set to 0 to skip obfuscation, or "all" to use all available CPUs.
 func obfuscateWorkers() (int, error) {
 	s := os.Getenv(envObfuscateWorkers)

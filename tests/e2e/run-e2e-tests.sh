@@ -652,6 +652,12 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
     # Heap snapshots are large (~150-180MB each); collecting from all instances
     # plus post-collection obfuscation needs more memory than the chart default.
     GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi"
+
+    # Allow overriding the number of obfuscation workers via env var.
+    if [ -n "${OBFUSCATE_WORKERS:-}" ]; then
+        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[0].name=OBFUSCATE_WORKERS gather.extraEnvVars[0].value=$OBFUSCATE_WORKERS"
+        log_info "Obfuscation workers override: $OBFUSCATE_WORKERS"
+    fi
 else
     # Regular E2E: collect only from RHDHSUPP-308 instance to speed up testing
     GATHER_OPTS="$GATHER_OPTS --heap-dump-instances $RHDHSUPP308_INSTANCE"
