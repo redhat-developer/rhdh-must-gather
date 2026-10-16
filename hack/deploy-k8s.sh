@@ -129,7 +129,10 @@ if [[ -z "${OUTPUT_FILE}" ]]; then
     else
         OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar"
     fi
-elif [[ "${OUTPUT_FILE}" != *.tar.gz && "${OUTPUT_FILE}" != *.tar ]]; then
+else
+    # Normalize suffix to match the compression mode
+    OUTPUT_FILE="${OUTPUT_FILE%.tar.gz}"
+    OUTPUT_FILE="${OUTPUT_FILE%.tar}"
     if [[ "${COMPRESS}" == "true" ]]; then
         OUTPUT_FILE="${OUTPUT_FILE}.tar.gz"
     else
@@ -497,4 +500,4 @@ echo ""
 echo "Must-gather data saved to: ${OUTPUT_FILE}"
 echo ""
 echo "To extract the data, run:"
-echo "  tar xzf ${OUTPUT_FILE}"
+printf '  tar xf %q\n' "${OUTPUT_FILE}"
