@@ -721,9 +721,10 @@ else
         OPTS="$GATHER_OPTS" \
         ${GATHER_HELM_SET:+HELM_SET="$GATHER_HELM_SET"} \
         ${GATHER_HELM_SET_STRING:+HELM_SET_STRING="$GATHER_HELM_SET_STRING"} \
-        ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"}
-    # Find the output tarball (most recent one)
-    OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+        ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"} \
+        DEPLOY_K8S_EXTRA_OPTS="--no-compress"
+    # Find the output tarball (most recent one, .tar or .tar.gz)
+    OUTPUT_TARBALL=$(find . -maxdepth 1 \( -name 'rhdh-must-gather-output.k8s.*.tar' -o -name 'rhdh-must-gather-output.k8s.*.tar.gz' \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$OUTPUT_TARBALL" ]; then
         log_error "No output tarball found!"
         exit 1
@@ -731,9 +732,10 @@ else
     log_info "Found output tarball: $OUTPUT_TARBALL"
     # Extract and validate the output
     OUTPUT_DIR="${OUTPUT_TARBALL%.tar.gz}"
+    OUTPUT_DIR="${OUTPUT_DIR%.tar}"
     log_info "Extracting to: $OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
-    tar xzf "$OUTPUT_TARBALL" -C "$OUTPUT_DIR"
+    tar xf "$OUTPUT_TARBALL" -C "$OUTPUT_DIR"
 fi
 
 # ============================================================================

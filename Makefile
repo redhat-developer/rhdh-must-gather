@@ -145,7 +145,7 @@ deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Helm 
 		echo "Error: helm command not found. Please install Helm."; \
 		exit 1; \
 	fi
-	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(HELM_SET_STRING),--helm-set-string "$(HELM_SET_STRING)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)") $(if $(HELM_TIMEOUT),--timeout "$(HELM_TIMEOUT)")
+	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(HELM_SET_STRING),--helm-set-string "$(HELM_SET_STRING)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)") $(if $(HELM_TIMEOUT),--timeout "$(HELM_TIMEOUT)") $(DEPLOY_K8S_EXTRA_OPTS)
 
 
 ##@ Cleanup
