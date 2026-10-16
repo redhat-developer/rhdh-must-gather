@@ -85,14 +85,38 @@ func (c *Config) helmActionConfig(namespace string) (*action.Configuration, erro
 	return newHelmActionConfig(c, namespace)
 }
 
-var Registry = map[string]Collector{
-	"platform":          &Platform{},
-	"route":             &Route{},
-	"ingress":           &Ingress{},
-	"cluster-info":      &ClusterInfo{},
-	"operator":          &Operator{},
-	"orchestrator":      &Orchestrator{},
-	"helm":              &Helm{},
-	"namespace-inspect": &NamespaceInspect{},
-	"network-policies":  &NetworkPolicies{},
+type RunMode int
+
+const (
+	Default  RunMode = iota // Runs by default; user can disable with --without-<name>
+	AlwaysOn               // Always runs; no CLI flag
+	OptIn                  // Off by default; user enables with --with-<name>
+)
+
+type Registration struct {
+	Name      string
+	Collector Collector
+	Mode      RunMode
+	FlagDesc  string // CLI flag help text; auto-generated if empty
+}
+
+var Registrations = []Registration{
+	{Name: "platform", Collector: &Platform{}, Mode: Default},
+	{Name: "helm", Collector: &Helm{}, Mode: Default},
+	{Name: "operator", Collector: &Operator{}, Mode: Default},
+	{Name: "orchestrator", Collector: &Orchestrator{}, Mode: Default},
+	{Name: "route", Collector: &Route{}, Mode: Default},
+	{Name: "ingress", Collector: &Ingress{}, Mode: Default},
+	{Name: "namespace-inspect", Collector: &NamespaceInspect{}, Mode: Default},
+	{Name: "network-policies", Collector: &NetworkPolicies{}, Mode: AlwaysOn},
+	{Name: "cluster-info", Collector: &ClusterInfo{}, Mode: OptIn, FlagDesc: "Collect cluster-wide diagnostic information"},
+}
+
+func Get(name string) (Collector, bool) {
+	for _, r := range Registrations {
+		if r.Name == name {
+			return r.Collector, true
+		}
+	}
+	return nil, false
 }
