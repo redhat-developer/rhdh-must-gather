@@ -485,11 +485,14 @@ func cleanStaleWorkDirs(basePath string) {
 		// a run that was killed before it could restore them. Files may
 		// be in omitted/ (pre-clean), input/ (relocated), or output/
 		// (post-clean, if restoreOmittedFiles partially ran).
+		// Only recover omitted-pattern files from output/ — cleaner-
+		// generated files may be incomplete and would overwrite the
+		// originals already restored from input/.
 		omitted := filepath.Join(stale, "omitted")
 		input := filepath.Join(stale, "input")
 		output := filepath.Join(stale, "output")
 		recoverAll(omitted, input, basePath)
-		restoreInput(output, basePath)
+		recoverOmittedOnly(output, basePath)
 		_ = os.RemoveAll(stale)
 	}
 }
@@ -516,6 +519,35 @@ func restoreOmittedToInput(omittedDir, inputDir string) {
 		dst := filepath.Join(inputDir, rel)
 		_ = os.MkdirAll(filepath.Dir(dst), 0o755)
 		_ = os.Rename(path, dst)
+		return nil
+	})
+}
+
+// recoverOmittedOnly moves only omit-pattern files from srcDir to dstDir.
+// Used during stale cleanup to recover omitted files from the output tree
+// without overwriting originals with potentially incomplete cleaner output.
+func recoverOmittedOnly(srcDir, dstDir string) {
+	_ = filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		for _, pattern := range omitPatterns {
+			matched, _ := filepath.Match(pattern, d.Name())
+			if !matched {
+				continue
+			}
+			rel, err := filepath.Rel(srcDir, path)
+			if err != nil {
+				return nil
+			}
+			dst := filepath.Join(dstDir, rel)
+			if _, err := os.Stat(dst); err == nil {
+				return nil
+			}
+			_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+			_ = os.Rename(path, dst)
+			return nil
+		}
 		return nil
 	})
 }
