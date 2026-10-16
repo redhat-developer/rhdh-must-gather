@@ -6,7 +6,6 @@ package obfuscate
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/url"
@@ -89,6 +88,22 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return err
 	}
 
+	// Move omitted files (e.g. .heapsnapshot) out of the input tree before
+	// calling must-gather-clean. The library's file omitter matches against
+	// relative paths using filepath.Match, where * does not cross path
+	// separators — so a flat glob like *.heapsnapshot never matches files
+	// nested in subdirectories. Physically removing them is the only
+	// reliable way to prevent the cleaner from loading them into memory.
+	omittedDir := filepath.Join(work, "omitted")
+	if err := os.Mkdir(omittedDir, 0o755); err != nil {
+		restoreInput(inputDir, basePath)
+		return fmt.Errorf("creating omitted files directory: %w", err)
+	}
+	if err := extractOmittedFiles(inputDir, omittedDir); err != nil {
+		restoreInput(inputDir, basePath)
+		return fmt.Errorf("extracting omitted files: %w", err)
+	}
+
 	configPath := filepath.Join(work, "config.yaml")
 	outputPath := filepath.Join(work, "output")
 	reportDir := filepath.Join(work, "report")
@@ -110,7 +125,7 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		restoreInput(inputDir, basePath)
 		return fmt.Errorf("obfuscation report was not written: %w", err)
 	}
-	if err := copyOmittedFiles(inputDir, outputPath); err != nil {
+	if err := restoreOmittedFiles(omittedDir, outputPath); err != nil {
 		restoreInput(inputDir, basePath)
 		return fmt.Errorf("restoring omitted files: %w", err)
 	}
@@ -476,11 +491,10 @@ func restoreInput(inputDir, basePath string) {
 	}
 }
 
-// copyOmittedFiles links or copies files matching omitPatterns from inputDir
-// into outputDir, preserving relative paths. must-gather-clean drops omitted
-// files from its output, so this step restores them verbatim.
-// Hard links are preferred to avoid doubling disk usage for large files.
-func copyOmittedFiles(inputDir, outputDir string) error {
+// extractOmittedFiles moves files matching omitPatterns from inputDir into
+// omittedDir, preserving relative paths. This physically removes them from
+// the input tree so must-gather-clean never sees them.
+func extractOmittedFiles(inputDir, omittedDir string) error {
 	var count int
 	err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !d.Type().IsRegular() {
@@ -495,12 +509,12 @@ func copyOmittedFiles(inputDir, outputDir string) error {
 			if err != nil {
 				return err
 			}
-			dst := filepath.Join(outputDir, rel)
+			dst := filepath.Join(omittedDir, rel)
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
-			if err := linkOrCopy(path, dst); err != nil {
-				return fmt.Errorf("restoring omitted file %s: %w", rel, err)
+			if err := os.Rename(path, dst); err != nil {
+				return fmt.Errorf("extracting omitted file %s: %w", rel, err)
 			}
 			count++
 			return nil
@@ -511,41 +525,38 @@ func copyOmittedFiles(inputDir, outputDir string) error {
 		return err
 	}
 	if count > 0 {
-		log.Info("Restored %d file(s) excluded from obfuscation", count)
+		log.Info("Excluded %d file(s) from obfuscation", count)
 	}
 	return nil
 }
 
-func linkOrCopy(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
+// restoreOmittedFiles moves previously extracted files from omittedDir into
+// outputDir, preserving relative paths.
+func restoreOmittedFiles(omittedDir, outputDir string) error {
+	var count int
+	err := filepath.WalkDir(omittedDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(omittedDir, path)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(outputDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(path, dst); err != nil {
+			return fmt.Errorf("restoring omitted file %s: %w", rel, err)
+		}
+		count++
 		return nil
-	}
-	return copyFile(src, dst)
-}
-
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = in.Close() }()
-
-	info, err := in.Stat()
-	if err != nil {
-		return err
+	if count > 0 {
+		log.Info("Restored %d file(s) excluded from obfuscation", count)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
+	return nil
 }

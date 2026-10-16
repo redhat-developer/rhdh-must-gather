@@ -534,50 +534,55 @@ func TestRelocateAndRestore(t *testing.T) {
 	}
 }
 
-func TestCopyOmittedFiles(t *testing.T) {
+func TestExtractOmittedFiles(t *testing.T) {
 	input := t.TempDir()
 	mustWrite(t, filepath.Join(input, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "snapshot-data")
 	mustWrite(t, filepath.Join(input, "helm", "heap-dumps", "pod=x", "container=c", "heap.fallback.heapsnapshot"), "fallback-data")
 	mustWrite(t, filepath.Join(input, "operator", "heap-dumps", "pod=y", "container=c", "dump.PARTIAL.heapsnapshot"), "partial-data")
 	mustWrite(t, filepath.Join(input, "logs", "app.log"), "keep me")
 
-	output := t.TempDir()
-	// Simulate must-gather-clean output: only non-omitted files present
-	mustWrite(t, filepath.Join(output, "logs", "app.log"), "obfuscated")
-
-	if err := copyOmittedFiles(input, output); err != nil {
-		t.Fatalf("copyOmittedFiles() error = %v", err)
+	omitted := t.TempDir()
+	if err := extractOmittedFiles(input, omitted); err != nil {
+		t.Fatalf("extractOmittedFiles() error = %v", err)
 	}
 
-	// Heap snapshots should be copied to output
-	if got := mustRead(t, filepath.Join(output, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); got != "snapshot-data" {
+	// Heap snapshots should be moved to omitted dir
+	if got := mustRead(t, filepath.Join(omitted, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); got != "snapshot-data" {
 		t.Errorf("heapsnapshot = %q, want 'snapshot-data'", got)
 	}
-	if got := mustRead(t, filepath.Join(output, "helm", "heap-dumps", "pod=x", "container=c", "heap.fallback.heapsnapshot")); got != "fallback-data" {
+	if got := mustRead(t, filepath.Join(omitted, "helm", "heap-dumps", "pod=x", "container=c", "heap.fallback.heapsnapshot")); got != "fallback-data" {
 		t.Errorf("fallback = %q, want 'fallback-data'", got)
 	}
-	if got := mustRead(t, filepath.Join(output, "operator", "heap-dumps", "pod=y", "container=c", "dump.PARTIAL.heapsnapshot")); got != "partial-data" {
+	if got := mustRead(t, filepath.Join(omitted, "operator", "heap-dumps", "pod=y", "container=c", "dump.PARTIAL.heapsnapshot")); got != "partial-data" {
 		t.Errorf("partial = %q, want 'partial-data'", got)
+	}
+
+	// Heap snapshots should no longer exist in input
+	if _, err := os.Stat(filepath.Join(input, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); err == nil {
+		t.Error("heapsnapshot should have been removed from input")
+	}
+
+	// Non-matching files should remain in input
+	if got := mustRead(t, filepath.Join(input, "logs", "app.log")); got != "keep me" {
+		t.Errorf("app.log = %q, want 'keep me'", got)
 	}
 }
 
-func TestCopyOmittedFiles_NoHeapSnapshots(t *testing.T) {
+func TestExtractOmittedFiles_NoHeapSnapshots(t *testing.T) {
 	input := t.TempDir()
 	mustWrite(t, filepath.Join(input, "logs", "app.log"), "log data")
 
-	output := t.TempDir()
-	mustWrite(t, filepath.Join(output, "logs", "app.log"), "obfuscated")
-
-	if err := copyOmittedFiles(input, output); err != nil {
-		t.Fatalf("copyOmittedFiles() error = %v", err)
+	omitted := t.TempDir()
+	if err := extractOmittedFiles(input, omitted); err != nil {
+		t.Fatalf("extractOmittedFiles() error = %v", err)
 	}
-	// Output should be unchanged
-	if got := mustRead(t, filepath.Join(output, "logs", "app.log")); got != "obfuscated" {
-		t.Errorf("app.log = %q, want 'obfuscated'", got)
+	// Input should be unchanged
+	if got := mustRead(t, filepath.Join(input, "logs", "app.log")); got != "log data" {
+		t.Errorf("app.log = %q, want 'log data'", got)
 	}
 }
 
-func TestCopyOmittedFiles_SkipsSymlinks(t *testing.T) {
+func TestExtractOmittedFiles_SkipsSymlinks(t *testing.T) {
 	input := t.TempDir()
 	snapshotDir := filepath.Join(input, "heap-dumps", "pod=x", "container=c")
 	mustWrite(t, filepath.Join(snapshotDir, "real.heapsnapshot"), "real-data")
@@ -585,23 +590,46 @@ func TestCopyOmittedFiles_SkipsSymlinks(t *testing.T) {
 		t.Skipf("symlinks not supported: %v", err)
 	}
 
-	output := t.TempDir()
-	if err := copyOmittedFiles(input, output); err != nil {
-		t.Fatalf("copyOmittedFiles() error = %v", err)
+	omitted := t.TempDir()
+	if err := extractOmittedFiles(input, omitted); err != nil {
+		t.Fatalf("extractOmittedFiles() error = %v", err)
 	}
 
-	if got := mustRead(t, filepath.Join(output, "heap-dumps", "pod=x", "container=c", "real.heapsnapshot")); got != "real-data" {
+	// Only regular files should be extracted
+	if got := mustRead(t, filepath.Join(omitted, "heap-dumps", "pod=x", "container=c", "real.heapsnapshot")); got != "real-data" {
 		t.Errorf("real snapshot = %q, want 'real-data'", got)
 	}
-	if _, err := os.Lstat(filepath.Join(output, "heap-dumps", "pod=x", "container=c", "link.heapsnapshot")); err == nil {
-		t.Error("symlink should not have been copied to output")
+	if _, err := os.Lstat(filepath.Join(omitted, "heap-dumps", "pod=x", "container=c", "link.heapsnapshot")); err == nil {
+		t.Error("symlink should not have been extracted")
+	}
+}
+
+func TestRestoreOmittedFiles(t *testing.T) {
+	omitted := t.TempDir()
+	mustWrite(t, filepath.Join(omitted, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "snapshot-data")
+
+	output := t.TempDir()
+	mustWrite(t, filepath.Join(output, "logs", "app.log"), "obfuscated")
+
+	if err := restoreOmittedFiles(omitted, output); err != nil {
+		t.Fatalf("restoreOmittedFiles() error = %v", err)
+	}
+
+	if got := mustRead(t, filepath.Join(output, "helm", "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); got != "snapshot-data" {
+		t.Errorf("heapsnapshot = %q, want 'snapshot-data'", got)
+	}
+	// Original output files should still be there
+	if got := mustRead(t, filepath.Join(output, "logs", "app.log")); got != "obfuscated" {
+		t.Errorf("app.log = %q, want 'obfuscated'", got)
 	}
 }
 
 func TestApplyPreservesHeapSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "logs", "app.log"), "node 10.20.30.40\n")
-	mustWrite(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "v8-snapshot-binary-data")
+	dumpDir := filepath.Join(dir, "heap-dumps", "pod=x", "container=c")
+	mustWrite(t, filepath.Join(dumpDir, "heap.heapsnapshot"), "v8-snapshot-binary-data")
+	mustWrite(t, filepath.Join(dumpDir, "metadata.json"), "ip 10.20.30.40\n")
 
 	if err := Apply(dir, nil, func(config, input, output, report string) error {
 		return Clean(config, input, output, report, 1)
@@ -613,6 +641,11 @@ func TestApplyPreservesHeapSnapshots(t *testing.T) {
 	got := mustRead(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"))
 	if got != "v8-snapshot-binary-data" {
 		t.Errorf("heapsnapshot = %q, want 'v8-snapshot-binary-data'", got)
+	}
+	// Sibling file in same dir should be obfuscated
+	meta := mustRead(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "metadata.json"))
+	if strings.Contains(meta, "10.20.30.40") {
+		t.Errorf("IP still present in metadata.json: %s", meta)
 	}
 	// IP in log should be obfuscated
 	logBody := mustRead(t, filepath.Join(dir, "logs", "app.log"))
