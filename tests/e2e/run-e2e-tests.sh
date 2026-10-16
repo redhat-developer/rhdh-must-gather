@@ -638,6 +638,7 @@ log_info "Running must-gather"
 log_info "=========================================="
 
 GATHER_OPTS="--with-heap-dumps"
+GATHER_HELM_SET=""
 if [ "$WITH_HEAP_DUMPS" = true ]; then
     # Nightly mode: collect from all instances, with optional method override
     if [ -n "$HEAP_DUMP_METHOD" ]; then
@@ -648,6 +649,9 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
             export HEAP_DUMP_SIGUSR2_STABLE_SECONDS=30
         fi
     fi
+    # Heap snapshots are large (~150-180MB each); collecting from all instances
+    # plus post-collection obfuscation needs more memory than the chart default.
+    GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi"
 else
     # Regular E2E: collect only from RHDHSUPP-308 instance to speed up testing
     GATHER_OPTS="$GATHER_OPTS --heap-dump-instances $RHDHSUPP308_INSTANCE"
@@ -697,6 +701,7 @@ else
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
         OPTS="$GATHER_OPTS" \
+        ${GATHER_HELM_SET:+HELM_SET="$GATHER_HELM_SET"} \
         ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"}
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
