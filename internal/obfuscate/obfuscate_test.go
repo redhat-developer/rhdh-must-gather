@@ -225,6 +225,25 @@ func TestApplyFailureKeepsOriginalTree(t *testing.T) {
 	assertNoReversibleReport(t, dir)
 }
 
+func TestApplyFailureRecoverOmittedFiles(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "logs", "app.log"), "node 10.20.30.40\n")
+	mustWrite(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot"), "binary-data")
+
+	err := Apply(dir, nil, func(string, string, string, string) error {
+		return errors.New("clean failed")
+	})
+	if err == nil {
+		t.Fatal("Apply() error = nil, want failure")
+	}
+	if got := mustRead(t, filepath.Join(dir, "logs", "app.log")); got != "node 10.20.30.40\n" {
+		t.Errorf("log = %q, want original", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, "heap-dumps", "pod=x", "container=c", "heap.heapsnapshot")); got != "binary-data" {
+		t.Errorf("heapsnapshot = %q, want 'binary-data' — omitted files were not recovered", got)
+	}
+}
+
 func TestApplyKeepsResourceNamedReport(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "_configmaps", "report.yaml"), ""+

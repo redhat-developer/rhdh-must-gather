@@ -100,7 +100,7 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("creating omitted files directory: %w", err)
 	}
 	if err := extractOmittedFiles(inputDir, omittedDir); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("extracting omitted files: %w", err)
 	}
 
@@ -108,25 +108,25 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	outputPath := filepath.Join(work, "output")
 	reportDir := filepath.Join(work, "report")
 	if err := os.Mkdir(reportDir, 0o700); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("creating obfuscation report directory: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(configYAML(domains)), 0o600); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("writing obfuscation config: %w", err)
 	}
 
 	if err := clean(configPath, inputDir, outputPath, reportDir); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return err
 	}
 	reportPath := filepath.Join(reportDir, reportFileName)
 	if _, err := os.Stat(reportPath); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("obfuscation report was not written: %w", err)
 	}
 	if err := restoreOmittedFiles(omittedDir, outputPath); err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("restoring omitted files: %w", err)
 	}
 
@@ -134,7 +134,7 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	// the same filesystem so renames are atomic pointer swaps.
 	outEntries, err := os.ReadDir(outputPath)
 	if err != nil {
-		restoreInput(inputDir, basePath)
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("reading obfuscated output: %w", err)
 	}
 	for _, e := range outEntries {
@@ -144,11 +144,10 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
 		}
 	}
-	// Only remove the work directory after publication succeeds.
-	// On failure, restoreInput moves files back to basePath; if that
-	// partially fails, the work dir is left behind for
-	// cleanStaleWorkDirs to handle on the next run.
-	_ = os.RemoveAll(work)
+
+	if err := os.RemoveAll(work); err != nil {
+		return fmt.Errorf("removing obfuscation work directory: %w", err)
+	}
 	return nil
 }
 
@@ -473,10 +472,43 @@ func cleanStaleWorkDirs(basePath string) {
 		return
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".obfuscate-") && e.IsDir() {
-			_ = os.RemoveAll(filepath.Join(basePath, e.Name()))
+		if !strings.HasPrefix(e.Name(), ".obfuscate-") || !e.IsDir() {
+			continue
 		}
+		stale := filepath.Join(basePath, e.Name())
+		// Recover files that were relocated into this work directory by
+		// a run that was killed before it could restore them.
+		omitted := filepath.Join(stale, "omitted")
+		input := filepath.Join(stale, "input")
+		recoverAll(omitted, input, basePath)
+		_ = os.RemoveAll(stale)
 	}
+}
+
+// recoverAll restores omitted files back into inputDir, then moves
+// inputDir contents back to basePath. Used on failure paths so the
+// original collected tree is recovered.
+func recoverAll(omittedDir, inputDir, basePath string) {
+	restoreOmittedToInput(omittedDir, inputDir)
+	restoreInput(inputDir, basePath)
+}
+
+// restoreOmittedToInput moves extracted files from omittedDir back into
+// inputDir so they are included when restoreInput recovers the tree.
+func restoreOmittedToInput(omittedDir, inputDir string) {
+	_ = filepath.WalkDir(omittedDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(omittedDir, path)
+		if err != nil {
+			return nil
+		}
+		dst := filepath.Join(inputDir, rel)
+		_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+		_ = os.Rename(path, dst)
+		return nil
+	})
 }
 
 // restoreInput moves all entries from inputDir back to basePath so the

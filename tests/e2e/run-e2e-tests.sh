@@ -655,13 +655,19 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
     GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi resources.limits.cpu=1500m resources.requests.cpu=250m"
 
     # Allow overriding the number of obfuscation workers via env var.
-    # Use extraEnvVars index 1 because deploy-k8s.sh may write
-    # HEAP_DUMP_SIGUSR2_STABLE_SECONDS at index 0 in the values file.
+    # deploy-k8s.sh writes HEAP_DUMP_SIGUSR2_STABLE_SECONDS at
+    # extraEnvVars[0] when set, so use index 1 in that case to avoid
+    # collision; otherwise use index 0.
     # Use --set-string for the value because Helm --set would render a
     # bare number as an integer, but K8s env var values must be strings.
     if [ -n "${OBFUSCATE_WORKERS:-}" ]; then
-        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[1].name=OBFUSCATE_WORKERS"
-        GATHER_HELM_SET_STRING="gather.extraEnvVars[1].value=$OBFUSCATE_WORKERS"
+        if [ -n "${HEAP_DUMP_SIGUSR2_STABLE_SECONDS:-}" ]; then
+            WORKER_IDX=1
+        else
+            WORKER_IDX=0
+        fi
+        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[$WORKER_IDX].name=OBFUSCATE_WORKERS"
+        GATHER_HELM_SET_STRING="gather.extraEnvVars[$WORKER_IDX].value=$OBFUSCATE_WORKERS"
         log_info "Obfuscation workers override: $OBFUSCATE_WORKERS"
     fi
 else
