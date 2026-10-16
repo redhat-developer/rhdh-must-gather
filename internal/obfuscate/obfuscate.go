@@ -130,6 +130,11 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("restoring omitted files: %w", err)
 	}
 
+	// Remove sensitive files before publication so they cannot leak into
+	// the archive if a later step fails and the work dir stays behind.
+	_ = os.RemoveAll(reportDir)
+	_ = os.Remove(configPath)
+
 	// Move obfuscated files from outputPath to basePath. Everything is on
 	// the same filesystem so renames are atomic pointer swaps.
 	outEntries, err := os.ReadDir(outputPath)
@@ -477,10 +482,14 @@ func cleanStaleWorkDirs(basePath string) {
 		}
 		stale := filepath.Join(basePath, e.Name())
 		// Recover files that were relocated into this work directory by
-		// a run that was killed before it could restore them.
+		// a run that was killed before it could restore them. Files may
+		// be in omitted/ (pre-clean), input/ (relocated), or output/
+		// (post-clean, if restoreOmittedFiles partially ran).
 		omitted := filepath.Join(stale, "omitted")
 		input := filepath.Join(stale, "input")
+		output := filepath.Join(stale, "output")
 		recoverAll(omitted, input, basePath)
+		restoreInput(output, basePath)
 		_ = os.RemoveAll(stale)
 	}
 }
