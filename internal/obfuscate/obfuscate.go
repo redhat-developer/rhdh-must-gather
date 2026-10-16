@@ -31,7 +31,6 @@ const (
 	EnvDomains = "RHDH_OBFUSCATE_DOMAINS"
 
 	reportFileName = "report.yaml"
-	stagingDirName = ".obfuscated-staging"
 
 	discoveryTimeout = 10 * time.Second
 )
@@ -53,7 +52,8 @@ func Run(ctx context.Context, client *kube.Client, basePath string, namespaces [
 }
 
 // Apply obfuscates basePath using the supplied domain names.
-// Domain names are not logged. report.yaml is written outside basePath and deleted.
+// Domain names are not logged. report.yaml is written inside a temporary work
+// directory under basePath and removed when Apply returns.
 func Apply(basePath string, domains []string, clean CleanFunc) error {
 	if clean == nil {
 		return fmt.Errorf("obfuscation cleaner is not configured")
@@ -66,11 +66,26 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("obfuscation input %s is not a directory", basePath)
 	}
 
-	work, err := mkdirSameFS(basePath, "rhdh-must-gather-obfuscate-")
+	// Create the work directory inside basePath so it stays on the same
+	// volume (e.g. the PVC in a must-gather pod). Creating it beside the
+	// mount point (filepath.Dir) would land on the root filesystem, which
+	// counts against the container's ephemeral-storage limit and causes
+	// eviction when the gathered data is large (heap dumps, etc.).
+	work, err := os.MkdirTemp(basePath, ".obfuscate-")
 	if err != nil {
 		return fmt.Errorf("creating obfuscation work directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
+
+	// Relocate collected data into work/input so clean's input tree does
+	// not overlap with the output tree or the work directory itself.
+	inputDir := filepath.Join(work, "input")
+	if err := os.Mkdir(inputDir, 0o755); err != nil {
+		return fmt.Errorf("creating obfuscation input directory: %w", err)
+	}
+	if err := relocate(basePath, inputDir, filepath.Base(work)); err != nil {
+		return err
+	}
 
 	configPath := filepath.Join(work, "config.yaml")
 	outputPath := filepath.Join(work, "output")
@@ -82,20 +97,35 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("writing obfuscation config: %w", err)
 	}
 
-	if err := reportStaysOutside(outputPath, basePath, reportDir); err != nil {
-		return err
-	}
-	if err := clean(configPath, basePath, outputPath, reportDir); err != nil {
+	if err := clean(configPath, inputDir, outputPath, reportDir); err != nil {
+		restoreInput(inputDir, basePath)
 		return err
 	}
 	reportPath := filepath.Join(reportDir, reportFileName)
 	if _, err := os.Stat(reportPath); err != nil {
-		return fmt.Errorf("obfuscation report was not written outside the gather: %w", err)
+		restoreInput(inputDir, basePath)
+		return fmt.Errorf("obfuscation report was not written: %w", err)
 	}
-	if err := copyOmittedFiles(basePath, outputPath); err != nil {
+	if err := copyOmittedFiles(inputDir, outputPath); err != nil {
+		restoreInput(inputDir, basePath)
 		return fmt.Errorf("restoring omitted files: %w", err)
 	}
-	return publish(outputPath, basePath)
+
+	// Move obfuscated files from outputPath to basePath. Everything is on
+	// the same filesystem so renames are atomic pointer swaps.
+	outEntries, err := os.ReadDir(outputPath)
+	if err != nil {
+		restoreInput(inputDir, basePath)
+		return fmt.Errorf("reading obfuscated output: %w", err)
+	}
+	for _, e := range outEntries {
+		src := filepath.Join(outputPath, e.Name())
+		dst := filepath.Join(basePath, e.Name())
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
+		}
+	}
+	return nil
 }
 
 // Clean runs must-gather-clean in process. The gather command calls this from a
@@ -394,37 +424,35 @@ func writeObfuscation(b *strings.Builder, kind string) {
 	fmt.Fprintf(b, "    - type: %s\n      replacementType: Consistent\n      target: All\n", kind)
 }
 
-// mkdirSameFS creates a temp directory on the same filesystem as anchor so that
-// hard links between the two succeed. It falls back to the default temp dir.
-func mkdirSameFS(anchor, prefix string) (string, error) {
-	dir, err := os.MkdirTemp(filepath.Dir(anchor), prefix)
+// relocate moves every entry in srcDir into dstDir except for skip.
+// Both directories must be on the same filesystem so os.Rename is a fast
+// pointer swap without copying data.
+func relocate(srcDir, dstDir, skip string) error {
+	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		dir, err = os.MkdirTemp("", prefix)
+		return fmt.Errorf("reading directory for relocation: %w", err)
 	}
-	return dir, err
-}
-
-// reportStaysOutside rejects a report directory that would be copied into the
-// published gather. Collected files named report.yaml are ordinary resources
-// and are left in place. The reversible map is the report written under reportDir.
-func reportStaysOutside(outputPath, basePath, reportDir string) error {
-	if dirInside(outputPath, reportDir) || dirInside(basePath, reportDir) {
-		return fmt.Errorf("obfuscation report directory must stay outside the published gather")
+	for _, e := range entries {
+		if e.Name() == skip {
+			continue
+		}
+		if err := os.Rename(filepath.Join(srcDir, e.Name()), filepath.Join(dstDir, e.Name())); err != nil {
+			return fmt.Errorf("relocating %s for obfuscation: %w", e.Name(), err)
+		}
 	}
 	return nil
 }
 
-func dirInside(parent, child string) bool {
-	parent = filepath.Clean(parent)
-	child = filepath.Clean(child)
-	if parent == child {
-		return true
-	}
-	rel, err := filepath.Rel(parent, child)
+// restoreInput moves all entries from inputDir back to basePath so the
+// original collected tree is recovered after an obfuscation failure.
+func restoreInput(inputDir, basePath string) {
+	entries, err := os.ReadDir(inputDir)
 	if err != nil {
-		return false
+		return
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	for _, e := range entries {
+		_ = os.Rename(filepath.Join(inputDir, e.Name()), filepath.Join(basePath, e.Name()))
+	}
 }
 
 // copyOmittedFiles links or copies files matching omitPatterns from inputDir
@@ -474,79 +502,6 @@ func linkOrCopy(src, dst string) error {
 	return copyFile(src, dst)
 }
 
-func publish(cleaned, basePath string) error {
-	staging := filepath.Join(basePath, stagingDirName)
-	if err := os.RemoveAll(staging); err != nil {
-		return fmt.Errorf("removing previous obfuscation staging directory: %w", err)
-	}
-	if err := os.Rename(cleaned, staging); err != nil {
-		if copyErr := copyTree(cleaned, staging); copyErr != nil {
-			_ = os.RemoveAll(staging)
-			return fmt.Errorf("staging obfuscated output: %w", copyErr)
-		}
-	}
-
-	entries, err := os.ReadDir(basePath)
-	if err != nil {
-		return fmt.Errorf("reading collected output: %w", err)
-	}
-	for _, e := range entries {
-		if e.Name() == stagingDirName {
-			continue
-		}
-		if err := os.RemoveAll(filepath.Join(basePath, e.Name())); err != nil {
-			return fmt.Errorf("replacing collected output: %w", err)
-		}
-	}
-
-	staged, err := os.ReadDir(staging)
-	if err != nil {
-		return fmt.Errorf("reading staged obfuscated output: %w", err)
-	}
-	for _, e := range staged {
-		from := filepath.Join(staging, e.Name())
-		to := filepath.Join(basePath, e.Name())
-		if err := os.Rename(from, to); err != nil {
-			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
-		}
-	}
-	if err := os.RemoveAll(staging); err != nil {
-		return fmt.Errorf("removing obfuscation staging directory: %w", err)
-	}
-	return nil
-}
-
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			mode := info.Mode().Perm()
-			if mode == 0 {
-				mode = 0o755
-			}
-			return os.MkdirAll(target, mode)
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		}
-		return copyFile(path, target)
-	})
-}
 
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)

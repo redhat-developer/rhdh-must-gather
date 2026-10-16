@@ -166,9 +166,7 @@ func TestApplyObfuscatesWithoutDroppingResourcesOrReport(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, stagingDirName)); !os.IsNotExist(err) {
-		t.Fatalf("staging directory still present: %v", err)
-	}
+	assertNoWorkDir(t, dir)
 	assertNoReversibleReport(t, dir)
 
 	cm := mustRead(t, filepath.Join(dir, "resources", "app-config.yaml"))
@@ -224,9 +222,7 @@ func TestApplyFailureKeepsOriginalTree(t *testing.T) {
 	if got := mustRead(t, path); got != original {
 		t.Fatalf("original file changed:\n%s", got)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, stagingDirName)); !os.IsNotExist(statErr) {
-		t.Fatalf("staging directory left behind: %v", statErr)
-	}
+	assertNoWorkDir(t, dir)
 	assertNoReversibleReport(t, dir)
 }
 
@@ -246,6 +242,19 @@ func TestApplyKeepsResourceNamedReport(t *testing.T) {
 		t.Fatalf("resource named report was dropped:\n%s", body)
 	}
 	assertNoReversibleReport(t, dir)
+}
+
+func assertNoWorkDir(t *testing.T, root string) {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".obfuscate-") {
+			t.Fatalf("obfuscation work directory left behind: %s", e.Name())
+		}
+	}
 }
 
 func assertNoReversibleReport(t *testing.T, root string) {
@@ -492,99 +501,37 @@ func TestApiGroupPresent_WithDiscovery(t *testing.T) {
 	}
 }
 
-func TestReportStaysOutside_InsideOutput(t *testing.T) {
-	err := reportStaysOutside("/output", "/base", "/output/report")
-	if err == nil {
-		t.Fatal("expected error when reportDir is inside outputPath")
-	}
-}
 
-func TestReportStaysOutside_InsideBase(t *testing.T) {
-	err := reportStaysOutside("/output", "/base", "/base/report")
-	if err == nil {
-		t.Fatal("expected error when reportDir is inside basePath")
-	}
-}
-
-func TestReportStaysOutside_Outside(t *testing.T) {
-	err := reportStaysOutside("/output", "/base", "/other/report")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-}
-
-func TestDirInside(t *testing.T) {
-	tests := []struct {
-		name   string
-		parent string
-		child  string
-		want   bool
-	}{
-		{"same path", "/a/b", "/a/b", true},
-		{"child inside", "/a/b", "/a/b/c", true},
-		{"child outside", "/a/b", "/a/c", false},
-		{"parent of parent", "/a/b", "/a", false},
-		{"unrelated", "/x", "/y", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := dirInside(tt.parent, tt.child)
-			if got != tt.want {
-				t.Errorf("dirInside(%q, %q) = %v, want %v", tt.parent, tt.child, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCopyTree(t *testing.T) {
-	src := t.TempDir()
-	mustWrite(t, filepath.Join(src, "file.txt"), "hello")
-	mustWrite(t, filepath.Join(src, "sub", "nested.txt"), "world")
-	if err := os.Symlink("file.txt", filepath.Join(src, "link.txt")); err != nil {
+func TestRelocateAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "file.txt"), "hello")
+	mustWrite(t, filepath.Join(dir, "sub", "nested.txt"), "world")
+	skipDir := ".work"
+	if err := os.Mkdir(filepath.Join(dir, skipDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	dst := filepath.Join(t.TempDir(), "copy")
-	if err := copyTree(src, dst); err != nil {
-		t.Fatalf("copyTree() error = %v", err)
+	dst := filepath.Join(dir, skipDir, "input")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := relocate(dir, dst, skipDir); err != nil {
+		t.Fatalf("relocate() error = %v", err)
 	}
 
 	if got := mustRead(t, filepath.Join(dst, "file.txt")); got != "hello" {
 		t.Errorf("file.txt = %q, want hello", got)
 	}
-	if got := mustRead(t, filepath.Join(dst, "sub", "nested.txt")); got != "world" {
-		t.Errorf("sub/nested.txt = %q, want world", got)
+	if _, err := os.Stat(filepath.Join(dir, "file.txt")); !os.IsNotExist(err) {
+		t.Fatal("file.txt should have been moved out of dir")
 	}
-	link, err := os.Readlink(filepath.Join(dst, "link.txt"))
-	if err != nil {
-		t.Fatalf("readlink: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, skipDir)); err != nil {
+		t.Fatal("skip directory should still be in dir")
 	}
-	if link != "file.txt" {
-		t.Errorf("symlink target = %q, want file.txt", link)
-	}
-}
 
-func TestPublish(t *testing.T) {
-	base := t.TempDir()
-	mustWrite(t, filepath.Join(base, "original.txt"), "old data")
-
-	cleaned := filepath.Join(t.TempDir(), "cleaned")
-	if err := os.Mkdir(cleaned, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	mustWrite(t, filepath.Join(cleaned, "result.txt"), "new data")
-
-	if err := publish(cleaned, base); err != nil {
-		t.Fatalf("publish() error = %v", err)
-	}
-	if got := mustRead(t, filepath.Join(base, "result.txt")); got != "new data" {
-		t.Errorf("result.txt = %q, want 'new data'", got)
-	}
-	if _, err := os.Stat(filepath.Join(base, "original.txt")); !os.IsNotExist(err) {
-		t.Fatal("original.txt should have been removed")
-	}
-	if _, err := os.Stat(filepath.Join(base, stagingDirName)); !os.IsNotExist(err) {
-		t.Fatal("staging directory should have been removed")
+	restoreInput(dst, dir)
+	if got := mustRead(t, filepath.Join(dir, "file.txt")); got != "hello" {
+		t.Errorf("restored file.txt = %q, want hello", got)
 	}
 }
 
