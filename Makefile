@@ -12,6 +12,7 @@ LOG_LEVEL ?= info
 OPTS ?= ## Additional options to pass to must-gather (e.g., --with-heap-dumps --with-secrets)
 NAMESPACE ?= ## Namespace for deploy-k8s/deploy-openshift (default: random for k8s, auto for openshift)
 HELM_SET ?= ## Additional Helm --set flags for deploy-k8s (e.g., "gather.logLevel=debug")
+HELM_SET_STRING ?= ## Additional Helm --set-string flags for deploy-k8s (string values)
 OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k8s.<timestamp>.tar.gz)
 HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
@@ -144,7 +145,7 @@ deploy-k8s: ## Deploy the must-gather image on a non-OCP K8s cluster (uses Helm 
 		echo "Error: helm command not found. Please install Helm."; \
 		exit 1; \
 	fi
-	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)") $(if $(HELM_TIMEOUT),--timeout "$(HELM_TIMEOUT)")
+	@./hack/deploy-k8s.sh --image "$(FULL_IMAGE_NAME)" $(if $(NAMESPACE),--namespace "$(NAMESPACE)") $(if $(OPTS),--opts "$(OPTS)") $(if $(HELM_SET),--helm-set "$(HELM_SET)") $(if $(HELM_SET_STRING),--helm-set-string "$(HELM_SET_STRING)") $(if $(OUTPUT_FILE),--output "$(OUTPUT_FILE)") $(if $(HELM_TIMEOUT),--timeout "$(HELM_TIMEOUT)") $(DEPLOY_K8S_EXTRA_OPTS)
 
 
 ##@ Cleanup

@@ -33,8 +33,10 @@ IMAGE="${DEFAULT_IMAGE}"
 NAMESPACE=""
 OPTS_STRING=""
 HELM_SET_STRING=""
+HELM_SET_STR_STRING=""
 OUTPUT_FILE=""
 HELM_TIMEOUT="60m"
+COMPRESS=true
 
 # Parse named arguments
 show_help() {
@@ -60,6 +62,10 @@ while [[ $# -gt 0 ]]; do
             HELM_SET_STRING="$2"
             shift 2
             ;;
+        --helm-set-string)
+            HELM_SET_STR_STRING="$2"
+            shift 2
+            ;;
         --output)
             OUTPUT_FILE="$2"
             shift 2
@@ -67,6 +73,10 @@ while [[ $# -gt 0 ]]; do
         --timeout)
             HELM_TIMEOUT="$2"
             shift 2
+            ;;
+        --no-compress)
+            COMPRESS=false
+            shift
             ;;
         --help|-h)
             show_help
@@ -114,9 +124,20 @@ if [[ -z "${NAMESPACE}" ]]; then
 fi
 RELEASE_NAME="rhdh-must-gather"
 if [[ -z "${OUTPUT_FILE}" ]]; then
-    OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar.gz"
-elif [[ "${OUTPUT_FILE}" != *.tar.gz ]]; then
-    OUTPUT_FILE="${OUTPUT_FILE}.tar.gz"
+    if [[ "${COMPRESS}" == "true" ]]; then
+        OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar.gz"
+    else
+        OUTPUT_FILE="rhdh-must-gather-output.k8s.${TIMESTAMP}.tar"
+    fi
+else
+    # Normalize suffix to match the compression mode
+    OUTPUT_FILE="${OUTPUT_FILE%.tar.gz}"
+    OUTPUT_FILE="${OUTPUT_FILE%.tar}"
+    if [[ "${COMPRESS}" == "true" ]]; then
+        OUTPUT_FILE="${OUTPUT_FILE}.tar.gz"
+    else
+        OUTPUT_FILE="${OUTPUT_FILE}.tar"
+    fi
 fi
 
 echo "Testing against a regular K8s cluster using Helm chart..."
@@ -311,12 +332,18 @@ cat "${TMP_VALUES}"
 echo "---"
 echo ""
 
-# Build additional --set arguments
+# Build additional --set and --set-string arguments
 HELM_SET_ARGS=()
 if [[ -n "${HELM_SET_STRING}" ]]; then
     read -ra HELM_SET_ARRAY <<< "${HELM_SET_STRING}"
     for item in "${HELM_SET_ARRAY[@]}"; do
         HELM_SET_ARGS+=(--set "${item}")
+    done
+fi
+if [[ -n "${HELM_SET_STR_STRING}" ]]; then
+    read -ra HELM_SET_STR_ARRAY <<< "${HELM_SET_STR_STRING}"
+    for item in "${HELM_SET_STR_ARRAY[@]}"; do
+        HELM_SET_ARGS+=(--set-string "${item}")
     done
 fi
 
@@ -440,7 +467,11 @@ echo ""
 echo "Pulling must-gather data from data-holder container..."
 POD_NAME=$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/component=gather" -o jsonpath='{.items[0].metadata.name}')
 echo "Pod: ${POD_NAME}"
-if ! timeout 10m kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar czf - -C /must-gather . > "${OUTPUT_FILE}"; then
+TAR_FLAGS="cf"
+if [[ "${COMPRESS}" == "true" ]]; then
+    TAR_FLAGS="czf"
+fi
+if ! timeout 10m kubectl -n "${NAMESPACE}" exec "${POD_NAME}" -c data-holder -- tar ${TAR_FLAGS} - -C /must-gather . > "${OUTPUT_FILE}"; then
     echo "Error: Failed to pull data from data-holder container (timeout or error)"
     echo ""
     echo "Resources left in namespace ${NAMESPACE} for debugging."
@@ -469,4 +500,4 @@ echo ""
 echo "Must-gather data saved to: ${OUTPUT_FILE}"
 echo ""
 echo "To extract the data, run:"
-echo "  tar xzf ${OUTPUT_FILE}"
+printf '  tar xf %q\n' "${OUTPUT_FILE}"
