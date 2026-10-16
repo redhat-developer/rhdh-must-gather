@@ -18,6 +18,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
 )
 
@@ -225,6 +226,16 @@ func TestResolveHeapDumpInstances_EnvFallback(t *testing.T) {
 
 func noopClean(_, _, _, _ string) error { return nil }
 
+func excludeAllDefaultArgs() []string {
+	var args []string
+	for _, r := range collector.Registrations {
+		if r.Mode == collector.Default {
+			args = append(args, "--without-"+r.Name)
+		}
+	}
+	return args
+}
+
 func fakeClientFactory() (*kube.Client, error) {
 	fakeClient := fakeclientset.NewSimpleClientset()
 	fd := fakeClient.Discovery().(*fakediscovery.FakeDiscovery)
@@ -258,11 +269,7 @@ func TestRunGather_FullFlow(t *testing.T) {
 
 	cmd := newRootCmd()
 	// Exclude all collectors to avoid actual collection
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
-	}
-	_ = cmd.ParseFlags(args)
+	_ = cmd.ParseFlags(excludeAllDefaultArgs())
 
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
@@ -316,11 +323,7 @@ func TestRunGather_WithSecrets(t *testing.T) {
 	t.Setenv("BASE_COLLECTION_PATH", dir)
 
 	cmd := newRootCmd()
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
-	}
-	_ = cmd.ParseFlags(args)
+	_ = cmd.ParseFlags(excludeAllDefaultArgs())
 
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
@@ -339,11 +342,7 @@ func TestRunGather_WithHeapDumps(t *testing.T) {
 	t.Setenv("BASE_COLLECTION_PATH", dir)
 
 	cmd := newRootCmd()
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
-	}
-	_ = cmd.ParseFlags(args)
+	_ = cmd.ParseFlags(excludeAllDefaultArgs())
 
 	opts := &gatherOptions{
 		heapDumpMethod:    "sigusr2",
@@ -363,11 +362,7 @@ func TestRunGather_WithNamespaces(t *testing.T) {
 	t.Setenv("BASE_COLLECTION_PATH", dir)
 
 	cmd := newRootCmd()
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
-	}
-	_ = cmd.ParseFlags(args)
+	_ = cmd.ParseFlags(excludeAllDefaultArgs())
 
 	opts := &gatherOptions{
 		heapDumpMethod: "inspector",
@@ -378,38 +373,6 @@ func TestRunGather_WithNamespaces(t *testing.T) {
 	err := runGather(cmd, opts)
 	if err != nil {
 		t.Fatalf("runGather: %v", err)
-	}
-}
-
-func TestRunGather_UnknownCollector(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("BASE_COLLECTION_PATH", dir)
-
-	cmd := newRootCmd()
-	// Exclude all mandatory scripts
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
-	}
-	_ = cmd.ParseFlags(args)
-
-	// Add a nonexistent collector to the mandatory list temporarily
-	origScripts := mandatoryScripts
-	mandatoryScripts = []string{"nonexistent-collector"}
-	defer func() { mandatoryScripts = origScripts }()
-
-	// Re-parse without exclusions so the unknown collector is included
-	cmd2 := newRootCmd()
-	_ = cmd2.ParseFlags([]string{})
-
-	opts := &gatherOptions{
-		heapDumpMethod: "inspector",
-		clientFactory:  fakeClientFactory,
-		cleanFunc:      noopClean,
-	}
-	err := runGather(cmd2, opts)
-	if err != nil {
-		t.Fatalf("runGather should not fail for unknown collector: %v", err)
 	}
 }
 
