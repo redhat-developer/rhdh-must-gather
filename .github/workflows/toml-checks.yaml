@@ -23,7 +23,7 @@ jobs:
           files_ignore: |
             vendor/**
 
-      - uses: tombi-toml/setup-tombi@888e911b339668f6c2d66521db8191b708c05009 # v1.8.2
+      - uses: tombi-toml/setup-tombi@be97456589cb1f9c6c8a419bd7fe825b40a9df50 # v1.8.5
         if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         with:
           version: 'v0.9.9'
