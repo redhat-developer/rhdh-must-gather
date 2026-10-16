@@ -238,7 +238,7 @@ func TestObfuscateWorkers(t *testing.T) {
 		want    int
 		wantErr bool
 	}{
-		{"default", "", defaultObfuscateWorkers, false},
+		{"default", "", defaultObfuscateWorkers(), false},
 		{"override", "4", 4, false},
 		{"one", "1", 1, false},
 		{"zero skips obfuscation", "0", 0, false},
@@ -256,6 +256,52 @@ func TestObfuscateWorkers(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("obfuscateWorkers() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCPUMax(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int
+	}{
+		{"4 CPUs", "400000 100000", 4},
+		{"1.5 CPUs rounds up to 2", "150000 100000", 2},
+		{"0.5 CPUs rounds up to 1", "50000 100000", 1},
+		{"unlimited", "max 100000", 0},
+		{"empty", "", 0},
+		{"garbage", "not a number", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCPUMax(tt.input); got != tt.want {
+				t.Errorf("parseCPUMax(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCPUQuotaPeriod(t *testing.T) {
+	tests := []struct {
+		name   string
+		quota  string
+		period string
+		want   int
+	}{
+		{"4 CPUs", "400000", "100000", 4},
+		{"1.5 CPUs rounds up to 2", "150000", "100000", 2},
+		{"0.5 CPUs rounds up to 1", "50000", "100000", 1},
+		{"no limit", "-1", "100000", 0},
+		{"invalid quota", "abc", "100000", 0},
+		{"invalid period", "400000", "abc", 0},
+		{"zero period", "400000", "0", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCPUQuotaPeriod(tt.quota, tt.period); got != tt.want {
+				t.Errorf("parseCPUQuotaPeriod(%q, %q) = %d, want %d", tt.quota, tt.period, got, tt.want)
 			}
 		})
 	}

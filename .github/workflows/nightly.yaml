@@ -163,6 +163,8 @@ jobs:
           wait: 120s
 
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
+        env:
+          OBFUSCATE_WORKERS: ${{ vars.RHDH_OBFUSCATE_WORKERS }}
         run: |
           if [ "${{ matrix.method }}" = "auto" ]; then
             # Auto: let the tool use its built-in default method (inspector)

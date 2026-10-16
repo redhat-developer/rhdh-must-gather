@@ -13,10 +13,64 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/obfuscate"
 )
 
-const (
-	envObfuscateWorkers     = "RHDH_OBFUSCATE_WORKERS"
-	defaultObfuscateWorkers = 2
-)
+const envObfuscateWorkers = "OBFUSCATE_WORKERS"
+
+func defaultObfuscateWorkers() int {
+	return max(1, effectiveCPUs()/2)
+}
+
+// effectiveCPUs returns the container's CPU quota (cgroup v2 then v1),
+// falling back to runtime.GOMAXPROCS which reports host CPUs.
+func effectiveCPUs() int {
+	if n := cgroupCPUQuota(); n > 0 {
+		return n
+	}
+	return runtime.GOMAXPROCS(0)
+}
+
+func cgroupCPUQuota() int {
+	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
+		if n := parseCPUMax(strings.TrimSpace(string(data))); n > 0 {
+			return n
+		}
+	}
+	quota, err1 := os.ReadFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+	period, err2 := os.ReadFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+	if err1 == nil && err2 == nil {
+		return parseCPUQuotaPeriod(strings.TrimSpace(string(quota)), strings.TrimSpace(string(period)))
+	}
+	return 0
+}
+
+// parseCPUMax parses cgroup v2 cpu.max ("quota period" or "max period").
+func parseCPUMax(s string) int {
+	fields := strings.Fields(s)
+	if len(fields) != 2 || fields[0] == "max" {
+		return 0
+	}
+	quota, err := strconv.Atoi(fields[0])
+	if err != nil || quota <= 0 {
+		return 0
+	}
+	period, err := strconv.Atoi(fields[1])
+	if err != nil || period <= 0 {
+		return 0
+	}
+	return (quota + period - 1) / period
+}
+
+// parseCPUQuotaPeriod parses cgroup v1 cpu.cfs_quota_us / cpu.cfs_period_us.
+func parseCPUQuotaPeriod(quotaStr, periodStr string) int {
+	quota, err := strconv.Atoi(quotaStr)
+	if err != nil || quota <= 0 {
+		return 0
+	}
+	period, err := strconv.Atoi(periodStr)
+	if err != nil || period <= 0 {
+		return 0
+	}
+	return (quota + period - 1) / period
+}
 
 func newObfuscateCmd() *cobra.Command {
 	var input, output, reportDir, config string
@@ -47,7 +101,7 @@ func newObfuscateCmd() *cobra.Command {
 	flags.StringVar(&input, "input", "", "Directory of the collected must-gather")
 	flags.StringVar(&output, "output", "", "Directory for the obfuscated output")
 	flags.StringVar(&reportDir, "report-dir", "", "Directory for report.yaml, which must stay out of the published gather")
-	flags.IntVar(&workers, "workers", defaultObfuscateWorkers, "Number of must-gather-clean workers")
+	flags.IntVar(&workers, "workers", defaultObfuscateWorkers(), "Number of must-gather-clean workers")
 	for _, name := range []string{"config", "input", "output", "report-dir"} {
 		if err := cmd.MarkFlagRequired(name); err != nil {
 			panic(err)
@@ -92,17 +146,10 @@ func obfuscateCommandArgs(configPath, inputPath, outputPath, reportDir string, w
 	}
 }
 
-// obfuscateWorkers returns the number of parallel workers for must-gather-clean.
-// Default is 2 because the obfuscation subprocess shares its cgroup memory
-// limit with the parent gather process, and each worker loads entire YAML/JSON
-// files into memory (os.ReadFile) for Kubernetes resource detection. Using
-// runtime.GOMAXPROCS (host CPU count, not the container limit) caused OOM
-// kills in the 512Mi init container. Override with RHDH_OBFUSCATE_WORKERS;
-// set to 0 to skip obfuscation, or "all" to use all available CPUs.
 func obfuscateWorkers() (int, error) {
 	s := os.Getenv(envObfuscateWorkers)
 	if s == "" {
-		return defaultObfuscateWorkers, nil
+		return defaultObfuscateWorkers(), nil
 	}
 	if strings.EqualFold(s, "all") {
 		return runtime.GOMAXPROCS(0), nil

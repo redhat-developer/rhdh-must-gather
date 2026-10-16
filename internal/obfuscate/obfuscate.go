@@ -6,7 +6,6 @@ package obfuscate
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/url"
@@ -31,7 +30,6 @@ const (
 	EnvDomains = "RHDH_OBFUSCATE_DOMAINS"
 
 	reportFileName = "report.yaml"
-	stagingDirName = ".obfuscated-staging"
 
 	discoveryTimeout = 10 * time.Second
 )
@@ -53,7 +51,8 @@ func Run(ctx context.Context, client *kube.Client, basePath string, namespaces [
 }
 
 // Apply obfuscates basePath using the supplied domain names.
-// Domain names are not logged. report.yaml is written outside basePath and deleted.
+// Domain names are not logged. report.yaml is written inside a temporary work
+// directory under basePath and removed when Apply returns.
 func Apply(basePath string, domains []string, clean CleanFunc) error {
 	if clean == nil {
 		return fmt.Errorf("obfuscation cleaner is not configured")
@@ -66,36 +65,95 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("obfuscation input %s is not a directory", basePath)
 	}
 
-	work, err := mkdirSameFS(basePath, "rhdh-must-gather-obfuscate-")
+	// Remove stale work directories left behind by a previous SIGKILL/OOM.
+	cleanStaleWorkDirs(basePath)
+
+	// Create the work directory inside basePath so it stays on the same
+	// volume (e.g. the PVC in a must-gather pod). Creating it beside the
+	// mount point (filepath.Dir) would land on the root filesystem, which
+	// counts against the container's ephemeral-storage limit and causes
+	// eviction when the gathered data is large (heap dumps, etc.).
+	work, err := os.MkdirTemp(basePath, ".obfuscate-")
 	if err != nil {
 		return fmt.Errorf("creating obfuscation work directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(work) }()
+
+	// Relocate collected data into work/input so clean's input tree does
+	// not overlap with the output tree or the work directory itself.
+	inputDir := filepath.Join(work, "input")
+	if err := os.Mkdir(inputDir, 0o755); err != nil {
+		return fmt.Errorf("creating obfuscation input directory: %w", err)
+	}
+	if err := relocate(basePath, inputDir, filepath.Base(work)); err != nil {
+		return err
+	}
+
+	// Move omitted files (e.g. .heapsnapshot) out of the input tree before
+	// calling must-gather-clean. The library's file omitter matches against
+	// relative paths using filepath.Match, where * does not cross path
+	// separators — so a flat glob like *.heapsnapshot never matches files
+	// nested in subdirectories. Physically removing them is the only
+	// reliable way to prevent the cleaner from loading them into memory.
+	omittedDir := filepath.Join(work, "omitted")
+	if err := os.Mkdir(omittedDir, 0o755); err != nil {
+		restoreInput(inputDir, basePath)
+		return fmt.Errorf("creating omitted files directory: %w", err)
+	}
+	if err := extractOmittedFiles(inputDir, omittedDir); err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
+		return fmt.Errorf("extracting omitted files: %w", err)
+	}
 
 	configPath := filepath.Join(work, "config.yaml")
 	outputPath := filepath.Join(work, "output")
 	reportDir := filepath.Join(work, "report")
 	if err := os.Mkdir(reportDir, 0o700); err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("creating obfuscation report directory: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(configYAML(domains)), 0o600); err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("writing obfuscation config: %w", err)
 	}
 
-	if err := reportStaysOutside(outputPath, basePath, reportDir); err != nil {
-		return err
-	}
-	if err := clean(configPath, basePath, outputPath, reportDir); err != nil {
+	if err := clean(configPath, inputDir, outputPath, reportDir); err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
 		return err
 	}
 	reportPath := filepath.Join(reportDir, reportFileName)
 	if _, err := os.Stat(reportPath); err != nil {
-		return fmt.Errorf("obfuscation report was not written outside the gather: %w", err)
+		recoverAll(omittedDir, inputDir, basePath)
+		return fmt.Errorf("obfuscation report was not written: %w", err)
 	}
-	if err := copyOmittedFiles(basePath, outputPath); err != nil {
+	if err := restoreOmittedFiles(omittedDir, outputPath); err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
 		return fmt.Errorf("restoring omitted files: %w", err)
 	}
-	return publish(outputPath, basePath)
+
+	// Remove sensitive files before publication so they cannot leak into
+	// the archive if a later step fails and the work dir stays behind.
+	_ = os.RemoveAll(reportDir)
+	_ = os.Remove(configPath)
+
+	// Move obfuscated files from outputPath to basePath. Everything is on
+	// the same filesystem so renames are atomic pointer swaps.
+	outEntries, err := os.ReadDir(outputPath)
+	if err != nil {
+		recoverAll(omittedDir, inputDir, basePath)
+		return fmt.Errorf("reading obfuscated output: %w", err)
+	}
+	for _, e := range outEntries {
+		src := filepath.Join(outputPath, e.Name())
+		dst := filepath.Join(basePath, e.Name())
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
+		}
+	}
+
+	if err := os.RemoveAll(work); err != nil {
+		return fmt.Errorf("removing obfuscation work directory: %w", err)
+	}
+	return nil
 }
 
 // Clean runs must-gather-clean in process. The gather command calls this from a
@@ -394,44 +452,122 @@ func writeObfuscation(b *strings.Builder, kind string) {
 	fmt.Fprintf(b, "    - type: %s\n      replacementType: Consistent\n      target: All\n", kind)
 }
 
-// mkdirSameFS creates a temp directory on the same filesystem as anchor so that
-// hard links between the two succeed. It falls back to the default temp dir.
-func mkdirSameFS(anchor, prefix string) (string, error) {
-	dir, err := os.MkdirTemp(filepath.Dir(anchor), prefix)
+// relocate moves every entry in srcDir into dstDir except for skip.
+// Both directories must be on the same filesystem so os.Rename is a fast
+// pointer swap without copying data.
+func relocate(srcDir, dstDir, skip string) error {
+	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		dir, err = os.MkdirTemp("", prefix)
+		return fmt.Errorf("reading directory for relocation: %w", err)
 	}
-	return dir, err
-}
-
-// reportStaysOutside rejects a report directory that would be copied into the
-// published gather. Collected files named report.yaml are ordinary resources
-// and are left in place. The reversible map is the report written under reportDir.
-func reportStaysOutside(outputPath, basePath, reportDir string) error {
-	if dirInside(outputPath, reportDir) || dirInside(basePath, reportDir) {
-		return fmt.Errorf("obfuscation report directory must stay outside the published gather")
+	for _, e := range entries {
+		if e.Name() == skip {
+			continue
+		}
+		if err := os.Rename(filepath.Join(srcDir, e.Name()), filepath.Join(dstDir, e.Name())); err != nil {
+			return fmt.Errorf("relocating %s for obfuscation: %w", e.Name(), err)
+		}
 	}
 	return nil
 }
 
-func dirInside(parent, child string) bool {
-	parent = filepath.Clean(parent)
-	child = filepath.Clean(child)
-	if parent == child {
-		return true
-	}
-	rel, err := filepath.Rel(parent, child)
+func cleanStaleWorkDirs(basePath string) {
+	entries, err := os.ReadDir(basePath)
 	if err != nil {
-		return false
+		return
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".obfuscate-") || !e.IsDir() {
+			continue
+		}
+		stale := filepath.Join(basePath, e.Name())
+		// Recover files that were relocated into this work directory by
+		// a run that was killed before it could restore them. Files may
+		// be in omitted/ (pre-clean), input/ (relocated), or output/
+		// (post-clean, if restoreOmittedFiles partially ran).
+		// Only recover omitted-pattern files from output/ — cleaner-
+		// generated files may be incomplete and would overwrite the
+		// originals already restored from input/.
+		omitted := filepath.Join(stale, "omitted")
+		input := filepath.Join(stale, "input")
+		output := filepath.Join(stale, "output")
+		recoverAll(omitted, input, basePath)
+		recoverOmittedOnly(output, basePath)
+		_ = os.RemoveAll(stale)
+	}
 }
 
-// copyOmittedFiles links or copies files matching omitPatterns from inputDir
-// into outputDir, preserving relative paths. must-gather-clean drops omitted
-// files from its output, so this step restores them verbatim.
-// Hard links are preferred to avoid doubling disk usage for large files.
-func copyOmittedFiles(inputDir, outputDir string) error {
+// recoverAll restores omitted files back into inputDir, then moves
+// inputDir contents back to basePath. Used on failure paths so the
+// original collected tree is recovered.
+func recoverAll(omittedDir, inputDir, basePath string) {
+	restoreOmittedToInput(omittedDir, inputDir)
+	restoreInput(inputDir, basePath)
+}
+
+// restoreOmittedToInput moves extracted files from omittedDir back into
+// inputDir so they are included when restoreInput recovers the tree.
+func restoreOmittedToInput(omittedDir, inputDir string) {
+	_ = filepath.WalkDir(omittedDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(omittedDir, path)
+		if err != nil {
+			return nil
+		}
+		dst := filepath.Join(inputDir, rel)
+		_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+		_ = os.Rename(path, dst)
+		return nil
+	})
+}
+
+// recoverOmittedOnly moves only omit-pattern files from srcDir to dstDir.
+// Used during stale cleanup to recover omitted files from the output tree
+// without overwriting originals with potentially incomplete cleaner output.
+func recoverOmittedOnly(srcDir, dstDir string) {
+	_ = filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		for _, pattern := range omitPatterns {
+			matched, _ := filepath.Match(pattern, d.Name())
+			if !matched {
+				continue
+			}
+			rel, err := filepath.Rel(srcDir, path)
+			if err != nil {
+				return nil
+			}
+			dst := filepath.Join(dstDir, rel)
+			if _, err := os.Stat(dst); err == nil {
+				return nil
+			}
+			_ = os.MkdirAll(filepath.Dir(dst), 0o755)
+			_ = os.Rename(path, dst)
+			return nil
+		}
+		return nil
+	})
+}
+
+// restoreInput moves all entries from inputDir back to basePath so the
+// original collected tree is recovered after an obfuscation failure.
+func restoreInput(inputDir, basePath string) {
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		_ = os.Rename(filepath.Join(inputDir, e.Name()), filepath.Join(basePath, e.Name()))
+	}
+}
+
+// extractOmittedFiles moves files matching omitPatterns from inputDir into
+// omittedDir, preserving relative paths. This physically removes them from
+// the input tree so must-gather-clean never sees them.
+func extractOmittedFiles(inputDir, omittedDir string) error {
 	var count int
 	err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !d.Type().IsRegular() {
@@ -446,12 +582,12 @@ func copyOmittedFiles(inputDir, outputDir string) error {
 			if err != nil {
 				return err
 			}
-			dst := filepath.Join(outputDir, rel)
+			dst := filepath.Join(omittedDir, rel)
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return err
 			}
-			if err := linkOrCopy(path, dst); err != nil {
-				return fmt.Errorf("restoring omitted file %s: %w", rel, err)
+			if err := os.Rename(path, dst); err != nil {
+				return fmt.Errorf("extracting omitted file %s: %w", rel, err)
 			}
 			count++
 			return nil
@@ -462,114 +598,38 @@ func copyOmittedFiles(inputDir, outputDir string) error {
 		return err
 	}
 	if count > 0 {
+		log.Info("Excluded %d file(s) from obfuscation", count)
+	}
+	return nil
+}
+
+// restoreOmittedFiles moves previously extracted files from omittedDir into
+// outputDir, preserving relative paths.
+func restoreOmittedFiles(omittedDir, outputDir string) error {
+	var count int
+	err := filepath.WalkDir(omittedDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		rel, err := filepath.Rel(omittedDir, path)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(outputDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(path, dst); err != nil {
+			return fmt.Errorf("restoring omitted file %s: %w", rel, err)
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if count > 0 {
 		log.Info("Restored %d file(s) excluded from obfuscation", count)
 	}
 	return nil
-}
-
-func linkOrCopy(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		return nil
-	}
-	return copyFile(src, dst)
-}
-
-func publish(cleaned, basePath string) error {
-	staging := filepath.Join(basePath, stagingDirName)
-	if err := os.RemoveAll(staging); err != nil {
-		return fmt.Errorf("removing previous obfuscation staging directory: %w", err)
-	}
-	if err := os.Rename(cleaned, staging); err != nil {
-		if copyErr := copyTree(cleaned, staging); copyErr != nil {
-			_ = os.RemoveAll(staging)
-			return fmt.Errorf("staging obfuscated output: %w", copyErr)
-		}
-	}
-
-	entries, err := os.ReadDir(basePath)
-	if err != nil {
-		return fmt.Errorf("reading collected output: %w", err)
-	}
-	for _, e := range entries {
-		if e.Name() == stagingDirName {
-			continue
-		}
-		if err := os.RemoveAll(filepath.Join(basePath, e.Name())); err != nil {
-			return fmt.Errorf("replacing collected output: %w", err)
-		}
-	}
-
-	staged, err := os.ReadDir(staging)
-	if err != nil {
-		return fmt.Errorf("reading staged obfuscated output: %w", err)
-	}
-	for _, e := range staged {
-		from := filepath.Join(staging, e.Name())
-		to := filepath.Join(basePath, e.Name())
-		if err := os.Rename(from, to); err != nil {
-			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
-		}
-	}
-	if err := os.RemoveAll(staging); err != nil {
-		return fmt.Errorf("removing obfuscation staging directory: %w", err)
-	}
-	return nil
-}
-
-func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			mode := info.Mode().Perm()
-			if mode == 0 {
-				mode = 0o755
-			}
-			return os.MkdirAll(target, mode)
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, target)
-		}
-		return copyFile(path, target)
-	})
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
 }

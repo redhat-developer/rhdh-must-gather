@@ -279,6 +279,8 @@ resources: null
 intelligentAssistant:
   plugins: []
 dynamicPlugins:
+  includes: []
+  plugins: []
   initContainer:
     resources: null
 openshift:
@@ -327,6 +329,8 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
+    # Default plugins must be included here: IA (Intelligent Assistant) is
+    # enabled by default in RHDH and requires its plugin from the default catalog.
     cat > "$STANDALONE_VALUES_FILE" <<EOF
 host: rhdh-standalone.127.0.0.1.sslip.io
 dynamicPlugins:
@@ -482,6 +486,7 @@ data:
   dynamic-plugins.yaml: |
     includes:
       - dynamic-plugins.default.yaml
+    plugins: []
 EOF
     done
 
@@ -638,6 +643,8 @@ log_info "Running must-gather"
 log_info "=========================================="
 
 GATHER_OPTS="--with-heap-dumps"
+GATHER_HELM_SET=""
+GATHER_HELM_SET_STRING=""
 if [ "$WITH_HEAP_DUMPS" = true ]; then
     # Nightly mode: collect from all instances, with optional method override
     if [ -n "$HEAP_DUMP_METHOD" ]; then
@@ -647,6 +654,26 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
         if [ "$HEAP_DUMP_METHOD" = "sigusr2" ]; then
             export HEAP_DUMP_SIGUSR2_STABLE_SECONDS=30
         fi
+    fi
+    # Heap snapshots are large (~150-180MB each); collecting from all instances
+    # plus post-collection obfuscation needs more memory than the chart default.
+    GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi resources.limits.cpu=1500m resources.requests.cpu=250m"
+
+    # Allow overriding the number of obfuscation workers via env var.
+    # deploy-k8s.sh writes HEAP_DUMP_SIGUSR2_STABLE_SECONDS at
+    # extraEnvVars[0] when set, so use index 1 in that case to avoid
+    # collision; otherwise use index 0.
+    # Use --set-string for the value because Helm --set would render a
+    # bare number as an integer, but K8s env var values must be strings.
+    if [ -n "${OBFUSCATE_WORKERS:-}" ]; then
+        if [ -n "${HEAP_DUMP_SIGUSR2_STABLE_SECONDS:-}" ]; then
+            WORKER_IDX=1
+        else
+            WORKER_IDX=0
+        fi
+        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[$WORKER_IDX].name=OBFUSCATE_WORKERS"
+        GATHER_HELM_SET_STRING="gather.extraEnvVars[$WORKER_IDX].value=$OBFUSCATE_WORKERS"
+        log_info "Obfuscation workers override: $OBFUSCATE_WORKERS"
     fi
 else
     # Regular E2E: collect only from RHDHSUPP-308 instance to speed up testing
@@ -697,9 +724,12 @@ else
         IMAGE_NAME="$IMAGE_NAME" \
         IMAGE_TAG="$IMAGE_TAG" \
         OPTS="$GATHER_OPTS" \
-        ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"}
-    # Find the output tarball (most recent one)
-    OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+        ${GATHER_HELM_SET:+HELM_SET="$GATHER_HELM_SET"} \
+        ${GATHER_HELM_SET_STRING:+HELM_SET_STRING="$GATHER_HELM_SET_STRING"} \
+        ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"} \
+        DEPLOY_K8S_EXTRA_OPTS="--no-compress"
+    # Find the output tarball (most recent one, .tar or .tar.gz)
+    OUTPUT_TARBALL=$(find . -maxdepth 1 \( -name 'rhdh-must-gather-output.k8s.*.tar' -o -name 'rhdh-must-gather-output.k8s.*.tar.gz' \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$OUTPUT_TARBALL" ]; then
         log_error "No output tarball found!"
         exit 1
@@ -707,9 +737,10 @@ else
     log_info "Found output tarball: $OUTPUT_TARBALL"
     # Extract and validate the output
     OUTPUT_DIR="${OUTPUT_TARBALL%.tar.gz}"
+    OUTPUT_DIR="${OUTPUT_DIR%.tar}"
     log_info "Extracting to: $OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
-    tar xzf "$OUTPUT_TARBALL" -C "$OUTPUT_DIR"
+    tar xf "$OUTPUT_TARBALL" -C "$OUTPUT_DIR"
 fi
 
 # ============================================================================
