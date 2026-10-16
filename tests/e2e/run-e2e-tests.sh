@@ -639,6 +639,7 @@ log_info "=========================================="
 
 GATHER_OPTS="--with-heap-dumps"
 GATHER_HELM_SET=""
+GATHER_HELM_SET_STRING=""
 if [ "$WITH_HEAP_DUMPS" = true ]; then
     # Nightly mode: collect from all instances, with optional method override
     if [ -n "$HEAP_DUMP_METHOD" ]; then
@@ -654,8 +655,13 @@ if [ "$WITH_HEAP_DUMPS" = true ]; then
     GATHER_HELM_SET="resources.limits.memory=1Gi resources.requests.memory=256Mi resources.limits.cpu=1500m resources.requests.cpu=250m"
 
     # Allow overriding the number of obfuscation workers via env var.
+    # Use extraEnvVars index 1 because deploy-k8s.sh may write
+    # HEAP_DUMP_SIGUSR2_STABLE_SECONDS at index 0 in the values file.
+    # Use --set-string for the value because Helm --set would render a
+    # bare number as an integer, but K8s env var values must be strings.
     if [ -n "${OBFUSCATE_WORKERS:-}" ]; then
-        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[0].name=OBFUSCATE_WORKERS gather.extraEnvVars[0].value=$OBFUSCATE_WORKERS"
+        GATHER_HELM_SET="$GATHER_HELM_SET gather.extraEnvVars[1].name=OBFUSCATE_WORKERS"
+        GATHER_HELM_SET_STRING="gather.extraEnvVars[1].value=$OBFUSCATE_WORKERS"
         log_info "Obfuscation workers override: $OBFUSCATE_WORKERS"
     fi
 else
@@ -708,6 +714,7 @@ else
         IMAGE_TAG="$IMAGE_TAG" \
         OPTS="$GATHER_OPTS" \
         ${GATHER_HELM_SET:+HELM_SET="$GATHER_HELM_SET"} \
+        ${GATHER_HELM_SET_STRING:+HELM_SET_STRING="$GATHER_HELM_SET_STRING"} \
         ${HELM_TIMEOUT:+HELM_TIMEOUT="$HELM_TIMEOUT"}
     # Find the output tarball (most recent one)
     OUTPUT_TARBALL=$(find . -maxdepth 1 -name 'rhdh-must-gather-output.k8s.*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)

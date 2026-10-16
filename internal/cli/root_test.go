@@ -268,8 +268,8 @@ func TestParseCPUMax(t *testing.T) {
 		want  int
 	}{
 		{"4 CPUs", "400000 100000", 4},
-		{"1.5 CPUs floors to 1", "150000 100000", 1},
-		{"0.5 CPUs floors to 0", "50000 100000", 0},
+		{"1.5 CPUs rounds up to 2", "150000 100000", 2},
+		{"0.5 CPUs rounds up to 1", "50000 100000", 1},
 		{"unlimited", "max 100000", 0},
 		{"empty", "", 0},
 		{"garbage", "not a number", 0},
@@ -291,7 +291,8 @@ func TestParseCPUQuotaPeriod(t *testing.T) {
 		want   int
 	}{
 		{"4 CPUs", "400000", "100000", 4},
-		{"1.5 CPUs floors to 1", "150000", "100000", 1},
+		{"1.5 CPUs rounds up to 2", "150000", "100000", 2},
+		{"0.5 CPUs rounds up to 1", "50000", "100000", 1},
 		{"no limit", "-1", "100000", 0},
 		{"invalid quota", "abc", "100000", 0},
 		{"invalid period", "400000", "abc", 0},

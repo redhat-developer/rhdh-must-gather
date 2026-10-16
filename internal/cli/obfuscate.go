@@ -56,7 +56,7 @@ func parseCPUMax(s string) int {
 	if err != nil || period <= 0 {
 		return 0
 	}
-	return quota / period
+	return (quota + period - 1) / period
 }
 
 // parseCPUQuotaPeriod parses cgroup v1 cpu.cfs_quota_us / cpu.cfs_period_us.
@@ -69,7 +69,7 @@ func parseCPUQuotaPeriod(quotaStr, periodStr string) int {
 	if err != nil || period <= 0 {
 		return 0
 	}
-	return quota / period
+	return (quota + period - 1) / period
 }
 
 func newObfuscateCmd() *cobra.Command {

@@ -33,6 +33,7 @@ IMAGE="${DEFAULT_IMAGE}"
 NAMESPACE=""
 OPTS_STRING=""
 HELM_SET_STRING=""
+HELM_SET_STR_STRING=""
 OUTPUT_FILE=""
 HELM_TIMEOUT="60m"
 
@@ -58,6 +59,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --helm-set)
             HELM_SET_STRING="$2"
+            shift 2
+            ;;
+        --helm-set-string)
+            HELM_SET_STR_STRING="$2"
             shift 2
             ;;
         --output)
@@ -311,12 +316,18 @@ cat "${TMP_VALUES}"
 echo "---"
 echo ""
 
-# Build additional --set arguments
+# Build additional --set and --set-string arguments
 HELM_SET_ARGS=()
 if [[ -n "${HELM_SET_STRING}" ]]; then
     read -ra HELM_SET_ARRAY <<< "${HELM_SET_STRING}"
     for item in "${HELM_SET_ARRAY[@]}"; do
         HELM_SET_ARGS+=(--set "${item}")
+    done
+fi
+if [[ -n "${HELM_SET_STR_STRING}" ]]; then
+    read -ra HELM_SET_STR_ARRAY <<< "${HELM_SET_STR_STRING}"
+    for item in "${HELM_SET_STR_ARRAY[@]}"; do
+        HELM_SET_ARGS+=(--set-string "${item}")
     done
 fi
 

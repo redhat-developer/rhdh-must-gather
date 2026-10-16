@@ -66,6 +66,9 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 		return fmt.Errorf("obfuscation input %s is not a directory", basePath)
 	}
 
+	// Remove stale work directories left behind by a previous SIGKILL/OOM.
+	cleanStaleWorkDirs(basePath)
+
 	// Create the work directory inside basePath so it stays on the same
 	// volume (e.g. the PVC in a must-gather pod). Creating it beside the
 	// mount point (filepath.Dir) would land on the root filesystem, which
@@ -75,7 +78,6 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	if err != nil {
 		return fmt.Errorf("creating obfuscation work directory: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(work) }()
 
 	// Relocate collected data into work/input so clean's input tree does
 	// not overlap with the output tree or the work directory itself.
@@ -91,9 +93,11 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 	outputPath := filepath.Join(work, "output")
 	reportDir := filepath.Join(work, "report")
 	if err := os.Mkdir(reportDir, 0o700); err != nil {
+		restoreInput(inputDir, basePath)
 		return fmt.Errorf("creating obfuscation report directory: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(configYAML(domains)), 0o600); err != nil {
+		restoreInput(inputDir, basePath)
 		return fmt.Errorf("writing obfuscation config: %w", err)
 	}
 
@@ -125,6 +129,11 @@ func Apply(basePath string, domains []string, clean CleanFunc) error {
 			return fmt.Errorf("publishing obfuscated file %s: %w", e.Name(), err)
 		}
 	}
+	// Only remove the work directory after publication succeeds.
+	// On failure, restoreInput moves files back to basePath; if that
+	// partially fails, the work dir is left behind for
+	// cleanStaleWorkDirs to handle on the next run.
+	_ = os.RemoveAll(work)
 	return nil
 }
 
@@ -441,6 +450,18 @@ func relocate(srcDir, dstDir, skip string) error {
 		}
 	}
 	return nil
+}
+
+func cleanStaleWorkDirs(basePath string) {
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".obfuscate-") && e.IsDir() {
+			_ = os.RemoveAll(filepath.Join(basePath, e.Name()))
+		}
+	}
 }
 
 // restoreInput moves all entries from inputDir back to basePath so the

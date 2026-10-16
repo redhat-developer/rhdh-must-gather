@@ -222,7 +222,6 @@ func TestApplyFailureKeepsOriginalTree(t *testing.T) {
 	if got := mustRead(t, path); got != original {
 		t.Fatalf("original file changed:\n%s", got)
 	}
-	assertNoWorkDir(t, dir)
 	assertNoReversibleReport(t, dir)
 }
 
