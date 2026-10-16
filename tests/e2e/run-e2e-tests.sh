@@ -279,6 +279,8 @@ resources: null
 intelligentAssistant:
   plugins: []
 dynamicPlugins:
+  includes: []
+  plugins: []
   initContainer:
     resources: null
 openshift:
@@ -327,6 +329,8 @@ if [ "$SKIP_HELM_STANDALONE" = false ]; then
     log_info "Deploying standalone Helm release (helm template + kubectl apply)..."
     STANDALONE_RELEASE="my-helm-standalone"
     STANDALONE_VALUES_FILE="$(mktemp)"
+    # Default plugins must be included here: IA (Intelligent Assistant) is
+    # enabled by default in RHDH and requires its plugin from the default catalog.
     cat > "$STANDALONE_VALUES_FILE" <<EOF
 host: rhdh-standalone.127.0.0.1.sslip.io
 dynamicPlugins:
@@ -482,6 +486,7 @@ data:
   dynamic-plugins.yaml: |
     includes:
       - dynamic-plugins.default.yaml
+    plugins: []
 EOF
     done
 
