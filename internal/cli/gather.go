@@ -40,6 +40,12 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
+	workers, err := obfuscateWorkers()
+	if err != nil {
+		return err
+	}
+	skipObfuscation := workers == 0
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -56,6 +62,10 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 			log.Warn("Sanitization aborted by interrupt. Review carefully before sharing externally.")
 			err = errors.Join(err, fmt.Errorf("sanitization aborted"))
 		default:
+			if skipObfuscation {
+				log.Info("Obfuscation skipped (%s=0)", envObfuscateWorkers)
+				break
+			}
 			log.Info("Obfuscating data...")
 			clean := opts.cleanFunc
 			if clean == nil {

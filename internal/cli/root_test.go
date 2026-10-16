@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -227,6 +228,36 @@ func TestObfuscateSubcommandCleansTree(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(report, "report.yaml")); err != nil {
 		t.Fatalf("report.yaml missing from report dir: %v", err)
+	}
+}
+
+func TestObfuscateWorkers(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		want    int
+		wantErr bool
+	}{
+		{"default", "", defaultObfuscateWorkers, false},
+		{"override", "4", 4, false},
+		{"one", "1", 1, false},
+		{"zero skips obfuscation", "0", 0, false},
+		{"all uses GOMAXPROCS", "all", runtime.GOMAXPROCS(0), false},
+		{"ALL uses GOMAXPROCS", "ALL", runtime.GOMAXPROCS(0), false},
+		{"invalid string", "abc", 0, true},
+		{"negative", "-1", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envObfuscateWorkers, tt.env)
+			got, err := obfuscateWorkers()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("obfuscateWorkers() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("obfuscateWorkers() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
