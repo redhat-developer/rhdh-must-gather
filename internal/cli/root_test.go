@@ -238,7 +238,7 @@ func TestObfuscateWorkers(t *testing.T) {
 		want    int
 		wantErr bool
 	}{
-		{"default", "", defaultObfuscateWorkers, false},
+		{"default", "", defaultObfuscateWorkers(), false},
 		{"override", "4", 4, false},
 		{"one", "1", 1, false},
 		{"zero skips obfuscation", "0", 0, false},

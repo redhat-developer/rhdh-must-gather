@@ -13,10 +13,11 @@ import (
 	"github.com/redhat-developer/rhdh-must-gather/internal/obfuscate"
 )
 
-const (
-	envObfuscateWorkers     = "OBFUSCATE_WORKERS"
-	defaultObfuscateWorkers = 2
-)
+const envObfuscateWorkers = "OBFUSCATE_WORKERS"
+
+func defaultObfuscateWorkers() int {
+	return max(1, runtime.GOMAXPROCS(0)/2)
+}
 
 func newObfuscateCmd() *cobra.Command {
 	var input, output, reportDir, config string
@@ -47,7 +48,7 @@ func newObfuscateCmd() *cobra.Command {
 	flags.StringVar(&input, "input", "", "Directory of the collected must-gather")
 	flags.StringVar(&output, "output", "", "Directory for the obfuscated output")
 	flags.StringVar(&reportDir, "report-dir", "", "Directory for report.yaml, which must stay out of the published gather")
-	flags.IntVar(&workers, "workers", defaultObfuscateWorkers, "Number of must-gather-clean workers")
+	flags.IntVar(&workers, "workers", defaultObfuscateWorkers(), "Number of must-gather-clean workers")
 	for _, name := range []string{"config", "input", "output", "report-dir"} {
 		if err := cmd.MarkFlagRequired(name); err != nil {
 			panic(err)
@@ -92,17 +93,10 @@ func obfuscateCommandArgs(configPath, inputPath, outputPath, reportDir string, w
 	}
 }
 
-// obfuscateWorkers returns the number of parallel workers for must-gather-clean.
-// Default is 2 because the obfuscation subprocess shares its cgroup memory
-// limit with the parent gather process, and each worker loads entire YAML/JSON
-// files into memory (os.ReadFile) for Kubernetes resource detection. Using
-// runtime.GOMAXPROCS (host CPU count, not the container limit) caused OOM
-// kills in the 512Mi init container. Override with OBFUSCATE_WORKERS;
-// set to 0 to skip obfuscation, or "all" to use all available CPUs.
 func obfuscateWorkers() (int, error) {
 	s := os.Getenv(envObfuscateWorkers)
 	if s == "" {
-		return defaultObfuscateWorkers, nil
+		return defaultObfuscateWorkers(), nil
 	}
 	if strings.EqualFold(s, "all") {
 		return runtime.GOMAXPROCS(0), nil
