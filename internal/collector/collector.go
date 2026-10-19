@@ -94,10 +94,12 @@ const (
 )
 
 type Registration struct {
-	Name      string
-	Collector Collector
-	Mode      RunMode
-	FlagDesc  string // CLI flag help text; auto-generated if empty
+	Name         string
+	Collector    Collector
+	Mode         RunMode
+	FlagDesc     string   // CLI flag help text; auto-generated if empty
+	RunAfter     []string // soft ordering: these collectors should run first when enabled
+	FlagAliases  []string // deprecated flag names (registered as hidden aliases)
 }
 
 var Registrations = []Registration{
@@ -107,9 +109,9 @@ var Registrations = []Registration{
 	{Name: "orchestrator", Collector: &Orchestrator{}, Mode: Default},
 	{Name: "route", Collector: &Route{}, Mode: Default},
 	{Name: "ingress", Collector: &Ingress{}, Mode: Default},
-	{Name: "namespace-inspect", Collector: &NamespaceInspect{}, Mode: Default},
-	{Name: "network-policies", Collector: &NetworkPolicies{}, Mode: AlwaysOn},
-	{Name: "cluster-info", Collector: &ClusterInfo{}, Mode: OptIn, FlagDesc: "Collect cluster-wide diagnostic information"},
+	{Name: "namespace-inspect", Collector: &NamespaceInspect{}, Mode: Default, RunAfter: []string{"orchestrator"}},
+	{Name: "network-policies", Collector: &NetworkPolicies{}, Mode: AlwaysOn, RunAfter: []string{"orchestrator"}},
+	{Name: "cluster-info", Collector: &ClusterInfo{}, Mode: OptIn, FlagDesc: "Collect cluster-wide diagnostic information", FlagAliases: []string{"cluster-info"}},
 }
 
 func Get(name string) (Collector, bool) {

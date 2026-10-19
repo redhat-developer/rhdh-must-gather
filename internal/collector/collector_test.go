@@ -201,6 +201,27 @@ func TestRegistrationModes(t *testing.T) {
 	}
 }
 
+func TestRunAfterOrdering(t *testing.T) {
+	position := make(map[string]int)
+	for i, r := range Registrations {
+		position[r.Name] = i
+	}
+
+	for _, r := range Registrations {
+		for _, dep := range r.RunAfter {
+			depPos, ok := position[dep]
+			if !ok {
+				t.Errorf("%s declares RunAfter %q, but %q is not registered", r.Name, dep, dep)
+				continue
+			}
+			if depPos >= position[r.Name] {
+				t.Errorf("%s (position %d) declares RunAfter %q (position %d): dependency must appear earlier",
+					r.Name, position[r.Name], dep, depPos)
+			}
+		}
+	}
+}
+
 func TestGet(t *testing.T) {
 	c, ok := Get("platform")
 	if !ok {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
+	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
 
 type gatherOptions struct {
@@ -92,6 +93,10 @@ from both Helm-based and Operator-managed RHDH instances.`,
 			}
 			flags.Bool("with-"+r.Name, false, desc)
 		}
+		for _, alias := range r.FlagAliases {
+			flags.Bool(alias, false, "Deprecated: use --with-"+r.Name+" instead")
+			_ = flags.MarkHidden(alias)
+		}
 	}
 
 	cmd.SetVersionTemplate("rhdh-must-gather {{.Version}}\n")
@@ -116,6 +121,15 @@ func buildScriptList(cmd *cobra.Command) []string {
 			}
 		case collector.OptIn:
 			included, _ := cmd.Flags().GetBool("with-" + r.Name)
+			if !included {
+				for _, alias := range r.FlagAliases {
+					if v, _ := cmd.Flags().GetBool(alias); v {
+						log.Warn("--%s is deprecated, use --with-%s instead", alias, r.Name)
+						included = true
+						break
+					}
+				}
+			}
 			if included {
 				scripts = append(scripts, r.Name)
 			}
