@@ -49,6 +49,26 @@ func TestBuildScriptList_WithClusterInfo(t *testing.T) {
 	}
 }
 
+func TestBuildScriptList_DeprecatedClusterInfoAlias(t *testing.T) {
+	cmd := newRootCmd()
+	if err := cmd.ParseFlags([]string{"--cluster-info"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	scripts := buildScriptList(cmd)
+
+	found := false
+	for _, s := range scripts {
+		if s == "cluster-info" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("deprecated --cluster-info alias should still enable cluster-info collector, got %v", scripts)
+	}
+}
+
 func TestBuildScriptList_WithExclusions(t *testing.T) {
 	cmd := newRootCmd()
 	if err := cmd.ParseFlags([]string{"--without-helm", "--without-operator"}); err != nil {
