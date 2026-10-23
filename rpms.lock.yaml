@@ -32,13 +32,13 @@ arches:
     name: glibc-devel
     evr: 2.34-283.el9_8
     sourcerpm: glibc-2.34-283.el9_8.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-687.57.1.el9_8.aarch64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/k/kernel-headers-5.14.0-687.60.1.el9_8.aarch64.rpm
     repoid: ubi-9-for-aarch64-appstream-rpms
-    size: 2939977
-    checksum: sha256:31860419149438987e706dd2929fbc707552cd2e51dbc86547d294f9fed5f204
+    size: 2947321
+    checksum: sha256:2905722b8f11583753d46f31afa2fdfe14784bcbb8d6668eb5a4ee1d7ff63752
     name: kernel-headers
-    evr: 5.14.0-687.57.1.el9_8
-    sourcerpm: kernel-5.14.0-687.57.1.el9_8.src.rpm
+    evr: 5.14.0-687.60.1.el9_8
+    sourcerpm: kernel-5.14.0-687.60.1.el9_8.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/appstream/os/Packages/l/libasan-11.5.0-14.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-appstream-rpms
     size: 409047
@@ -221,13 +221,13 @@ arches:
     name: elfutils-libs
     evr: 0.194-1.el9
     sourcerpm: elfutils-0.194-1.el9.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/e/expat-2.5.0-6.el9_8.5.aarch64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/e/expat-2.5.0-6.el9_8.7.aarch64.rpm
     repoid: ubi-9-for-aarch64-baseos-rpms
-    size: 122957
-    checksum: sha256:d13bd77f429835b303d388e24811fb935060be4788c8fe4cf87703640f2337e0
+    size: 123207
+    checksum: sha256:991979acbff4494fee979934ec88d1c252f46baa77a2f1b35ec69251dd9c39ff
     name: expat
-    evr: 2.5.0-6.el9_8.5
-    sourcerpm: expat-2.5.0-6.el9_8.5.src.rpm
+    evr: 2.5.0-6.el9_8.7
+    sourcerpm: expat-2.5.0-6.el9_8.7.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/os/Packages/g/grep-3.6-5.el9.aarch64.rpm
     repoid: ubi-9-for-aarch64-baseos-rpms
     size: 276244
@@ -452,13 +452,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.aarch64.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.3-72.el9.aarch64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-aarch64-rpms
-    size: 11909643
-    checksum: sha256:4d6a1343d1f4aa30ad764221cbcd840933ee9426f3ed77e858949bfa24b1a84d
+    size: 11909610
+    checksum: sha256:e9d94dd2e1bfe95595acc3df781595f420699b56b417f6779f65deff6c26d3d2
     name: helm
-    evr: 3.19.5.1-71.el9
-    sourcerpm: helm-3.19.5.1-71.el9.src.rpm
+    evr: 3.19.5.3-72.el9
+    sourcerpm: helm-3.19.5.3-72.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/rhocp/4.22/os/Packages/o/openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.aarch64.rpm
     repoid: rhocp-4.22-for-rhel-9-aarch64-rpms
     size: 27501568
@@ -539,12 +539,12 @@ arches:
     checksum: sha256:643279e796ded16c5be5cdc2a91839c787e62e59757008675eb0580a4a42af21
     name: elfutils
     evr: 0.194-1.el9
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/e/expat-2.5.0-6.el9_8.5.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/e/expat-2.5.0-6.el9_8.7.src.rpm
     repoid: ubi-9-for-aarch64-baseos-source-rpms
-    size: 8411609
-    checksum: sha256:38d7acfd1130c02c6a00010159a1350ca0f56cd7ed64f3d8394aa5b3d6512ddd
+    size: 8414665
+    checksum: sha256:c02441639a25646db44bb3e04f47b91131646ac0f1c87e3ff919dae4ec3de08c
     name: expat
-    evr: 2.5.0-6.el9_8.5
+    evr: 2.5.0-6.el9_8.7
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/g/gcc-11.5.0-14.el9.src.rpm
     repoid: ubi-9-for-aarch64-baseos-source-rpms
     size: 81978017
@@ -689,12 +689,12 @@ arches:
     checksum: sha256:6c788387cde9c0fde5481382f3f8416e3ecbcf09c908b409b6c63358b90a399f
     name: util-linux
     evr: 2.37.4-25.el9
-  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/source/SRPMS/Packages/h/helm-3.19.5.1-71.el9.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/aarch64/ocp-tools/4.18/source/SRPMS/Packages/h/helm-3.19.5.3-72.el9.src.rpm
     repoid: ocp-tools-4.18-for-rhel-9-aarch64-source-rpms
-    size: 13173675
-    checksum: sha256:fa0d84546254e2ad980eae0c1e8fce5bb52f9c262b1ca7a1dc8ff5a7d0ab986e
+    size: 13186373
+    checksum: sha256:b03b67c039a320a705de47f76607b100da9d4850044ae30c610fdf81f3ceac3d
     name: helm
-    evr: 3.19.5.1-71.el9
+    evr: 3.19.5.3-72.el9
   module_metadata: []
 - arch: x86_64
   packages:
@@ -733,13 +733,13 @@ arches:
     name: glibc-headers
     evr: 2.34-283.el9_8
     sourcerpm: glibc-2.34-283.el9_8.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/k/kernel-headers-5.14.0-687.57.1.el9_8.x86_64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/k/kernel-headers-5.14.0-687.60.1.el9_8.x86_64.rpm
     repoid: ubi-9-for-x86_64-appstream-rpms
-    size: 2979225
-    checksum: sha256:c5766b2f8e4531f824575546028de7d8eb9fa95d7246dfafd4883c58312a2ef2
+    size: 2986597
+    checksum: sha256:02a07e8ee63bd1d2ed34b2bb5c7bd114860b0422832af1a5cc305dfdc2bc46f7
     name: kernel-headers
-    evr: 5.14.0-687.57.1.el9_8
-    sourcerpm: kernel-5.14.0-687.57.1.el9_8.src.rpm
+    evr: 5.14.0-687.60.1.el9_8
+    sourcerpm: kernel-5.14.0-687.60.1.el9_8.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/appstream/os/Packages/l/libmpc-1.2.1-4.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-appstream-rpms
     size: 66075
@@ -915,13 +915,13 @@ arches:
     name: elfutils-libs
     evr: 0.194-1.el9
     sourcerpm: elfutils-0.194-1.el9.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/e/expat-2.5.0-6.el9_8.5.x86_64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/e/expat-2.5.0-6.el9_8.7.x86_64.rpm
     repoid: ubi-9-for-x86_64-baseos-rpms
-    size: 129088
-    checksum: sha256:e6e7edd632fdd1dc4ad94b19b7ab88646f3ef8c1c7956bac58985c3e7118a362
+    size: 129370
+    checksum: sha256:289c8f4e65e7db02f5cc1c47caf5dcc0353660520ee4f840a3d27b0fa71680f7
     name: expat
-    evr: 2.5.0-6.el9_8.5
-    sourcerpm: expat-2.5.0-6.el9_8.5.src.rpm
+    evr: 2.5.0-6.el9_8.7
+    sourcerpm: expat-2.5.0-6.el9_8.7.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/os/Packages/g/grep-3.6-5.el9.x86_64.rpm
     repoid: ubi-9-for-x86_64-baseos-rpms
     size: 279174
@@ -1139,13 +1139,13 @@ arches:
     name: util-linux-core
     evr: 2.37.4-25.el9
     sourcerpm: util-linux-2.37.4-25.el9.src.rpm
-  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.1-71.el9.x86_64.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/os/Packages/h/helm-3.19.5.3-72.el9.x86_64.rpm
     repoid: ocp-tools-4.18-for-rhel-9-x86_64-rpms
-    size: 13496216
-    checksum: sha256:4d99e00e61149f7474623247ebfe659fdbf119fc3581a52560809065b7ea0c74
+    size: 13496226
+    checksum: sha256:599ff6c70bb3b5686b9b7038906ef18cf4c58a46c936f6850f7ab3980cee5a3b
     name: helm
-    evr: 3.19.5.1-71.el9
-    sourcerpm: helm-3.19.5.1-71.el9.src.rpm
+    evr: 3.19.5.3-72.el9
+    sourcerpm: helm-3.19.5.3-72.el9.src.rpm
   - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhocp/4.22/os/Packages/o/openshift-clients-4.22.0-202609170632.p2.gd0f23b1.assembly.stream.el9.x86_64.rpm
     repoid: rhocp-4.22-for-rhel-9-x86_64-rpms
     size: 30598441
@@ -1226,12 +1226,12 @@ arches:
     checksum: sha256:643279e796ded16c5be5cdc2a91839c787e62e59757008675eb0580a4a42af21
     name: elfutils
     evr: 0.194-1.el9
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/e/expat-2.5.0-6.el9_8.5.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/e/expat-2.5.0-6.el9_8.7.src.rpm
     repoid: ubi-9-for-x86_64-baseos-source-rpms
-    size: 8411609
-    checksum: sha256:38d7acfd1130c02c6a00010159a1350ca0f56cd7ed64f3d8394aa5b3d6512ddd
+    size: 8414665
+    checksum: sha256:c02441639a25646db44bb3e04f47b91131646ac0f1c87e3ff919dae4ec3de08c
     name: expat
-    evr: 2.5.0-6.el9_8.5
+    evr: 2.5.0-6.el9_8.7
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/g/gcc-11.5.0-14.el9.src.rpm
     repoid: ubi-9-for-x86_64-baseos-source-rpms
     size: 81978017
@@ -1376,10 +1376,10 @@ arches:
     checksum: sha256:6c788387cde9c0fde5481382f3f8416e3ecbcf09c908b409b6c63358b90a399f
     name: util-linux
     evr: 2.37.4-25.el9
-  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/source/SRPMS/Packages/h/helm-3.19.5.1-71.el9.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/ocp-tools/4.18/source/SRPMS/Packages/h/helm-3.19.5.3-72.el9.src.rpm
     repoid: ocp-tools-4.18-for-rhel-9-x86_64-source-rpms
-    size: 13173675
-    checksum: sha256:fa0d84546254e2ad980eae0c1e8fce5bb52f9c262b1ca7a1dc8ff5a7d0ab986e
+    size: 13186373
+    checksum: sha256:b03b67c039a320a705de47f76607b100da9d4850044ae30c610fdf81f3ceac3d
     name: helm
-    evr: 3.19.5.1-71.el9
+    evr: 3.19.5.3-72.el9
   module_metadata: []
