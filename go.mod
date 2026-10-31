@@ -9,7 +9,7 @@ require (
 	github.com/openshift/must-gather-clean v0.0.5
 	github.com/openshift/oc v0.0.0-alpha.0.0.20260902120315-e0e4c04430bf
 	github.com/spf13/cobra v1.10.2
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	helm.sh/helm/v4 v4.3.1
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
