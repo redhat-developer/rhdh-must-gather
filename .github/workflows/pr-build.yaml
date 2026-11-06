@@ -16,8 +16,19 @@ env:
 
 jobs:
   pr-build:
-    name: Build PR Container Image
-    runs-on: ubuntu-latest
+    name: Build PR Container Image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Build each arch natively on a matching runner
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -93,11 +104,13 @@ jobs:
           imageTags: ${{ steps.prep.outputs.IMAGE_TAG }}
           buildArgs: |
             RHDH_MUST_GATHER_VERSION=${{ steps.prep.outputs.VERSION }}
+          platform: ${{ matrix.platform }}
           skipArtifactUpload: 'true'
 
-      # Save the image as a tarball for the push workflow
+      # Save the image as a tarball for the push workflow.
+      # Only the amd64 leg produces the artifact consumed by pr-push and e2e-tests.
       - name: Save image to tarball
-        if: steps.changed-files.outputs.any_changed == 'true'
+        if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
         env:
            NAME: ${{ env.IMAGE_NAME }}
            TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
@@ -106,7 +119,7 @@ jobs:
 
       # Create metadata file for the push workflow
       - name: Create metadata
-        if: steps.changed-files.outputs.any_changed == 'true'
+        if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           IMAGE_TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
@@ -121,7 +134,7 @@ jobs:
             '{pr_number: $pr, image_tag: $it, extra_tags: $et, version: $vs}' > metadata.json
 
       - name: Upload image artifact
-        if: steps.changed-files.outputs.any_changed == 'true'
+        if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pr-image
@@ -148,6 +161,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${PR_NUM}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Build**: Hermetic (\`--network=none\`)" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
