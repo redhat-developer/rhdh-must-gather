@@ -6,7 +6,8 @@
     ":rebaseStalePrs",
     "docker:disableMajor",
     "default:pinDigestsDisabled",
-    "helpers:pinGitHubActionDigests"
+    "helpers:pinGitHubActionDigests",
+    "security:gomodIndirectSecurityUpdates"
   ],
   "labels": [
     "kind/dependency upgrade"
