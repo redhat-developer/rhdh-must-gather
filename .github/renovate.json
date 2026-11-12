@@ -61,11 +61,8 @@
       "automerge": false
     },
     {
-      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
-      "enabled": false,
-      "matchManagers": [
-        "dockerfile"
-      ],
+      "description": "Do generate PRs for minor dockerfile updates. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
+      "enabled": true,
       "matchDatasources": [
         "docker"
       ],
@@ -79,24 +76,17 @@
       "automerge": false
     },
     {
-      "description": "Containerfile base image and RPM lock updates on main and release-* are done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
-      "enabled": false,
-      "matchManagers": [
-        "dockerfile"
-      ],
+      "description": "Do automerge patch updates to dockerfiles. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
+      "enabled": true,
       "matchDatasources": [
         "docker"
       ],
       "matchUpdateTypes": [
         "patch"
       ],
-      "matchBaseBranches": [
-        "main",
-        "/^release-.*/"
-      ],
       "additionalBranchPrefix": "dockerfile ",
       "groupName": "All dockerfile images",
-      "automerge": false,
+      "automerge": true,
       "pinDigests": false
     },
     {
@@ -183,7 +173,7 @@
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s*python3 -m pip install.*?/refs/tags/(?<currentValue>v[\\d.]+)\\.zip"
+        "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s+RPM_LOCKFILE_PROTOTYPE_VERSION:\\s*(?<currentValue>v\\S+)"
       ],
       "datasourceTemplate": "github-releases"
     }
