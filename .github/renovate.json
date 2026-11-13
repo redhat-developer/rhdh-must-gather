@@ -21,15 +21,6 @@
   ],
   "packageRules": [
     {
-      "description": "Allow digest updates for the renovate-config-validator image",
-      "matchPackageNames": [
-        "ghcr.io/renovatebot/renovate"
-      ],
-      "digest": {
-        "enabled": true
-      }
-    },
-    {
       "description": "Disable major updates on release branches",
       "matchBaseBranches": ["/^release-.*/"],
       "matchUpdateTypes": ["major"],
@@ -68,6 +59,20 @@
         "digest"
       ],
       "automerge": false
+    },
+    {
+      "description": "Allow digest updates for the renovate-config-validator image",
+      "matchPackageNames": [
+        "ghcr.io/renovatebot/renovate"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "pinDigest"
+      ],
+      "enabled": true,
+      "digest": {
+        "enabled": true
+      }
     },
     {
       "description": "Group all Containerfile image updates. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
