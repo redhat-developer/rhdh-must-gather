@@ -14,50 +14,39 @@ on:
       - '.rhdh/docker/Containerfile'
       - '.github/workflows/update-rpm-lockfile.yaml'
   pull_request:
+    types: [opened, synchronize, reopened]
     branches:
       - main
       - 'release-[0-9]+.[0-9]+'
+    paths:
+      - 'rpms.in.yaml'
+      - '.rhdh/docker/Containerfile'
+      - '.github/workflows/update-rpm-lockfile.yaml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CONTAINERFILE_PATH: .rhdh/docker/Containerfile
+  # To revert to main (e.g. broken release): set to 'main', change refs/tags/ to refs/heads/ in the install step, and remove the renovate comment
+  # renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
+  RPM_LOCKFILE_PROTOTYPE_VERSION: v0.30.1
 
 jobs:
   update-lockfile:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.head_ref || github.ref }}
+          persist-credentials: false
           fetch-depth: 0
-
-      - name: Get changed files
-        if: github.event_name == 'pull_request'
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-        with:
-          files: |
-            rpms.in.yaml
-            rpms.lock.yaml
-            .rhdh/docker/Containerfile
-            .github/workflows/update-rpm-lockfile.yaml
-
-      - name: Check if hermetic Containerfile exists
-        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
-        run: |
-          if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
-            echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
-            exit 1
-          fi
 
       - name: Require RHDH_BOT_TOKEN
         if: github.event_name != 'pull_request'
@@ -69,14 +58,19 @@ jobs:
             exit 1
           fi
 
+      - name: Check if hermetic Containerfile exists
+        run: |
+          if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
+            echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
+            exit 1
+          fi
+
       - name: Configure Git
-        if: github.event_name != 'pull_request'
         run: |
           git config --global user.name "rhdh-bot"
           git config --global user.email "rhdh-bot@redhat.com"
 
       - name: Install rpm-lockfile-prototype
-        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [[ ! -x "${HOME}/.local/bin/rpm-lockfile-prototype" ]]; then
             echo "Installing rpm-lockfile-prototype ..."
@@ -85,8 +79,7 @@ jobs:
             sudo apt-get install -y podman skopeo rpm
             sudo apt-get install -y dnf python3-dnf
             mkdir -p "${HOME}/.local/bin/"
-            # renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
-            python3 -m pip install --user https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/v0.30.1.zip
+            python3 -m pip install --user "https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/${RPM_LOCKFILE_PROTOTYPE_VERSION}.zip"
             export PATH=${PATH%":${HOME}/.local/bin"}:${HOME}/.local/bin
             echo "${HOME}/.local/bin" >> $GITHUB_PATH
           else
@@ -94,37 +87,75 @@ jobs:
           fi
 
       - name: Run rpm-lockfile-prototype
-        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           echo "Running '${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' in $(pwd)"
           ${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml
 
       - name: Check for lockfile changes
-        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         id: check-lockfile-changes
         run: |
           if git diff --quiet rpms.lock.yaml; then
             echo "No changes to rpms.lock.yaml detected"
             echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "Changes detected in rpms.lock.yaml:"
-            echo ""
-            git diff rpms.lock.yaml
+            echo "Changes detected in rpms.lock.yaml"
             echo "changes=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Warn if lockfile is out-of-date
-        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
-        run: |
-          echo "::warning::rpms.lock.yaml is out of date. Please regenerate it by running 'rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' and committing the result, or wait for the next periodic update."
-          git diff rpms.lock.yaml > rpms-lockfile.diff
+      # --- PR trigger: auto-commit and push back to the PR branch ---
 
-      - name: Upload lockfile diff
-        if: github.event_name == 'pull_request' && steps.changed-files.outputs.any_changed == 'true' && steps.check-lockfile-changes.outputs.changes == 'true'
+      - name: Auto-commit and push updated lockfile
+        id: autopush
+        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          RHDH_BOT_TOKEN: ${{ secrets.RHDH_BOT_TOKEN }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ -z "${RHDH_BOT_TOKEN}" || -z "${HEAD_REF}" ]]; then
+            echo "::warning::RHDH_BOT_TOKEN or HEAD_REF is not set, skipping auto-push"
+            exit 0
+          fi
+          git remote set-url origin "https://x-access-token:${RHDH_BOT_TOKEN}@github.com/${{ github.repository }}.git"
+          git add rpms.lock.yaml
+          git commit -m "chore: update rpms.lock.yaml"
+          if git push origin "HEAD:${HEAD_REF}"; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            git reset --mixed HEAD~1
+          fi
+
+      - name: Generate lockfile patch
+        id: lockfile-patch
+        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.autopush.outputs.pushed != 'true'
+        run: git diff rpms.lock.yaml > rpms-lockfile-update.patch
+
+      - name: Upload lockfile patch
+        if: steps.lockfile-patch.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: rpms-lockfile-diff
-          path: rpms-lockfile.diff
+          name: rpms-lockfile-update
+          path: rpms-lockfile-update.patch
+
+      - name: Fail if lockfile is out of sync
+        if: github.event_name == 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true' && steps.autopush.outputs.pushed != 'true'
+        run: |
+          echo "::error::rpms.lock.yaml is out of sync with rpms.in.yaml"
+          echo ""
+          echo "❌ The RPM lockfile needs to be regenerated."
+          echo ""
+          echo "A .patch file is available as a build artifact (rpms-lockfile-update)."
+          echo "Download and apply it with 'git apply rpms-lockfile-update.patch', or regenerate locally:"
+          echo ""
+          echo "  pip install https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/${RPM_LOCKFILE_PROTOTYPE_VERSION}.zip"
+          echo "  rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml"
+          echo "  git add rpms.lock.yaml"
+          echo "  git commit -m 'chore: update rpms.lock.yaml'"
+          echo "  git push"
+          exit 1
+
+      # --- Push/schedule/dispatch trigger: create a standalone PR ---
 
       - name: Determine target branch
         if: github.event_name != 'pull_request' && steps.check-lockfile-changes.outputs.changes == 'true'
