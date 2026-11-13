@@ -21,6 +21,15 @@
   ],
   "packageRules": [
     {
+      "description": "Allow digest updates for the renovate-config-validator image",
+      "matchPackageNames": [
+        "ghcr.io/renovatebot/renovate"
+      ],
+      "digest": {
+        "enabled": true
+      }
+    },
+    {
       "description": "Disable major updates on release branches",
       "matchBaseBranches": ["/^release-.*/"],
       "matchUpdateTypes": ["major"],
