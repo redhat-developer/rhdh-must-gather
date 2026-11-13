@@ -7,6 +7,7 @@ A specialized diagnostic data collection tool for [Red Hat Developer Hub (RHDH)]
 This `must-gather` tool helps users collect essential RHDH data from their deployments, helping support teams and engineers troubleshoot issues effectively. It allows for focused data gathering across any installation method and platform supported by RHDH.
 
 - **Multi-platform**: OpenShift and standard Kubernetes
+- **Multi-architecture**: published images are multi-arch manifest lists (`linux/amd64` and `linux/arm64`)
 - **Multi-deployment**: Helm-based and Operator-managed RHDH instances
 - **RHDH-focused collection**: Only RHDH-specific logs, configurations, and resources
 
