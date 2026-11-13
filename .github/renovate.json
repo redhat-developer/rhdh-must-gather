@@ -61,32 +61,21 @@
       "automerge": false
     },
     {
-      "description": "Do generate PRs for minor dockerfile updates. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
+      "description": "Group all Containerfile image updates. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
       "enabled": true,
       "matchDatasources": [
         "docker"
       ],
       "matchUpdateTypes": [
-        "minor"
+        "minor",
+        "patch"
       ],
       "matchBaseBranches": [
         "main",
         "/^release-.*/"
       ],
-      "automerge": false
-    },
-    {
-      "description": "Do automerge patch updates to dockerfiles. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
-      "enabled": true,
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchUpdateTypes": [
-        "patch"
-      ],
-      "additionalBranchPrefix": "dockerfile ",
       "groupName": "All dockerfile images",
-      "automerge": true,
+      "automerge": false,
       "pinDigests": false
     },
     {
@@ -141,6 +130,12 @@
       "matchManagers": ["gomod"],
       "matchDepTypes": ["indirect"],
       "matchUpdateTypes": ["major", "minor", "patch", "pin", "pinDigest", "digest", "lockFileMaintenance", "rollback", "replacement", "bump"],
+      "enabled": false
+    },
+    {
+      "description": "Disable Containerfile updates on release-1.10; rpm lockfile requires internal RH repos not reachable by Renovate/CI. The weekly maintenance script and rhdh-base-images skill handle these updates instead.",
+      "matchBaseBranches": ["release-1.10"],
+      "matchDatasources": ["docker"],
       "enabled": false
     }
   ],
