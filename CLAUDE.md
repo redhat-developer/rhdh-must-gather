@@ -43,7 +43,7 @@ The tool is a single Go binary that handles CLI parsing, Kubernetes API access, 
 
 - **`cmd/gather/main.go`** - Entry point
 - **`internal/cli/`** - Cobra CLI, flag parsing, orchestration
-- **`internal/collector/`** - Individual collectors (helm, operator, orchestrator, platform, route, ingress, namespace-inspect, cluster-info)
+- **`internal/collector/`** - Individual collectors (helm, operator, orchestrator, platform, route, ingress, namespace-inspect, network-policies, cluster-info) and the run-mode registry that drives flags and execution order
 - **`internal/sanitize/`** - Post-collection data sanitization
 - **`internal/exec/`** - Command execution utilities
 - **`internal/log/`** - Logging utilities
@@ -65,7 +65,13 @@ The tool is a single Go binary that handles CLI parsing, Kubernetes API access, 
 
 ### Adding a New Collector
 1. Create a new Go type implementing the collector interface in `internal/collector/`
-2. Register it in the orchestrator's collector list in `internal/cli/gather.go`
+2. Add one entry to `registry` in `internal/collector/collector.go`, choosing its `RunMode`:
+   - `Default` — runs unless the user passes `--without-<name>`
+   - `AlwaysOn` — always runs, no flag (e.g. `network-policies`)
+   - `OptIn` — off unless the user passes `--with-<name>` (e.g. `cluster-info`)
+   Execution order follows registry order; use `RunAfter` when a collector reads
+   another collector's output from the collection directory. No changes to
+   `internal/cli/` are needed.
 3. Use the Kubernetes client-go SDK for API access (no shell-outs)
 4. Respect `Config.TargetNamespaces` for namespace filtering
 5. Respect `Config.WithSecrets` when collecting secrets
