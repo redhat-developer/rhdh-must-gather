@@ -52,7 +52,7 @@ func CollectPodData(ctx context.Context, cfg *Config, ns string, pod *corev1.Pod
 echo "===ID==="
 id 2>/dev/null || echo "unknown"
 echo "===ENV==="
-env | grep -E "^(BACKSTAGE_|RHDH_|UPSTREAM_REPO|MIDSTREAM_REPO|NODE_|APP_CONFIG_|LOG_LEVEL|PLUGIN_|NO_PROXY|HTTP_PROXY|HTTPS_PROXY|NPM_CONFIG_|GLOBAL_AGENT_)" | sort || true
+env | grep -E "^(BACKSTAGE_|RHDH_|UPSTREAM_REPO|MIDSTREAM_REPO|NODE_|APP_CONFIG_|LOG_LEVEL|PLUGIN_|NO_PROXY|HTTP_PROXY|HTTPS_PROXY|NPM_CONFIG_)" | sort || true
 echo "===VERSIONS==="
 echo "BACKSTAGE_VERSION=${BACKSTAGE_VERSION:-}"
 echo "RHDH_VERSION=${RHDH_VERSION:-}"
