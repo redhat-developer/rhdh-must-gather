@@ -228,8 +228,8 @@ func noopClean(_, _, _, _ string) error { return nil }
 
 func excludeAllDefaultArgs() []string {
 	var args []string
-	for _, r := range collector.Registrations {
-		if r.Mode == collector.Default {
+	for _, r := range collector.All() {
+		if r.RunMode == collector.Default {
 			args = append(args, "--without-"+r.Name)
 		}
 	}

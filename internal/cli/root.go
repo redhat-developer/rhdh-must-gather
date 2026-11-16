@@ -39,6 +39,7 @@ from both Helm-based and Operator-managed RHDH instances.`,
 			return runGather(cmd, opts)
 		},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			warnDeprecatedCollectorFlags(cmd)
 			method := opts.heapDumpMethod
 			if method != "inspector" && method != "sigusr2" {
 				return fmt.Errorf("--heap-dump-method must be 'inspector' or 'sigusr2', got %q", method)
@@ -78,24 +79,18 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.StringVar(&opts.since, "since", "", "Only collect logs newer than a relative duration (e.g. 5s, 2m, 3h)")
 	flags.StringVar(&opts.sinceTime, "since-time", "", "Only collect logs after a specific date (RFC3339, e.g. 2006-01-02T15:04:05Z)")
 
-	for _, r := range collector.Registrations {
-		switch r.Mode {
+	for _, r := range collector.All() {
+		switch r.RunMode {
 		case collector.Default:
-			desc := r.FlagDesc
-			if desc == "" {
-				desc = "Skip " + r.Name + " data collection"
-			}
-			flags.Bool("without-"+r.Name, false, desc)
+			flags.Bool("without-"+r.Name, false, flagDesc(r, "Skip "+r.Name+" data collection"))
 		case collector.OptIn:
-			desc := r.FlagDesc
-			if desc == "" {
-				desc = "Include " + r.Name + " data collection"
+			flags.Bool("with-"+r.Name, false, flagDesc(r, "Include "+r.Name+" data collection"))
+			// Aliases are only honoured for OptIn collectors, so only register
+			// them there; a flag nobody reads is worse than no flag.
+			for _, alias := range r.FlagAliases {
+				flags.Bool(alias, false, "Deprecated: use --with-"+r.Name+" instead")
+				_ = flags.MarkHidden(alias) // cannot fail: registered on the line above
 			}
-			flags.Bool("with-"+r.Name, false, desc)
-		}
-		for _, alias := range r.FlagAliases {
-			flags.Bool(alias, false, "Deprecated: use --with-"+r.Name+" instead")
-			_ = flags.MarkHidden(alias)
 		}
 	}
 
@@ -109,33 +104,58 @@ from both Helm-based and Operator-managed RHDH instances.`,
 }
 
 func buildScriptList(cmd *cobra.Command) []string {
-	scripts := make([]string, 0, len(collector.Registrations))
-	for _, r := range collector.Registrations {
-		switch r.Mode {
-		case collector.AlwaysOn:
+	regs := collector.InRunOrder()
+	scripts := make([]string, 0, len(regs))
+	for _, r := range regs {
+		if collectorEnabled(cmd, r) {
 			scripts = append(scripts, r.Name)
-		case collector.Default:
-			excluded, _ := cmd.Flags().GetBool("without-" + r.Name)
-			if !excluded {
-				scripts = append(scripts, r.Name)
-			}
-		case collector.OptIn:
-			included, _ := cmd.Flags().GetBool("with-" + r.Name)
-			if !included {
-				for _, alias := range r.FlagAliases {
-					if v, _ := cmd.Flags().GetBool(alias); v {
-						log.Warn("--%s is deprecated, use --with-%s instead", alias, r.Name)
-						included = true
-						break
-					}
-				}
-			}
-			if included {
-				scripts = append(scripts, r.Name)
-			}
 		}
 	}
 	return scripts
+}
+
+// collectorEnabled reports whether r should run for the given command line.
+func collectorEnabled(cmd *cobra.Command, r collector.Registration) bool {
+	switch r.RunMode {
+	case collector.AlwaysOn:
+		return true
+	case collector.Default:
+		excluded, _ := cmd.Flags().GetBool("without-" + r.Name)
+		return !excluded
+	case collector.OptIn:
+		included, _ := cmd.Flags().GetBool("with-" + r.Name)
+		for _, alias := range r.FlagAliases {
+			if v, _ := cmd.Flags().GetBool(alias); v {
+				included = true
+			}
+		}
+		return included
+	}
+	return false
+}
+
+// flagDesc returns the help text for a collector's flag.
+func flagDesc(r collector.Registration, fallback string) string {
+	if r.FlagDesc != "" {
+		return r.FlagDesc
+	}
+	return fallback
+}
+
+// warnDeprecatedCollectorFlags reports use of deprecated collector flag aliases
+// (e.g. --cluster-info). It is called once per invocation so the warning is
+// printed even when the replacement flag was passed as well.
+//
+// Aliases only exist for OptIn collectors — TestRegistryIntegrity rejects any
+// other combination — so the replacement flag is always --with-<name>.
+func warnDeprecatedCollectorFlags(cmd *cobra.Command) {
+	for _, r := range collector.All() {
+		for _, alias := range r.FlagAliases {
+			if v, _ := cmd.Flags().GetBool(alias); v {
+				log.Warn("--%s is deprecated, use --with-%s instead", alias, r.Name)
+			}
+		}
+	}
 }
 
 func Execute() error {

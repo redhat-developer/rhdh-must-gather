@@ -154,38 +154,38 @@ func TestConfig_ApplyLogSince(t *testing.T) {
 
 func TestRegistrations(t *testing.T) {
 	expected := map[string]bool{
-		"platform":         true,
-		"helm":             true,
-		"operator":         true,
-		"orchestrator":     true,
-		"route":            true,
-		"ingress":          true,
+		"platform":          true,
+		"helm":              true,
+		"operator":          true,
+		"orchestrator":      true,
+		"route":             true,
+		"ingress":           true,
 		"namespace-inspect": true,
-		"cluster-info":     true,
-		"network-policies": true,
+		"cluster-info":      true,
+		"network-policies":  true,
 	}
 
-	for _, r := range Registrations {
+	for _, r := range registry {
 		t.Run(r.Name, func(t *testing.T) {
 			if r.Collector.Name() != r.Name {
 				t.Errorf("Name() = %q, want %q", r.Collector.Name(), r.Name)
 			}
 			if !expected[r.Name] {
-				t.Errorf("unexpected collector %q in Registrations", r.Name)
+				t.Errorf("unexpected collector %q in registry", r.Name)
 			}
 			delete(expected, r.Name)
 		})
 	}
 
 	for name := range expected {
-		t.Errorf("missing collector %q in Registrations", name)
+		t.Errorf("missing collector %q in registry", name)
 	}
 }
 
 func TestRegistrationModes(t *testing.T) {
 	modes := make(map[string]RunMode)
-	for _, r := range Registrations {
-		modes[r.Name] = r.Mode
+	for _, r := range registry {
+		modes[r.Name] = r.RunMode
 	}
 
 	if modes["network-policies"] != AlwaysOn {
@@ -201,24 +201,135 @@ func TestRegistrationModes(t *testing.T) {
 	}
 }
 
-func TestRunAfterOrdering(t *testing.T) {
-	position := make(map[string]int)
-	for i, r := range Registrations {
-		position[r.Name] = i
+// TestRegistryIntegrity guards the invariants that let gather.go skip a lookup
+// check: every emitted name exists, every collector is usable, and ordering
+// metadata is consistent.
+func TestRegistryIntegrity(t *testing.T) {
+	positions := make(map[string]int, len(registry))
+	for i, r := range registry {
+		if r.Name == "" {
+			t.Errorf("registry entry %d has an empty name", i)
+			continue
+		}
+		if prev, dup := positions[r.Name]; dup {
+			t.Errorf("collector %q registered twice (positions %d and %d)", r.Name, prev, i)
+		}
+		positions[r.Name] = i
 	}
 
-	for _, r := range Registrations {
-		for _, dep := range r.RunAfter {
-			depPos, ok := position[dep]
-			if !ok {
-				t.Errorf("%s declares RunAfter %q, but %q is not registered", r.Name, dep, dep)
-				continue
+	for _, r := range registry {
+		if r.Collector == nil {
+			t.Errorf("collector %q has a nil Collector", r.Name)
+			continue
+		}
+		if r.Collector.Name() != r.Name {
+			t.Errorf("collector %q: Collector.Name() = %q", r.Name, r.Collector.Name())
+		}
+		if r.RunMode < Default || r.RunMode > OptIn {
+			t.Errorf("collector %q has invalid RunMode %d", r.Name, r.RunMode)
+		}
+		if len(r.FlagAliases) > 0 && r.RunMode != OptIn {
+			t.Errorf("collector %q declares flag aliases but is not OptIn", r.Name)
+		}
+		for _, alias := range r.FlagAliases {
+			if alias == "" {
+				t.Errorf("collector %q has an empty flag alias", r.Name)
 			}
-			if depPos >= position[r.Name] {
-				t.Errorf("%s (position %d) declares RunAfter %q (position %d): dependency must appear earlier",
-					r.Name, position[r.Name], dep, depPos)
+			if alias == "with-"+r.Name || alias == "without-"+r.Name {
+				t.Errorf("collector %q: flag alias %q collides with its own generated flag", r.Name, alias)
 			}
 		}
+	}
+
+	ordered, err := inRunOrder(registry)
+	if err != nil {
+		t.Fatalf("registry ordering: %v", err)
+	}
+	if len(ordered) != len(registry) {
+		t.Errorf("inRunOrder returned %d collectors, want %d", len(ordered), len(registry))
+	}
+}
+
+func TestInRunOrder_DeclaredOrderIsAlreadyValid(t *testing.T) {
+	ordered := InRunOrder()
+
+	if len(ordered) != len(registry) {
+		t.Fatalf("InRunOrder returned %d collectors, want %d", len(ordered), len(registry))
+	}
+	for i, r := range ordered {
+		if r.Name != registry[i].Name {
+			t.Fatalf("InRunOrder[%d] = %q, want %q: declared order should already respect RunAfter",
+				i, r.Name, registry[i].Name)
+		}
+	}
+}
+
+func TestInRunOrder_ReordersDependencies(t *testing.T) {
+	// Same registrations, deliberately declared in the wrong order.
+	shuffled := []Registration{
+		{Name: "network-policies", RunMode: AlwaysOn, RunAfter: []string{"orchestrator"}},
+		{Name: "namespace-inspect", RunMode: Default, RunAfter: []string{"orchestrator"}},
+		{Name: "route", RunMode: Default},
+		{Name: "orchestrator", RunMode: Default},
+	}
+
+	ordered, err := inRunOrder(shuffled)
+	if err != nil {
+		t.Fatalf("inRunOrder: %v", err)
+	}
+
+	positions := make(map[string]int, len(ordered))
+	for i, r := range ordered {
+		positions[r.Name] = i
+	}
+	if len(positions) != len(shuffled) {
+		t.Fatalf("inRunOrder lost or duplicated collectors: got %d, want %d", len(positions), len(shuffled))
+	}
+	for _, r := range shuffled {
+		for _, dep := range r.RunAfter {
+			if positions[dep] >= positions[r.Name] {
+				t.Errorf("%q (position %d) did not run after %q (position %d)",
+					r.Name, positions[r.Name], dep, positions[dep])
+			}
+		}
+	}
+	// Ties keep declared order: route precedes orchestrator in the input.
+	if positions["route"] > positions["orchestrator"] {
+		t.Errorf("inRunOrder should be stable: route (position %d) moved after orchestrator (position %d)",
+			positions["route"], positions["orchestrator"])
+	}
+}
+
+func TestInRunOrder_RejectsDanglingAndCircularDependencies(t *testing.T) {
+	t.Run("dangling", func(t *testing.T) {
+		_, err := inRunOrder([]Registration{
+			{Name: "a", RunMode: Default, RunAfter: []string{"missing"}},
+		})
+		if err == nil {
+			t.Fatal("expected an error for an unregistered RunAfter target")
+		}
+	})
+
+	t.Run("cycle", func(t *testing.T) {
+		_, err := inRunOrder([]Registration{
+			{Name: "a", RunMode: Default, RunAfter: []string{"b"}},
+			{Name: "b", RunMode: Default, RunAfter: []string{"a"}},
+		})
+		if err == nil {
+			t.Fatal("expected an error for a RunAfter cycle")
+		}
+	})
+}
+
+func TestAll_ReturnsCopy(t *testing.T) {
+	all := All()
+	if len(all) != len(registry) {
+		t.Fatalf("All() returned %d collectors, want %d", len(all), len(registry))
+	}
+
+	all[0].Name = "mutated"
+	if registry[0].Name == "mutated" {
+		t.Error("All() exposed the underlying registry slice to mutation")
 	}
 }
 
