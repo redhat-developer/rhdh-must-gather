@@ -100,7 +100,10 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/hermeto-cache/rhdh-must-gather
-        key: hermeto-deps-${{ inputs.platform }}-${{ steps.hermeto-vars.outputs.hermeto_key }}-${{ hashFiles('go.mod', 'go.sum', 'rpms.lock.yaml') }}
+        # Hermeto always runs linux/amd64 and fetches every arch listed in
+        # rpms.lock.yaml, so the cache is arch-independent. Do not key on
+        # inputs.platform, or each build leg keeps a duplicate cold cache.
+        key: hermeto-deps-${{ steps.hermeto-vars.outputs.hermeto_key }}-${{ hashFiles('go.mod', 'go.sum', 'rpms.lock.yaml') }}
 
     - name: Fetch dependencies with hermeto
       if: steps.cache-deps.outputs.cache-hit != 'true'

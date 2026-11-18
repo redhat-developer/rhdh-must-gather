@@ -62,7 +62,14 @@ jobs:
             console.log(`Found ${pulls.length} PR(s) via listPullRequestsAssociatedWithCommit`);
             pulls.forEach(p => console.log(`  - PR #${p.number}: state=${p.state}`));
 
-            let pr = pulls.find(p => p.state === "open");
+            // Bind the PR to this run's head branch and repository, so a
+            // different PR that happens to share the head SHA (e.g. a fork
+            // pushing the same commit) cannot capture another PR's pr-<N> tag.
+            let pr = pulls.find(p =>
+              p.state === "open" &&
+              p.head.ref === branch &&
+              p.head.repo?.full_name === context.payload.workflow_run.head_repository?.full_name
+            );
 
             // Method 3: If no results and this is a fork, try searching by branch
             if (!pr && isFork) {
@@ -213,7 +220,12 @@ jobs:
               podman images
               exit 1
             fi
-            echo "Loaded ${LOCAL}"
+            ACTUAL_ARCH=$(podman image inspect --format '{{.Architecture}}' "${LOCAL}")
+            if [[ "${ACTUAL_ARCH}" != "${ARCH}" ]]; then
+              echo "::error::Image ${LOCAL} reports architecture '${ACTUAL_ARCH}', expected '${ARCH}'"
+              exit 1
+            fi
+            echo "Loaded ${LOCAL} (${ACTUAL_ARCH})"
           done
 
       - name: Log into registry ${{ vars.REGISTRY }}

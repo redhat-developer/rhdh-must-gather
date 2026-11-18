@@ -193,7 +193,9 @@ jobs:
             fi
 
             echo "${REF}" >> /tmp/image-tags.txt
-            if [[ ${TAG} == latest-* ]]; then
+            # Only expire commit-pinned tags (latest[-x.y]-<shortsha>).
+            # Floating tags (latest, latest-1.x) must stay published.
+            if [[ ${TAG} == latest-* && ${TAG} == *-"${SHORT_SHA}" ]]; then
               echo "${TAG}" >> /tmp/expiry-tags.txt
             fi
           done
@@ -244,9 +246,11 @@ jobs:
           done < /tmp/expiry-tags.txt
 
       # Remove the temporary per-arch build tags. The arch images stay in the
-      # registry by digest, referenced by the manifest list.
+      # registry by digest, referenced by the manifest list. Only clean up
+      # after a successful manifest push: a failed push keeps the tags so the
+      # job can be re-run without rebuilding both architectures.
       - name: Clean up per-arch build tags
-        if: always()
+        if: always() && steps.push.conclusion == 'success'
         env:
           API_TOKEN: ${{ secrets.QUAY_OAUTH_TOKEN || secrets.QUAY_TOKEN }}
           REGISTRY: ${{ vars.REGISTRY }}
@@ -272,6 +276,7 @@ jobs:
               echo "✓ Deleted arch build tag: ${TAG}"
             else
               echo "Warning: Failed to delete arch build tag ${TAG} (HTTP $HTTP_CODE); it can be removed manually"
+              echo "This may be due to using a robot account token instead of an OAuth application token"
             fi
           done
 
