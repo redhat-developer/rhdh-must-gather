@@ -75,9 +75,25 @@ runs:
         fi
         echo "Using ${HERMETO_IMAGE}"
         echo "HERMETO_IMAGE=${HERMETO_IMAGE}" >> "$GITHUB_ENV"
+        # Hermeto ≥0.63 ships amd64-only; always run it as linux/amd64.
+        echo "HERMETO_PLATFORM=linux/amd64" >> "$GITHUB_ENV"
         echo "LOCAL_CACHE_DIR=/tmp/hermeto-cache/rhdh-must-gather" >> "$GITHUB_ENV"
         # Invalidate the dependency cache when the Hermeto image tag changes.
         echo "hermeto_key=${HERMETO_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+    # Hermeto images from 0.63+ are amd64-only. On arm64 runners, enable QEMU
+    # so we can still run Hermeto under --platform linux/amd64. Hermeto fetches
+    # every arch listed in rpms.lock.yaml, so the resulting cache still covers
+    # aarch64 RPMs needed by the native arm64 image build.
+    - name: Enable amd64 emulation for Hermeto
+      if: runner.arch == 'ARM64'
+      shell: bash
+      run: |
+        set -ex
+        sudo apt-get -y update
+        sudo apt-get -y install qemu-user-static
+        # Confirm binfmt can execute the pinned Hermeto image as amd64
+        podman run --rm --platform linux/amd64 "$HERMETO_IMAGE" --version
 
     - name: Restore hermeto dependency cache
       id: cache-deps
@@ -95,7 +111,8 @@ runs:
         mkdir -p "$LOCAL_CACHE_DIR"
 
         echo "::group::Fetching dependencies with hermeto"
-        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+        podman run --rm --platform "${HERMETO_PLATFORM}" \
+          -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
           --log-level DEBUG \
           fetch-deps \
           --source . \
@@ -109,14 +126,16 @@ runs:
         fi
 
         echo "::group::Generating environment file"
-        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+        podman run --rm --platform "${HERMETO_PLATFORM}" \
+          -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
           --log-level DEBUG \
           generate-env --format env \
           --output /cachi2/cachi2.env /cachi2/output
         echo "::endgroup::"
 
         echo "::group::Injecting files"
-        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+        podman run --rm --platform "${HERMETO_PLATFORM}" \
+          -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
           --log-level DEBUG \
           inject-files /cachi2/output
         echo "::endgroup::"
@@ -127,14 +146,16 @@ runs:
       run: |
         set -ex
         echo "::group::Generating environment file from cached deps"
-        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+        podman run --rm --platform "${HERMETO_PLATFORM}" \
+          -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
           --log-level DEBUG \
           generate-env --format env \
           --output /cachi2/cachi2.env /cachi2/output
         echo "::endgroup::"
 
         echo "::group::Injecting files from cached deps"
-        podman run --rm -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
+        podman run --rm --platform "${HERMETO_PLATFORM}" \
+          -v "$PWD:/source:z" -v "$LOCAL_CACHE_DIR:/cachi2:z" -w /source "$HERMETO_IMAGE" \
           --log-level DEBUG \
           inject-files /cachi2/output
         echo "::endgroup::"
