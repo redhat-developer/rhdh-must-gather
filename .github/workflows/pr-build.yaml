@@ -107,17 +107,20 @@ jobs:
           platform: ${{ matrix.platform }}
           skipArtifactUpload: 'true'
 
-      # Save the image as a tarball for the push workflow.
-      # Only the amd64 leg produces the artifact consumed by pr-push and e2e-tests.
+      # Save each arch as its own artifact. Arch-suffixed local tags let
+      # pr-push load both without collision and assemble a multi-arch
+      # manifest list. E2E tests consume the amd64 artifact only.
       - name: Save image to tarball
-        if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
+        if: steps.changed-files.outputs.any_changed == 'true'
         env:
-           NAME: ${{ env.IMAGE_NAME }}
-           TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+          NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ steps.prep.outputs.IMAGE_TAG }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          podman save "${NAME}:${TAG}" | gzip > image.tar.gz
+          podman tag "${NAME}:${TAG}" "${NAME}:${TAG}-${ARCH}"
+          podman save "${NAME}:${TAG}-${ARCH}" | gzip > "image-${ARCH}.tar.gz"
 
-      # Create metadata file for the push workflow
+      # Create metadata file for the push workflow (once, with the amd64 artifact)
       - name: Create metadata
         if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
         env:
@@ -133,14 +136,22 @@ jobs:
             --arg vs "$VERSION" \
             '{pr_number: $pr, image_tag: $it, extra_tags: $et, version: $vs}' > metadata.json
 
-      - name: Upload image artifact
+      - name: Upload amd64 image artifact
         if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'amd64'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: pr-image
+          name: pr-image-amd64
           path: |
-            image.tar.gz
+            image-amd64.tar.gz
             metadata.json
+          retention-days: 1
+
+      - name: Upload arm64 image artifact
+        if: steps.changed-files.outputs.any_changed == 'true' && matrix.arch == 'arm64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pr-image-arm64
+          path: image-arm64.tar.gz
           retention-days: 1
 
       - name: Summary
@@ -166,7 +177,7 @@ jobs:
           echo "- **Status**: Built and saved as artifact" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The image will be pushed by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
+          echo "Both architectures are pushed as a multi-arch manifest list by the PR Push workflow." >> $GITHUB_STEP_SUMMARY
 
   e2e-tests:
     name: E2E Tests (Container Image)
@@ -184,11 +195,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download image artifact
+      - name: Download amd64 image artifact
         if: needs.pr-build.outputs.image-built == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: pr-image
+          name: pr-image-amd64
 
       - name: Load image into podman
         if: needs.pr-build.outputs.image-built == 'true'
@@ -196,8 +207,8 @@ jobs:
           TAG: ${{ needs.pr-build.outputs.image-tag }}
           NAME: ${{ env.IMAGE_NAME }}
         run: |
-          gunzip -c image.tar.gz | podman load
-          podman tag "${NAME}:${TAG}" "localhost/${NAME}:${TAG}"
+          gunzip -c image-amd64.tar.gz | podman load
+          podman tag "${NAME}:${TAG}-amd64" "localhost/${NAME}:${TAG}"
           podman images
 
       - name: Install dependencies
