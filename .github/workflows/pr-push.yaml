@@ -1,3 +1,5 @@
+# TODO(rm3l): once 2.2 is the minimum supported version, remove single-arch
+# fallback (all supported branches will produce multi-arch artifacts).
 name: PR Push
 
 on:
@@ -103,20 +105,28 @@ jobs:
               repo: context.repo.repo,
               run_id: runId,
             });
-            const required = ['pr-image-amd64', 'pr-image-arm64'];
-            const missing = required.filter(name => !artifacts.some(a => a.name === name));
-            if (missing.length === 0) {
-              console.log(`Artifacts ${required.join(', ')} for run ${runId}: found`);
+            const names = artifacts.map(a => a.name);
+            const hasAmd64 = names.includes('pr-image-amd64');
+            const hasArm64 = names.includes('pr-image-arm64');
+            const hasLegacy = names.includes('pr-image');
+
+            if (hasAmd64 && hasArm64) {
+              console.log(`Multi-arch artifacts (pr-image-amd64, pr-image-arm64) for run ${runId}: found`);
               core.setOutput('exists', true);
-            } else if (missing.length === required.length) {
+              core.setOutput('mode', 'multi-arch');
+            } else if (hasAmd64 !== hasArm64) {
+              core.setFailed(`Incomplete multi-arch artifacts for run ${runId}; missing: ${hasAmd64 ? 'pr-image-arm64' : 'pr-image-amd64'}`);
+            } else if (hasLegacy) {
+              console.log(`Legacy single-arch artifact (pr-image) for run ${runId}: found`);
+              core.setOutput('exists', true);
+              core.setOutput('mode', 'single-arch');
+            } else {
               console.log(`No PR image artifacts for run ${runId} (docs-only or skipped build)`);
               core.setOutput('exists', false);
-            } else {
-              core.setFailed(`Incomplete PR image artifacts for run ${runId}; missing: ${missing.join(', ')}`);
             }
 
       - name: Download amd64 artifact from build workflow
-        if: steps.check-artifact.outputs.exists == 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: pr-image-amd64
@@ -124,10 +134,18 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Download arm64 artifact from build workflow
-        if: steps.check-artifact.outputs.exists == 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: pr-image-arm64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download single-arch artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'single-arch'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pr-image
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
@@ -201,8 +219,8 @@ jobs:
 
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
-      - name: Load per-arch images from tarballs
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+      - name: Load per-arch images from tarballs (multi-arch)
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
         env:
           NAME: ${{ env.IMAGE_NAME }}
           TAG: ${{ env.SAFE_IMAGE_TAG }}
@@ -228,6 +246,21 @@ jobs:
             echo "Loaded ${LOCAL} (${ACTUAL_ARCH})"
           done
 
+      - name: Load image from tarball (single-arch)
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'single-arch'
+        env:
+          NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ env.SAFE_IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          gunzip -c image.tar.gz | podman load
+          if ! podman image exists "${NAME}:${TAG}"; then
+            echo "::error::Expected local image ${NAME}:${TAG} after load"
+            podman images
+            exit 1
+          fi
+          echo "Loaded ${NAME}:${TAG}"
+
       - name: Log into registry ${{ vars.REGISTRY }}
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
         uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2
@@ -237,7 +270,7 @@ jobs:
           password: ${{ secrets.QUAY_TOKEN }}
 
       - name: Push multi-arch manifest lists
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
         env:
           REGISTRY: ${{ vars.REGISTRY }}
           REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
@@ -259,6 +292,26 @@ jobs:
             podman manifest add "${REF}" "${AMD64_LOCAL}"
             podman manifest add "${REF}" "${ARM64_LOCAL}"
             podman manifest push --all "${REF}"
+          done
+
+      - name: Push single-arch image
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'single-arch'
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          MAIN_TAG: ${{ env.SAFE_IMAGE_TAG }}
+          EXTRA_TAGS: ${{ env.SAFE_EXTRA_TAGS }}
+        run: |
+          set -euo pipefail
+
+          IMAGE_REF="${REGISTRY}/${REGISTRY_ORG}/${IMAGE_NAME}"
+
+          for TAG in ${MAIN_TAG} ${EXTRA_TAGS}; do
+            REF="${IMAGE_REF}:${TAG}"
+            echo "Pushing ${REF}"
+            podman tag "${IMAGE_NAME}:${MAIN_TAG}" "${REF}"
+            podman push "${REF}"
           done
 
       - name: Set expiration on PR images
@@ -309,6 +362,7 @@ jobs:
           REGISTRY: ${{ vars.REGISTRY }}
           REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          BUILD_MODE: ${{ steps.check-artifact.outputs.mode }}
         with:
           script: |
             // Safe: using process.env avoids code injection
@@ -318,38 +372,53 @@ jobs:
             const registry = process.env.REGISTRY;
             const registryOrg = process.env.REGISTRY_ORG;
             const imageName = process.env.IMAGE_NAME;
-            
+            const buildMode = process.env.BUILD_MODE;
+
             const baseUrl = `${registry}/${registryOrg}/${imageName}`;
             const allTags = [mainTag, ...extraTags];
             const tagList = allTags.map(tag => `<li><code>${baseUrl}:${tag}</code></li>`).join('\n');
-            
+
+            const archInfo = buildMode === 'multi-arch'
+              ? 'multi-arch (`linux/amd64`, `linux/arm64`)'
+              : '`linux/amd64`';
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `PR images are available (for 1 week) — multi-arch (\`linux/amd64\`, \`linux/arm64\`):\n<ol>\n${tagList}\n</ol>`
+              body: `PR images are available (for 1 week) — ${archInfo}:\n<ol>\n${tagList}\n</ol>`
             })
 
       - name: Summary
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+        env:
+          BUILD_MODE: ${{ steps.check-artifact.outputs.mode }}
         run: |
           ALL_TAGS="\`${{ env.SAFE_IMAGE_TAG }}\`"
-          
+
           # FIXED: Use env var to avoid syntax error if empty
           for tag in $SAFE_EXTRA_TAGS; do
             ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
           done
-          
+
+          if [ "$BUILD_MODE" = "multi-arch" ]; then
+            PLATFORMS="linux/amd64, linux/arm64"
+            STATUS="Multi-arch manifest list pushed and expiration set"
+          else
+            PLATFORMS="linux/amd64"
+            STATUS="Single-arch image pushed and expiration set"
+          fi
+
           echo "### Push Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ env.SAFE_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: Multi-arch manifest list pushed and expiration set" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: ${PLATFORMS}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${STATUS}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
 
       - name: Summary (skipped - no artifact)
         if: steps.check-artifact.outputs.exists != 'true'
         run: |
           echo "### Push Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No \`pr-image-amd64\` / \`pr-image-arm64\` artifacts were produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
+          echo "No PR image artifacts (\`pr-image-amd64\`/\`pr-image-arm64\` or \`pr-image\`) were produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
           echo "This is expected when the PR changes don't affect the container image (e.g., docs-only changes)." >> $GITHUB_STEP_SUMMARY
