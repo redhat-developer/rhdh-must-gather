@@ -56,18 +56,16 @@ EOF
 build_cache() {
   local component_dir="$1"
   local local_cache_dir="$2"
-  local platform_args=()
-
-  if [[ -n "${TARGET_PLATFORM}" ]]; then
-    platform_args=("--platform" "${TARGET_PLATFORM}")
-  fi
+  # Hermeto ≥0.63 is amd64-only. It still fetches every arch from
+  # rpms.lock.yaml, so linux/amd64 is correct even when building arm64 images.
+  local hermeto_platform_args=("--platform" "linux/amd64")
 
   mkdir -p "${local_cache_dir}/output"
 
-  podman pull "${platform_args[@]}" "${HERMETO_IMAGE}"
+  podman pull "${hermeto_platform_args[@]}" "${HERMETO_IMAGE}"
 
   podman run --rm \
-    "${platform_args[@]}" \
+    "${hermeto_platform_args[@]}" \
     -v "${component_dir}:/source:z" \
     -v "${local_cache_dir}:/cachi2:z" \
     -w /source \
@@ -79,7 +77,7 @@ build_cache() {
     '[{"type": "rpm", "path": "."}, {"type": "gomod", "path": "."}]'
 
   podman run --rm \
-    "${platform_args[@]}" \
+    "${hermeto_platform_args[@]}" \
     -v "${component_dir}:/source:z" \
     -v "${local_cache_dir}:/cachi2:z" \
     -w /source \
@@ -87,7 +85,7 @@ build_cache() {
     generate-env --format env --output /cachi2/cachi2.env /cachi2/output
 
   podman run --rm \
-    "${platform_args[@]}" \
+    "${hermeto_platform_args[@]}" \
     -v "${component_dir}:/source:z" \
     -v "${local_cache_dir}:/cachi2:z" \
     -w /source \

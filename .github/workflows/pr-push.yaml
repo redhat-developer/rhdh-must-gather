@@ -62,7 +62,14 @@ jobs:
             console.log(`Found ${pulls.length} PR(s) via listPullRequestsAssociatedWithCommit`);
             pulls.forEach(p => console.log(`  - PR #${p.number}: state=${p.state}`));
 
-            let pr = pulls.find(p => p.state === "open");
+            // Bind the PR to this run's head branch and repository, so a
+            // different PR that happens to share the head SHA (e.g. a fork
+            // pushing the same commit) cannot capture another PR's pr-<N> tag.
+            let pr = pulls.find(p =>
+              p.state === "open" &&
+              p.head.ref === branch &&
+              p.head.repo?.full_name === context.payload.workflow_run.head_repository?.full_name
+            );
 
             // Method 3: If no results and this is a fork, try searching by branch
             if (!pr && isFork) {
@@ -85,7 +92,7 @@ jobs:
             console.log(`Using PR #${pr.number}`);
             core.setOutput("number", pr.number);
 
-      - name: Check if build artifact exists
+      - name: Check if build artifacts exist
         id: check-artifact
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
@@ -96,15 +103,31 @@ jobs:
               repo: context.repo.repo,
               run_id: runId,
             });
-            const found = artifacts.some(a => a.name === 'pr-image');
-            console.log(`Artifact 'pr-image' for run ${runId}: ${found ? 'found' : 'not found'}`);
-            core.setOutput('exists', found);
+            const required = ['pr-image-amd64', 'pr-image-arm64'];
+            const missing = required.filter(name => !artifacts.some(a => a.name === name));
+            if (missing.length === 0) {
+              console.log(`Artifacts ${required.join(', ')} for run ${runId}: found`);
+              core.setOutput('exists', true);
+            } else if (missing.length === required.length) {
+              console.log(`No PR image artifacts for run ${runId} (docs-only or skipped build)`);
+              core.setOutput('exists', false);
+            } else {
+              core.setFailed(`Incomplete PR image artifacts for run ${runId}; missing: ${missing.join(', ')}`);
+            }
 
-      - name: Download artifact from build workflow
+      - name: Download amd64 artifact from build workflow
         if: steps.check-artifact.outputs.exists == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: pr-image
+          name: pr-image-amd64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download arm64 artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pr-image-arm64
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
@@ -178,10 +201,32 @@ jobs:
 
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
-      - name: Load image from tarball
+      - name: Load per-arch images from tarballs
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+        env:
+          NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ env.SAFE_IMAGE_TAG }}
         run: |
-          gunzip -c image.tar.gz | podman load
+          set -euo pipefail
+          gunzip -c image-amd64.tar.gz | podman load
+          gunzip -c image-arm64.tar.gz | podman load
+
+          # Artifacts are saved with trusted arch-suffixed tags derived from the
+          # PR number (SAFE_IMAGE_TAG). Refuse unexpected local names.
+          for ARCH in amd64 arm64; do
+            LOCAL="${NAME}:${TAG}-${ARCH}"
+            if ! podman image exists "${LOCAL}"; then
+              echo "::error::Expected local image ${LOCAL} after load"
+              podman images
+              exit 1
+            fi
+            ACTUAL_ARCH=$(podman image inspect --format '{{.Architecture}}' "${LOCAL}")
+            if [[ "${ACTUAL_ARCH}" != "${ARCH}" ]]; then
+              echo "::error::Image ${LOCAL} reports architecture '${ACTUAL_ARCH}', expected '${ARCH}'"
+              exit 1
+            fi
+            echo "Loaded ${LOCAL} (${ACTUAL_ARCH})"
+          done
 
       - name: Log into registry ${{ vars.REGISTRY }}
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
@@ -191,34 +236,29 @@ jobs:
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
-      - name: Tag and push main tag
+      - name: Push multi-arch manifest lists
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          MAIN_TAG: ${{ env.SAFE_IMAGE_TAG }}
+          EXTRA_TAGS: ${{ env.SAFE_EXTRA_TAGS }}
         run: |
           set -euo pipefail
-          # Resolve the loaded image locally; do not trust artifact tag names.
-          LOCAL_IMAGE=$(podman images --format '{{.Repository}}:{{.Tag}}' | head -n1)
-          if [[ -z "$LOCAL_IMAGE" || "$LOCAL_IMAGE" == "<none>:<none>" ]]; then
-            echo "::error::No image found after podman load"
-            exit 1
-          fi
-          echo "Loaded image: ${LOCAL_IMAGE}"
 
-          podman tag "$LOCAL_IMAGE" \
-            ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
-          podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
+          IMAGE_REF="${REGISTRY}/${REGISTRY_ORG}/${IMAGE_NAME}"
+          AMD64_LOCAL="${IMAGE_NAME}:${MAIN_TAG}-amd64"
+          ARM64_LOCAL="${IMAGE_NAME}:${MAIN_TAG}-arm64"
 
-      - name: Tag and push extra tags
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
-        run: |
-          set -euo pipefail
-          # Reuse the trusted main tag pushed in the previous step.
-          LOCAL_IMAGE="${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
-
-          for tag in ${{ env.SAFE_EXTRA_TAGS }}; do
-            echo "Pushing extra tag: ${tag}"
-            podman tag "$LOCAL_IMAGE" \
-              ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
-            podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
+          for TAG in ${MAIN_TAG} ${EXTRA_TAGS}; do
+            REF="${IMAGE_REF}:${TAG}"
+            echo "Creating multi-arch manifest list for ${REF}"
+            podman manifest rm "${REF}" >/dev/null 2>&1 || true
+            podman manifest create "${REF}"
+            podman manifest add "${REF}" "${AMD64_LOCAL}"
+            podman manifest add "${REF}" "${ARM64_LOCAL}"
+            podman manifest push --all "${REF}"
           done
 
       - name: Set expiration on PR images
@@ -287,7 +327,7 @@ jobs:
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `PR images are available (for 1 week):\n<ol>\n${tagList}\n</ol>`
+              body: `PR images are available (for 1 week) — multi-arch (\`linux/amd64\`, \`linux/arm64\`):\n<ol>\n${tagList}\n</ol>`
             })
 
       - name: Summary
@@ -303,12 +343,13 @@ jobs:
           echo "### Push Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ env.SAFE_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: Pushed and expiration set" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Multi-arch manifest list pushed and expiration set" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
 
       - name: Summary (skipped - no artifact)
         if: steps.check-artifact.outputs.exists != 'true'
         run: |
           echo "### Push Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No \`pr-image\` artifact was produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
+          echo "No \`pr-image-amd64\` / \`pr-image-arm64\` artifacts were produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
           echo "This is expected when the PR changes don't affect the container image (e.g., docs-only changes)." >> $GITHUB_STEP_SUMMARY
