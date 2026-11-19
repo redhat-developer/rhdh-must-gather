@@ -57,7 +57,7 @@ jobs:
             .containerignore
             rpms.in.yaml
             rpms.lock.yaml
-            scripts/local-hermeto-build.sh
+            hack/local-hermeto-build.sh
             hack/deploy-k8s.sh
             LICENSE
             go.mod
