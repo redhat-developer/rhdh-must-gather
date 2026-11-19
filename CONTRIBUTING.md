@@ -53,7 +53,7 @@ make hermetic-build REGISTRY=localhost IMAGE_NAME=rhdh-must-gather IMAGE_TAG=her
 # Optional: make hermetic-build VERSION=2.1.0-custom
 
 # Or use the script directly
-./scripts/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test
+./hack/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test
 podman run --rm localhost/rhdh-must-gather:hermetic-test --help
 ```
 

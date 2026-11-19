@@ -113,7 +113,7 @@ image-build: ## Build the must-gather container image
 
 .PHONY: hermetic-build
 hermetic-build: ## Build must-gather image hermetically using Hermeto (matches Konflux/CI)
-	HERMETO_IMAGE="$(HERMETO_IMAGE)" scripts/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
+	HERMETO_IMAGE="$(HERMETO_IMAGE)" hack/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
 
 .PHONY: image-push
 image-push: image-build ## Build and push the image to registry
