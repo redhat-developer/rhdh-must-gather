@@ -382,11 +382,62 @@ jobs:
               ? 'multi-arch (`linux/amd64`, `linux/arm64`)'
               : '`linux/amd64`';
 
+            const shaTag = extraTags.length > 0 ? extraTags[0] : mainTag;
+            const fullImage = `${baseUrl}:${shaTag}`;
+            const headSha = context.payload.workflow_run.head_sha;
+            const headRepo = context.payload.workflow_run.head_repository.full_name;
+            const scriptUrl = `https://raw.githubusercontent.com/${headRepo}/${headSha}/hack/deploy-k8s.sh`;
+
+            const releaseName = 'my-rhdh-must-gather';
+            const podSelector = `app.kubernetes.io/instance=${releaseName},app.kubernetes.io/component=gather`;
+
+            const usage = [
+              ``,
+              `<details>`,
+              `<summary>Usage</summary>`,
+              ``,
+              `#### OpenShift`,
+              `\`\`\`bash`,
+              `oc adm must-gather --image=${fullImage} [-- /usr/bin/gather --with-heap-dumps]`,
+              `\`\`\``,
+              ``,
+              `#### Kubernetes`,
+              `Using the helper script (no clone needed):`,
+              `\`\`\`bash`,
+              `curl -sSL ${scriptUrl} | bash -s -- --image ${fullImage} [--opts "--with-heap-dumps"]`,
+              `\`\`\``,
+              ``,
+              `Or manually with Helm + kubectl:`,
+              `\`\`\`bash`,
+              `# 1. Install`,
+              `helm install ${releaseName} redhat-developer-hub-must-gather \\`,
+              `  --repo https://redhat-developer.github.io/rhdh-chart \\`,
+              `  --set image.tag=${shaTag} \\`,
+              `  [--set gather.heapDump.enabled=true]`,
+              ``,
+              `# 2. Wait for the gather to complete`,
+              `kubectl wait --for=condition=ready pod \\`,
+              `  -l ${podSelector} \\`,
+              `  --timeout=3600s`,
+              ``,
+              `# 3. Download the collected data`,
+              `kubectl exec deploy/${releaseName} -c data-holder -- \\`,
+              `  tar czf - -C /must-gather . > rhdh-must-gather-output.tar.gz`,
+              ``,
+              `# 4. Clean up`,
+              `helm uninstall ${releaseName}`,
+              `\`\`\``,
+              ``,
+              `See [Quick start](https://github.com/${headRepo}/blob/${headSha}/README.md#quick-start) for more details.`,
+              ``,
+              `</details>`,
+            ].join('\n');
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `PR images are available (for 1 week) — ${archInfo}:\n<ol>\n${tagList}\n</ol>`
+              body: `PR images are available (for 1 week) — ${archInfo}:\n<ol>\n${tagList}\n</ol>\n${usage}`
             })
 
       - name: Summary

@@ -50,7 +50,6 @@ jobs:
         with:
           files: |
             .github/workflows/pr-build.yaml
-            .github/workflows/pr-push.yaml
             .github/actions/docker-build/**
             Makefile
             Containerfile
