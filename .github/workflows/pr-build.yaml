@@ -58,6 +58,7 @@ jobs:
             rpms.in.yaml
             rpms.lock.yaml
             scripts/local-hermeto-build.sh
+            hack/deploy-k8s.sh
             LICENSE
             go.mod
             go.sum
