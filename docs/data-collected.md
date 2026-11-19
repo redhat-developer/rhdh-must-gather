@@ -155,4 +155,4 @@ RHDH can be deployed using the Orchestrator flavor, which includes additional in
   - Success rate depends on application instrumentation
 
 ### Cluster Information (optional)
-- **Cluster-wide diagnostic dump** using `oc cluster-info dump` (enabled with `--cluster-info` flag)
+- **Cluster-wide diagnostic dump** using `oc cluster-info dump` (enabled with `--with-cluster-info` flag)

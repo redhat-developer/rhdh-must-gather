@@ -6,19 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 	"github.com/redhat-developer/rhdh-must-gather/internal/kube"
+	"github.com/redhat-developer/rhdh-must-gather/internal/log"
 )
-
-var mandatoryScripts = []string{
-	"platform",
-	"helm",
-	"operator",
-	"orchestrator",
-	"route",
-	"ingress",
-	"namespace-inspect",
-	"network-policies",
-}
 
 type gatherOptions struct {
 	namespaces        string
@@ -26,7 +17,6 @@ type gatherOptions struct {
 	withHeapDumps     bool
 	heapDumpMethod    string
 	heapDumpInstances string
-	clusterInfo       bool
 	since             string
 	sinceTime         string
 	clientFactory     func() (*kube.Client, error)
@@ -49,6 +39,7 @@ from both Helm-based and Operator-managed RHDH instances.`,
 			return runGather(cmd, opts)
 		},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			warnDeprecatedCollectorFlags(cmd)
 			method := opts.heapDumpMethod
 			if method != "inspector" && method != "sigusr2" {
 				return fmt.Errorf("--heap-dump-method must be 'inspector' or 'sigusr2', got %q", method)
@@ -85,15 +76,22 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	flags.BoolVar(&opts.withHeapDumps, "with-heap-dumps", false, "Collect heap dumps from running backstage-backend processes")
 	flags.StringVar(&opts.heapDumpMethod, "heap-dump-method", "inspector", "Heap dump collection method: inspector or sigusr2 (sigusr2 is deprecated and will be removed in a future release)")
 	flags.StringVar(&opts.heapDumpInstances, "heap-dump-instances", "", "Comma-separated list of instance names to collect heap dumps from")
-	flags.BoolVar(&opts.clusterInfo, "cluster-info", false, "Collect cluster-wide diagnostic information")
 	flags.StringVar(&opts.since, "since", "", "Only collect logs newer than a relative duration (e.g. 5s, 2m, 3h)")
 	flags.StringVar(&opts.sinceTime, "since-time", "", "Only collect logs after a specific date (RFC3339, e.g. 2006-01-02T15:04:05Z)")
 
-	for _, script := range mandatoryScripts {
-		if script == "network-policies" {
-			continue
+	for _, r := range collector.All() {
+		switch r.RunMode {
+		case collector.Default:
+			flags.Bool("without-"+r.Name, false, flagDesc(r, "Skip "+r.Name+" data collection"))
+		case collector.OptIn:
+			flags.Bool("with-"+r.Name, false, flagDesc(r, "Include "+r.Name+" data collection"))
+			// Aliases are only honoured for OptIn collectors, so only register
+			// them there; a flag nobody reads is worse than no flag.
+			for _, alias := range r.FlagAliases {
+				flags.Bool(alias, false, "Deprecated: use --with-"+r.Name+" instead")
+				_ = flags.MarkHidden(alias) // cannot fail: registered on the line above
+			}
 		}
-		flags.Bool("without-"+script, false, "Skip "+script+" data collection")
 	}
 
 	cmd.SetVersionTemplate("rhdh-must-gather {{.Version}}\n")
@@ -105,22 +103,59 @@ from both Helm-based and Operator-managed RHDH instances.`,
 	return cmd
 }
 
-func buildScriptList(cmd *cobra.Command, opts *gatherOptions) []string {
-	scripts := make([]string, 0, len(mandatoryScripts)+1)
-	for _, s := range mandatoryScripts {
-		if s == "network-policies" {
-			scripts = append(scripts, s)
-			continue
+func buildScriptList(cmd *cobra.Command) []string {
+	regs := collector.InRunOrder()
+	scripts := make([]string, 0, len(regs))
+	for _, r := range regs {
+		if collectorEnabled(cmd, r) {
+			scripts = append(scripts, r.Name)
 		}
-		excluded, _ := cmd.Flags().GetBool("without-" + s)
-		if !excluded {
-			scripts = append(scripts, s)
-		}
-	}
-	if opts.clusterInfo {
-		scripts = append(scripts, "cluster-info")
 	}
 	return scripts
+}
+
+// collectorEnabled reports whether r should run for the given command line.
+func collectorEnabled(cmd *cobra.Command, r collector.Registration) bool {
+	switch r.RunMode {
+	case collector.AlwaysOn:
+		return true
+	case collector.Default:
+		excluded, _ := cmd.Flags().GetBool("without-" + r.Name)
+		return !excluded
+	case collector.OptIn:
+		included, _ := cmd.Flags().GetBool("with-" + r.Name)
+		for _, alias := range r.FlagAliases {
+			if v, _ := cmd.Flags().GetBool(alias); v {
+				included = true
+			}
+		}
+		return included
+	}
+	return false
+}
+
+// flagDesc returns the help text for a collector's flag.
+func flagDesc(r collector.Registration, fallback string) string {
+	if r.FlagDesc != "" {
+		return r.FlagDesc
+	}
+	return fallback
+}
+
+// warnDeprecatedCollectorFlags reports use of deprecated collector flag aliases
+// (e.g. --cluster-info). It is called once per invocation so the warning is
+// printed even when the replacement flag was passed as well.
+//
+// Aliases only exist for OptIn collectors — TestRegistryIntegrity rejects any
+// other combination — so the replacement flag is always --with-<name>.
+func warnDeprecatedCollectorFlags(cmd *cobra.Command) {
+	for _, r := range collector.All() {
+		for _, alias := range r.FlagAliases {
+			if v, _ := cmd.Flags().GetBool(alias); v {
+				log.Warn("--%s is deprecated, use --with-%s instead", alias, r.Name)
+			}
+		}
+	}
 }
 
 func Execute() error {

@@ -132,7 +132,7 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		HeapDumpInstances: resolveHeapDumpInstances(opts),
 	}
 
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 	log.Info("running the following collectors: %s", strings.Join(scripts, " "))
 
 	if opts.withSecrets {
@@ -160,11 +160,9 @@ func runGather(cmd *cobra.Command, opts *gatherOptions) (err error) {
 		if interrupted.Load() {
 			break
 		}
-		c, ok := collector.Registry[name]
-		if !ok {
-			log.Warn("Unknown collector %q, skipping", name)
-			continue
-		}
+		// buildScriptList only emits names taken from the collector registry, so
+		// the lookup cannot miss; TestRegistryIntegrity keeps that invariant.
+		c, _ := collector.Get(name)
 		log.Info("running %s", c.Name())
 		if err := c.Run(ctx, collectorCfg); err != nil {
 			log.Warn("Failed to run %s: %v, continuing with next collector...", c.Name(), err)
