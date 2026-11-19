@@ -30,6 +30,11 @@ make deploy-k8s                                     # Test on standard Kubernete
 make deploy-k8s OPTS="--with-secrets --namespaces ns1,ns2"
 ```
 
+### RPM Lockfile
+```bash
+make regen-rpm-lockfile     # Regenerate rpms.lock.yaml (requires python3, python3-dnf, skopeo, rpm)
+```
+
 ### Cleanup
 ```bash
 make clean                  # Remove images, tools, and test output
