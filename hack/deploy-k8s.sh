@@ -46,41 +46,22 @@ show_help() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --image)
-            IMAGE="$2"
-            shift 2
-            ;;
-        --namespace)
-            NAMESPACE="$2"
-            shift 2
-            ;;
-        --opts)
-            OPTS_STRING="$2"
-            shift 2
-            ;;
-        --helm-set)
-            HELM_SET_STRING="$2"
-            shift 2
-            ;;
-        --helm-set-string)
-            HELM_SET_STR_STRING="$2"
-            shift 2
-            ;;
-        --output)
-            OUTPUT_FILE="$2"
-            shift 2
-            ;;
-        --timeout)
-            HELM_TIMEOUT="$2"
-            shift 2
-            ;;
-        --no-compress)
-            COMPRESS=false
-            shift
-            ;;
-        --help|-h)
-            show_help
-            ;;
+        --image=*) IMAGE="${1#*=}"; shift ;;
+        --image) IMAGE="$2"; shift 2 ;;
+        --namespace=*) NAMESPACE="${1#*=}"; shift ;;
+        --namespace) NAMESPACE="$2"; shift 2 ;;
+        --opts=*) OPTS_STRING="${1#*=}"; shift ;;
+        --opts) OPTS_STRING="$2"; shift 2 ;;
+        --helm-set=*) HELM_SET_STRING="${1#*=}"; shift ;;
+        --helm-set) HELM_SET_STRING="$2"; shift 2 ;;
+        --helm-set-string=*) HELM_SET_STR_STRING="${1#*=}"; shift ;;
+        --helm-set-string) HELM_SET_STR_STRING="$2"; shift 2 ;;
+        --output=*) OUTPUT_FILE="${1#*=}"; shift ;;
+        --output) OUTPUT_FILE="$2"; shift 2 ;;
+        --timeout=*) HELM_TIMEOUT="${1#*=}"; shift ;;
+        --timeout) HELM_TIMEOUT="$2"; shift 2 ;;
+        --no-compress) COMPRESS=false; shift ;;
+        --help|-h) show_help ;;
         *)
             echo "Error: Unknown option: $1"
             echo "Use --help for usage information."

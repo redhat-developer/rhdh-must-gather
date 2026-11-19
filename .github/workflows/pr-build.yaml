@@ -50,7 +50,6 @@ jobs:
         with:
           files: |
             .github/workflows/pr-build.yaml
-            .github/workflows/pr-push.yaml
             .github/actions/docker-build/**
             Makefile
             Containerfile
@@ -59,6 +58,7 @@ jobs:
             rpms.in.yaml
             rpms.lock.yaml
             scripts/local-hermeto-build.sh
+            hack/deploy-k8s.sh
             LICENSE
             go.mod
             go.sum
