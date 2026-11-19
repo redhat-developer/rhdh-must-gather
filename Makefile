@@ -18,6 +18,7 @@ HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
 BUILD_ARGS ?=
 LABELS ?=
+RPM_LOCKFILE_CONTAINERFILE_PATH ?= .rhdh/docker/Containerfile
 TOOLS_DIR ?= ./bin
 BASE_COLLECTION_PATH ?= ./out
 
@@ -34,6 +35,9 @@ TESTS_DIR := ./tests
 YQ_VERSION := 3.4.2
 YQ_VENV := $(TOOLS_DIR)/yq-venv
 YQ_BIN := $(YQ_VENV)/bin/yq
+RPM_LOCKFILE_PROTOTYPE ?= $(TOOLS_DIR)/rpm-lockfile-prototype
+# renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
+RPM_LOCKFILE_PROTOTYPE_VERSION ?= v0.30.1
 
 WEBSOCAT_VERSION := 1.14.1
 WEBSOCAT_ARCHIVE_DIR := $(TOOLS_DIR)/websocat-$(WEBSOCAT_VERSION)
@@ -53,6 +57,10 @@ default: run-local
 .PHONY: local-output
 local-output:
 	@mkdir -p ./out
+
+.PHONY: regen-rpm-lockfile
+regen-rpm-lockfile: $(RPM_LOCKFILE_PROTOTYPE) ## Regenerate rpms.lock.yaml from rpms.in.yaml
+	$(RPM_LOCKFILE_PROTOTYPE) -f $(RPM_LOCKFILE_CONTAINERFILE_PATH) rpms.in.yaml
 
 .PHONY: local-setup
 local-setup: $(YQ_BIN) $(WEBSOCAT_BIN_DL) ## Download and setup required local tools (yq, websocat)
@@ -237,13 +245,35 @@ clean-out: ## Remove the local output directory
 	@echo "Local output directory cleaned"
 
 .PHONY: clean
-clean: clean-out ## Remove built images and test output
+clean: clean-out ## Remove built images, tools, and test output
 	@echo "Cleaning up..."
 	-podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
 	-rm -rf "$(TOOLS_DIR)"
 	-rm -rf "$(TEST_RESULTS_DIR)"
 	@echo "Cleanup complete"
+
+.PHONY: addrpmlockfileprototype
+addrpmlockfileprototype: $(RPM_LOCKFILE_PROTOTYPE) ## Download rpm-lockfile-prototype locally if necessary.
+$(RPM_LOCKFILE_PROTOTYPE): $(TOOLS_DIR)
+	$(call pip-install-tool,$(RPM_LOCKFILE_PROTOTYPE),konflux-ci/rpm-lockfile-prototype,$(RPM_LOCKFILE_PROTOTYPE_VERSION))
+
+# pip-install-tool will install a Python package from a GitHub release into a local venv, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - GitHub org/repo
+# $3 - version tag
+define pip-install-tool
+@venv_dir="$(1)-venv-$(3)"; \
+[ -d "$${venv_dir}" ] || { \
+set -e; \
+echo "Downloading $(2)@$(3)" ;\
+rm -rf $(1)-venv-* ;\
+python3 -m venv "$${venv_dir}" ;\
+"$${venv_dir}/bin/pip" install --quiet "https://github.com/$(2)/archive/refs/tags/$(3).zip" ;\
+sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' "$${venv_dir}/pyvenv.cfg" ;\
+} ;\
+ln -sf "$${venv_dir}/bin/$(notdir $(1))" "$(1)"
+endef
 
 ##@ General
 
@@ -293,3 +323,7 @@ help: ## Display this help.
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
 # @echo "  make run-container OPTS=\"--with-secrets --with-heap-dumps\""
 	@echo "  make deploy-openshift OPTS=\"--with-heap-dumps --namespaces my-ns\""
+	@echo "  make regen-rpm-lockfile                             # Regenerate rpms.lock.yaml"
+	@echo ""
+	@echo "Prerequisites for regen-rpm-lockfile:"
+	@echo "  System packages: python3, python3-pip, python3-dnf, skopeo, rpm"
