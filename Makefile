@@ -272,7 +272,7 @@ python3 -m venv "$${venv_dir}" ;\
 "$${venv_dir}/bin/pip" install --quiet "https://github.com/$(2)/archive/refs/tags/$(3).zip" ;\
 sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' "$${venv_dir}/pyvenv.cfg" ;\
 } ;\
-ln -sf "$${venv_dir}/bin/$(notdir $(1))" "$(1)"
+ln -sf "$$(basename $${venv_dir})/bin/$(notdir $(1))" "$(1)"
 endef
 
 ##@ General
