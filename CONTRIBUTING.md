@@ -30,6 +30,20 @@ make deploy-k8s
 make clean
 ```
 
+#### NetworkPolicy enforcement
+
+The E2E tests run on Kind clusters where NetworkPolicies are enforced. KinD's
+default CNI (kindnet) ignores NetworkPolicies, so the cluster is created with
+[`hack/kind-config.yaml`](hack/kind-config.yaml) (default CNI disabled) and Calico
+is installed with [`hack/install-calico.sh`](hack/install-calico.sh). The E2E
+workflows do this automatically; to reproduce it locally:
+
+```bash
+kind create cluster --config hack/kind-config.yaml --wait 0
+./hack/install-calico.sh
+make test-e2e
+```
+
 #### Regenerating the RPM lockfile
 
 When you change `rpms.in.yaml` or the downstream Containerfile (`.rhdh/docker/Containerfile`), regenerate the lockfile:

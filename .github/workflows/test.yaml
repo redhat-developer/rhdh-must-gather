@@ -117,7 +117,13 @@ jobs:
         uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: rhdh-must-gather-e2e
-          wait: 120s
+          config: hack/kind-config.yaml
+          # Nodes stay NotReady until a CNI is installed, so don't wait here.
+          wait: "0"
+
+      - name: Install Calico CNI (NetworkPolicy enforcement)
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: ./hack/install-calico.sh
 
       - name: Run E2E tests (local mode)
         if: steps.changed-files.outputs.any_changed == 'true'
