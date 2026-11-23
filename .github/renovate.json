@@ -174,14 +174,6 @@
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=npm\\n\\s*npm install\\s+--no-save\\s+(?<depName>[^@\\s]+)@(?<currentValue>[\\d.]+)"
-      ],
-      "datasourceTemplate": "npm"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
-      "matchStrings": [
         "#\\s*renovate:\\s*datasource=github-releases\\s+depName=(?<depName>\\S+)\\n\\s+RPM_LOCKFILE_PROTOTYPE_VERSION:\\s*(?<currentValue>v\\S+)"
       ],
       "datasourceTemplate": "github-releases"
