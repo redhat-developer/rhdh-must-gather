@@ -2,7 +2,7 @@
 #
 # Stage 1: Build Go gather binary
 # https://registry.access.redhat.com/ubi10/go-toolset
-FROM registry.access.redhat.com/ubi10/go-toolset:10.3-1795040023@sha256:d4437f69e2ddee6e564a06e7f6a6db223b0bfe03bd54c500a708b2dcdef2ffa2 AS go-builder
+FROM registry.access.redhat.com/ubi10/go-toolset:10.3-1795335720@sha256:1b1b6d0a428218c617c43629240c42954beff44c48d47fe2ed25f1dfdc9dfa54 AS go-builder
 # Build as the go-toolset default user (non-root). Hermeto prefetch must chmod the
 # /cachi2 cache (see local-hermeto-build.sh and CI) so this user can use gomod offline.
 COPY go.mod go.sum /opt/app-root/src/
