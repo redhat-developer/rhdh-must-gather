@@ -4,6 +4,12 @@ go 1.26.0
 
 toolchain go1.26.11
 
+// Tracks the go directive, so that release branches inherit this pin at branch
+// cut, where it preserves their GODEBUG-gated behaviour if the go directive is
+// later raised for a security fix. Update it together with the go directive, on
+// the main branch only.
+godebug default=go1.26
+
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/openshift/must-gather-clean v0.0.5
