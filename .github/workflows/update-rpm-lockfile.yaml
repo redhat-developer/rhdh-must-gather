@@ -11,17 +11,15 @@ on:
       - 'release-[0-9]+.[0-9]+'
     paths:
       - 'rpms.in.yaml'
+      - 'rpms.lock.yaml'
       - '.rhdh/docker/Containerfile'
+      - 'Makefile'
       - '.github/workflows/update-rpm-lockfile.yaml'
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
       - main
       - 'release-[0-9]+.[0-9]+'
-    paths:
-      - 'rpms.in.yaml'
-      - '.rhdh/docker/Containerfile'
-      - '.github/workflows/update-rpm-lockfile.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -29,12 +27,6 @@ concurrency:
 
 permissions:
   contents: write
-
-env:
-  CONTAINERFILE_PATH: .rhdh/docker/Containerfile
-  # To revert to main (e.g. broken release): set to 'main', change refs/tags/ to refs/heads/ in the install step, and remove the renovate comment
-  # renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
-  RPM_LOCKFILE_PROTOTYPE_VERSION: v0.30.1
 
 jobs:
   update-lockfile:
@@ -48,6 +40,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Get changed files
+        if: github.event_name == 'pull_request'
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: |
+            rpms.in.yaml
+            rpms.lock.yaml
+            .rhdh/docker/Containerfile
+            Makefile
+            .github/workflows/update-rpm-lockfile.yaml
+
       - name: Require RHDH_BOT_TOKEN
         if: github.event_name != 'pull_request'
         env:
@@ -58,40 +62,26 @@ jobs:
             exit 1
           fi
 
-      - name: Check if hermetic Containerfile exists
-        run: |
-          if [ ! -f "${{ env.CONTAINERFILE_PATH }}" ]; then
-            echo "Error: ${{ env.CONTAINERFILE_PATH }} not found!"
-            exit 1
-          fi
-
       - name: Configure Git
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
           git config --global user.name "rhdh-bot"
           git config --global user.email "rhdh-bot@redhat.com"
 
-      - name: Install rpm-lockfile-prototype
+      - name: Install system dependencies
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         run: |
-          if [[ ! -x "${HOME}/.local/bin/rpm-lockfile-prototype" ]]; then
-            echo "Installing rpm-lockfile-prototype ..."
-            sudo apt-get update
-            sudo apt-get install -y python3 python3-pip python3-dev build-essential
-            sudo apt-get install -y podman skopeo rpm
-            sudo apt-get install -y dnf python3-dnf
-            mkdir -p "${HOME}/.local/bin/"
-            python3 -m pip install --user "https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/${RPM_LOCKFILE_PROTOTYPE_VERSION}.zip"
-            export PATH=${PATH%":${HOME}/.local/bin"}:${HOME}/.local/bin
-            echo "${HOME}/.local/bin" >> $GITHUB_PATH
-          else
-            echo "rpm-lockfile-prototype already installed"
-          fi
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip python3-venv python3-dev build-essential
+          sudo apt-get install -y podman skopeo rpm
+          sudo apt-get install -y dnf python3-dnf
 
-      - name: Run rpm-lockfile-prototype
-        run: |
-          echo "Running '${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml' in $(pwd)"
-          ${HOME}/.local/bin/rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml
+      - name: Regenerate RPM lockfile
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
+        run: make regen-rpm-lockfile
 
       - name: Check for lockfile changes
+        if: github.event_name != 'pull_request' || steps.changed-files.outputs.any_changed == 'true'
         id: check-lockfile-changes
         run: |
           if git diff --quiet rpms.lock.yaml; then
@@ -148,8 +138,7 @@ jobs:
           echo "A .patch file is available as a build artifact (rpms-lockfile-update)."
           echo "Download and apply it with 'git apply rpms-lockfile-update.patch', or regenerate locally:"
           echo ""
-          echo "  pip install https://github.com/konflux-ci/rpm-lockfile-prototype/archive/refs/tags/${RPM_LOCKFILE_PROTOTYPE_VERSION}.zip"
-          echo "  rpm-lockfile-prototype -f ${{ env.CONTAINERFILE_PATH }} rpms.in.yaml"
+          echo "  make regen-rpm-lockfile"
           echo "  git add rpms.lock.yaml"
           echo "  git commit -m 'chore: update rpms.lock.yaml'"
           echo "  git push"
@@ -199,7 +188,7 @@ jobs:
             --body "$(cat <<EOF
           ## Description
 
-          This PR updates the \`rpms.lock.yaml\` file with the latest package versions based on current \`rpms.in.yaml\` configuration using \`${{ env.CONTAINERFILE_PATH }}\` as the base container context.
+          This PR updates the \`rpms.lock.yaml\` file with the latest package versions based on current \`rpms.in.yaml\` configuration.
 
           Auto-generated by the [Update RPM Lockfile workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
           EOF

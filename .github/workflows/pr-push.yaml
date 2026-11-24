@@ -1,3 +1,5 @@
+# TODO(rm3l): once 2.2 is the minimum supported version, remove single-arch
+# fallback (all supported branches will produce multi-arch artifacts).
 name: PR Push
 
 on:
@@ -62,7 +64,14 @@ jobs:
             console.log(`Found ${pulls.length} PR(s) via listPullRequestsAssociatedWithCommit`);
             pulls.forEach(p => console.log(`  - PR #${p.number}: state=${p.state}`));
 
-            let pr = pulls.find(p => p.state === "open");
+            // Bind the PR to this run's head branch and repository, so a
+            // different PR that happens to share the head SHA (e.g. a fork
+            // pushing the same commit) cannot capture another PR's pr-<N> tag.
+            let pr = pulls.find(p =>
+              p.state === "open" &&
+              p.head.ref === branch &&
+              p.head.repo?.full_name === context.payload.workflow_run.head_repository?.full_name
+            );
 
             // Method 3: If no results and this is a fork, try searching by branch
             if (!pr && isFork) {
@@ -85,7 +94,7 @@ jobs:
             console.log(`Using PR #${pr.number}`);
             core.setOutput("number", pr.number);
 
-      - name: Check if build artifact exists
+      - name: Check if build artifacts exist
         id: check-artifact
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
@@ -96,12 +105,44 @@ jobs:
               repo: context.repo.repo,
               run_id: runId,
             });
-            const found = artifacts.some(a => a.name === 'pr-image');
-            console.log(`Artifact 'pr-image' for run ${runId}: ${found ? 'found' : 'not found'}`);
-            core.setOutput('exists', found);
+            const names = artifacts.map(a => a.name);
+            const hasAmd64 = names.includes('pr-image-amd64');
+            const hasArm64 = names.includes('pr-image-arm64');
+            const hasLegacy = names.includes('pr-image');
 
-      - name: Download artifact from build workflow
-        if: steps.check-artifact.outputs.exists == 'true'
+            if (hasAmd64 && hasArm64) {
+              console.log(`Multi-arch artifacts (pr-image-amd64, pr-image-arm64) for run ${runId}: found`);
+              core.setOutput('exists', true);
+              core.setOutput('mode', 'multi-arch');
+            } else if (hasAmd64 !== hasArm64) {
+              core.setFailed(`Incomplete multi-arch artifacts for run ${runId}; missing: ${hasAmd64 ? 'pr-image-arm64' : 'pr-image-amd64'}`);
+            } else if (hasLegacy) {
+              console.log(`Legacy single-arch artifact (pr-image) for run ${runId}: found`);
+              core.setOutput('exists', true);
+              core.setOutput('mode', 'single-arch');
+            } else {
+              console.log(`No PR image artifacts for run ${runId} (docs-only or skipped build)`);
+              core.setOutput('exists', false);
+            }
+
+      - name: Download amd64 artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pr-image-amd64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download arm64 artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pr-image-arm64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download single-arch artifact from build workflow
+        if: steps.check-artifact.outputs.exists == 'true' && steps.check-artifact.outputs.mode == 'single-arch'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: pr-image
@@ -178,10 +219,47 @@ jobs:
 
           echo "EXPIRATION_TIMESTAMP=$(date -u -d "+7 days" +"%s")" >> "$GITHUB_ENV"
 
-      - name: Load image from tarball
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+      - name: Load per-arch images from tarballs (multi-arch)
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
+        env:
+          NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ env.SAFE_IMAGE_TAG }}
         run: |
+          set -euo pipefail
+          gunzip -c image-amd64.tar.gz | podman load
+          gunzip -c image-arm64.tar.gz | podman load
+
+          # Artifacts are saved with trusted arch-suffixed tags derived from the
+          # PR number (SAFE_IMAGE_TAG). Refuse unexpected local names.
+          for ARCH in amd64 arm64; do
+            LOCAL="${NAME}:${TAG}-${ARCH}"
+            if ! podman image exists "${LOCAL}"; then
+              echo "::error::Expected local image ${LOCAL} after load"
+              podman images
+              exit 1
+            fi
+            ACTUAL_ARCH=$(podman image inspect --format '{{.Architecture}}' "${LOCAL}")
+            if [[ "${ACTUAL_ARCH}" != "${ARCH}" ]]; then
+              echo "::error::Image ${LOCAL} reports architecture '${ACTUAL_ARCH}', expected '${ARCH}'"
+              exit 1
+            fi
+            echo "Loaded ${LOCAL} (${ACTUAL_ARCH})"
+          done
+
+      - name: Load image from tarball (single-arch)
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'single-arch'
+        env:
+          NAME: ${{ env.IMAGE_NAME }}
+          TAG: ${{ env.SAFE_IMAGE_TAG }}
+        run: |
+          set -euo pipefail
           gunzip -c image.tar.gz | podman load
+          if ! podman image exists "${NAME}:${TAG}"; then
+            echo "::error::Expected local image ${NAME}:${TAG} after load"
+            podman images
+            exit 1
+          fi
+          echo "Loaded ${NAME}:${TAG}"
 
       - name: Log into registry ${{ vars.REGISTRY }}
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
@@ -191,34 +269,49 @@ jobs:
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
-      - name: Tag and push main tag
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+      - name: Push multi-arch manifest lists
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'multi-arch'
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          MAIN_TAG: ${{ env.SAFE_IMAGE_TAG }}
+          EXTRA_TAGS: ${{ env.SAFE_EXTRA_TAGS }}
         run: |
           set -euo pipefail
-          # Resolve the loaded image locally; do not trust artifact tag names.
-          LOCAL_IMAGE=$(podman images --format '{{.Repository}}:{{.Tag}}' | head -n1)
-          if [[ -z "$LOCAL_IMAGE" || "$LOCAL_IMAGE" == "<none>:<none>" ]]; then
-            echo "::error::No image found after podman load"
-            exit 1
-          fi
-          echo "Loaded image: ${LOCAL_IMAGE}"
 
-          podman tag "$LOCAL_IMAGE" \
-            ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
-          podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}
+          IMAGE_REF="${REGISTRY}/${REGISTRY_ORG}/${IMAGE_NAME}"
+          AMD64_LOCAL="${IMAGE_NAME}:${MAIN_TAG}-amd64"
+          ARM64_LOCAL="${IMAGE_NAME}:${MAIN_TAG}-arm64"
 
-      - name: Tag and push extra tags
-        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && env.SAFE_EXTRA_TAGS != ''
+          for TAG in ${MAIN_TAG} ${EXTRA_TAGS}; do
+            REF="${IMAGE_REF}:${TAG}"
+            echo "Creating multi-arch manifest list for ${REF}"
+            podman manifest rm "${REF}" >/dev/null 2>&1 || true
+            podman manifest create "${REF}"
+            podman manifest add "${REF}" "${AMD64_LOCAL}"
+            podman manifest add "${REF}" "${ARM64_LOCAL}"
+            podman manifest push --all "${REF}"
+          done
+
+      - name: Push single-arch image
+        if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true' && steps.check-artifact.outputs.mode == 'single-arch'
+        env:
+          REGISTRY: ${{ vars.REGISTRY }}
+          REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          MAIN_TAG: ${{ env.SAFE_IMAGE_TAG }}
+          EXTRA_TAGS: ${{ env.SAFE_EXTRA_TAGS }}
         run: |
           set -euo pipefail
-          # Reuse the trusted main tag pushed in the previous step.
-          LOCAL_IMAGE="${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${{ env.SAFE_IMAGE_TAG }}"
 
-          for tag in ${{ env.SAFE_EXTRA_TAGS }}; do
-            echo "Pushing extra tag: ${tag}"
-            podman tag "$LOCAL_IMAGE" \
-              ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
-            podman push ${{ vars.REGISTRY }}/${{ vars.REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:${tag}
+          IMAGE_REF="${REGISTRY}/${REGISTRY_ORG}/${IMAGE_NAME}"
+
+          for TAG in ${MAIN_TAG} ${EXTRA_TAGS}; do
+            REF="${IMAGE_REF}:${TAG}"
+            echo "Pushing ${REF}"
+            podman tag "${IMAGE_NAME}:${MAIN_TAG}" "${REF}"
+            podman push "${REF}"
           done
 
       - name: Set expiration on PR images
@@ -269,6 +362,7 @@ jobs:
           REGISTRY: ${{ vars.REGISTRY }}
           REGISTRY_ORG: ${{ vars.REGISTRY_ORG }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          BUILD_MODE: ${{ steps.check-artifact.outputs.mode }}
         with:
           script: |
             // Safe: using process.env avoids code injection
@@ -278,37 +372,104 @@ jobs:
             const registry = process.env.REGISTRY;
             const registryOrg = process.env.REGISTRY_ORG;
             const imageName = process.env.IMAGE_NAME;
-            
+            const buildMode = process.env.BUILD_MODE;
+
             const baseUrl = `${registry}/${registryOrg}/${imageName}`;
             const allTags = [mainTag, ...extraTags];
             const tagList = allTags.map(tag => `<li><code>${baseUrl}:${tag}</code></li>`).join('\n');
-            
+
+            const archInfo = buildMode === 'multi-arch'
+              ? 'multi-arch (`linux/amd64`, `linux/arm64`)'
+              : '`linux/amd64`';
+
+            const shaTag = extraTags.length > 0 ? extraTags[0] : mainTag;
+            const fullImage = `${baseUrl}:${shaTag}`;
+            const headSha = context.payload.workflow_run.head_sha;
+            const headRepo = context.payload.workflow_run.head_repository.full_name;
+            const scriptUrl = `https://raw.githubusercontent.com/${headRepo}/${headSha}/hack/deploy-k8s.sh`;
+
+            const releaseName = 'my-rhdh-must-gather';
+            const podSelector = `app.kubernetes.io/instance=${releaseName},app.kubernetes.io/component=gather`;
+
+            const usage = [
+              ``,
+              `<details>`,
+              `<summary>Usage</summary>`,
+              ``,
+              `#### OpenShift`,
+              `\`\`\`bash`,
+              `oc adm must-gather --image=${fullImage} [-- /usr/bin/gather --with-heap-dumps]`,
+              `\`\`\``,
+              ``,
+              `#### Kubernetes`,
+              `Using the helper script (no clone needed):`,
+              `\`\`\`bash`,
+              `curl -sSL ${scriptUrl} | bash -s -- --image ${fullImage} [--opts "--with-heap-dumps"]`,
+              `\`\`\``,
+              ``,
+              `Or manually with Helm + kubectl:`,
+              `\`\`\`bash`,
+              `# 1. Install`,
+              `helm install ${releaseName} redhat-developer-hub-must-gather \\`,
+              `  --repo https://redhat-developer.github.io/rhdh-chart \\`,
+              `  --set image.tag=${shaTag} \\`,
+              `  [--set gather.heapDump.enabled=true]`,
+              ``,
+              `# 2. Wait for the gather to complete`,
+              `kubectl wait --for=condition=ready pod \\`,
+              `  -l ${podSelector} \\`,
+              `  --timeout=3600s`,
+              ``,
+              `# 3. Download the collected data`,
+              `kubectl exec deploy/${releaseName} -c data-holder -- \\`,
+              `  tar czf - -C /must-gather . > rhdh-must-gather-output.tar.gz`,
+              ``,
+              `# 4. Clean up`,
+              `helm uninstall ${releaseName}`,
+              `\`\`\``,
+              ``,
+              `See [Quick start](https://github.com/${headRepo}/blob/${headSha}/README.md#quick-start) for more details.`,
+              ``,
+              `</details>`,
+            ].join('\n');
+
             await github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `PR images are available (for 1 week):\n<ol>\n${tagList}\n</ol>`
+              body: `PR images are available (for 1 week) — ${archInfo}:\n<ol>\n${tagList}\n</ol>\n${usage}`
             })
 
       - name: Summary
         if: steps.check-artifact.outputs.exists == 'true' && steps.meta.outputs.skip != 'true'
+        env:
+          BUILD_MODE: ${{ steps.check-artifact.outputs.mode }}
         run: |
           ALL_TAGS="\`${{ env.SAFE_IMAGE_TAG }}\`"
-          
+
           # FIXED: Use env var to avoid syntax error if empty
           for tag in $SAFE_EXTRA_TAGS; do
             ALL_TAGS="${ALL_TAGS}, \`${tag}\`"
           done
-          
+
+          if [ "$BUILD_MODE" = "multi-arch" ]; then
+            PLATFORMS="linux/amd64, linux/arm64"
+            STATUS="Multi-arch manifest list pushed and expiration set"
+          else
+            PLATFORMS="linux/amd64"
+            STATUS="Single-arch image pushed and expiration set"
+          fi
+
           echo "### Push Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ env.SAFE_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **PR Number**: ${{ env.SAFE_PR_NUMBER }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: Pushed and expiration set" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: ${PLATFORMS}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${STATUS}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tags**: ${ALL_TAGS}" >> $GITHUB_STEP_SUMMARY
 
       - name: Summary (skipped - no artifact)
         if: steps.check-artifact.outputs.exists != 'true'
         run: |
           echo "### Push Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "No \`pr-image\` artifact was produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
+          echo "No PR image artifacts (\`pr-image-amd64\`/\`pr-image-arm64\` or \`pr-image\`) were produced by the PR Build workflow." >> $GITHUB_STEP_SUMMARY
           echo "This is expected when the PR changes don't affect the container image (e.g., docs-only changes)." >> $GITHUB_STEP_SUMMARY

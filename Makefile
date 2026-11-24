@@ -17,17 +17,21 @@ OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k
 HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
 # renovate: datasource=docker depName=quay.io/konflux-ci/hermeto
-HERMETO_IMAGE ?= quay.io/konflux-ci/hermeto:0.64.0
+HERMETO_IMAGE ?= quay.io/konflux-ci/hermeto:0.64.1
 BUILD_ARGS ?=
 LABELS ?=
+RPM_LOCKFILE_CONTAINERFILE_PATH ?= .rhdh/docker/Containerfile
 BASE_COLLECTION_PATH ?= ./out
 
 # Tool Binaries
 LOCALBIN ?= $(shell pwd)/bin
 GOSEC ?= $(LOCALBIN)/gosec
+RPM_LOCKFILE_PROTOTYPE ?= $(LOCALBIN)/rpm-lockfile-prototype
 
 # Tool Versions
 GOSEC_VERSION ?= v2.29.0
+# renovate: datasource=github-releases depName=konflux-ci/rpm-lockfile-prototype
+RPM_LOCKFILE_PROTOTYPE_VERSION ?= v0.30.1
 
 # Gosec options - default format is sarif so we can integrate with Github code scanning
 GOSEC_FMT ?= sarif  # for other options, see https://github.com/securego/gosec#output-formats
@@ -48,6 +52,10 @@ default: build
 .PHONY: local-output
 local-output:
 	@mkdir -p ./out
+
+.PHONY: regen-rpm-lockfile
+regen-rpm-lockfile: $(RPM_LOCKFILE_PROTOTYPE) ## Regenerate rpms.lock.yaml from rpms.in.yaml
+	$(RPM_LOCKFILE_PROTOTYPE) -f $(RPM_LOCKFILE_CONTAINERFILE_PATH) rpms.in.yaml
 
 .PHONY: run-local
 run-local: local-output ## Run the Go gather binary locally (requires cluster access)
@@ -113,7 +121,7 @@ image-build: ## Build the must-gather container image
 
 .PHONY: hermetic-build
 hermetic-build: ## Build must-gather image hermetically using Hermeto (matches Konflux/CI)
-	HERMETO_IMAGE="$(HERMETO_IMAGE)" scripts/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
+	HERMETO_IMAGE="$(HERMETO_IMAGE)" hack/local-hermeto-build.sh -d . -i $(FULL_IMAGE_NAME) --version "$(RHDH_MUST_GATHER_VERSION)"
 
 .PHONY: image-push
 image-push: image-build ## Build and push the image to registry
@@ -156,9 +164,10 @@ clean-out: ## Remove the local output directory
 	@echo "Local output directory cleaned"
 
 .PHONY: clean
-clean: clean-out ## Remove built images, binary, and test output
+clean: clean-out ## Remove built images, binary, tools, and test output
 	@echo "Cleaning up..."
 	-rm -f gather
+	-rm -rf "$(LOCALBIN)"
 	-podman rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
 	-podman rmi $(FULL_IMAGE_NAME) 2>/dev/null || true
 	-rm -rf "$(TEST_RESULTS_DIR)"
@@ -170,6 +179,11 @@ clean: clean-out ## Remove built images, binary, and test output
 addgosec: $(GOSEC) ## Download gosec locally if necessary.
 $(GOSEC): $(LOCALBIN)
 	$(call go-install-tool,$(GOSEC),github.com/securego/gosec/v2/cmd/gosec,$(GOSEC_VERSION))
+
+.PHONY: addrpmlockfileprototype
+addrpmlockfileprototype: $(RPM_LOCKFILE_PROTOTYPE) ## Download rpm-lockfile-prototype locally if necessary.
+$(RPM_LOCKFILE_PROTOTYPE): $(LOCALBIN)
+	$(call pip-install-tool,$(RPM_LOCKFILE_PROTOTYPE),konflux-ci/rpm-lockfile-prototype,$(RPM_LOCKFILE_PROTOTYPE_VERSION))
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -188,6 +202,23 @@ GOBIN=$(LOCALBIN) go install $${package} ;\
 mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
+endef
+
+# pip-install-tool will install a Python package from a GitHub release into a local venv, if it doesn't exist
+# $1 - target path with name of binary
+# $2 - GitHub org/repo
+# $3 - version tag
+define pip-install-tool
+@venv_dir="$(1)-venv-$(3)"; \
+[ -d "$${venv_dir}" ] || { \
+set -e; \
+echo "Downloading $(2)@$(3)" ;\
+rm -rf $(1)-venv-* ;\
+python3 -m venv "$${venv_dir}" ;\
+"$${venv_dir}/bin/pip" install --quiet "https://github.com/$(2)/archive/refs/tags/$(3).zip" ;\
+sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' "$${venv_dir}/pyvenv.cfg" ;\
+} ;\
+ln -sf "$$(basename $${venv_dir})/bin/$(notdir $(1))" "$(1)"
 endef
 
 ##@ General
@@ -222,3 +253,7 @@ help: ## Display this help.
 	@echo "  make deploy-k8s NAMESPACE=my-ns                    # Run deploy-k8s in a specific namespace"
 	@echo "  make run-local OPTS=\"--with-heap-dumps\""
 	@echo "  make deploy-openshift OPTS=\"--with-heap-dumps --namespaces my-ns\""
+	@echo "  make regen-rpm-lockfile                             # Regenerate rpms.lock.yaml"
+	@echo ""
+	@echo "Prerequisites for regen-rpm-lockfile:"
+	@echo "  System packages: python3, python3-pip, python3-dnf, skopeo, rpm"

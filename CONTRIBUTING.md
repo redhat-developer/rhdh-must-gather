@@ -30,6 +30,27 @@ make deploy-k8s
 make clean
 ```
 
+#### Regenerating the RPM lockfile
+
+When you change `rpms.in.yaml` or the downstream Containerfile (`.rhdh/docker/Containerfile`), regenerate the lockfile:
+
+```bash
+make regen-rpm-lockfile
+```
+
+This installs [`rpm-lockfile-prototype`](https://github.com/konflux-ci/rpm-lockfile-prototype) into the local `bin/` directory on first run. It requires the following system packages:
+
+- `python3` and `pip` (`python3-pip`)
+- `python3-dnf`
+- `skopeo`
+- `rpm`
+
+On Fedora/RHEL these are typically already installed. On Debian/Ubuntu, install them with:
+
+```bash
+sudo apt-get install python3 python3-pip python3-dnf podman skopeo rpm
+```
+
 ### Building the Image
 
 ```bash
@@ -53,7 +74,7 @@ make hermetic-build REGISTRY=localhost IMAGE_NAME=rhdh-must-gather IMAGE_TAG=her
 # Optional: make hermetic-build VERSION=2.1.0-custom
 
 # Or use the script directly
-./scripts/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test
+./hack/local-hermeto-build.sh -d . -i localhost/rhdh-must-gather:hermetic-test
 podman run --rm localhost/rhdh-must-gather:hermetic-test --help
 ```
 
