@@ -48,6 +48,15 @@
       ]
     },
     {
+      "description": "Group all Python dependencies (requirements*.txt, pyproject.toml, etc.) into their own PRs, so Python bumps are never mixed with Go, GitHub Actions or container image updates. Must stay after the 'all patch dependencies' rule to override its group.",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "groupName": "all python dependencies",
+      "groupSlug": "all-python",
+      "automerge": false
+    },
+    {
       "description": "Do NOT generate PRs to pin or apply digests to dockerfiles",
       "enabled": false,
       "matchDatasources": [
