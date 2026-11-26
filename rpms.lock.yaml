@@ -228,13 +228,13 @@ arches:
     name: rpm-plugin-syslog
     evr: 4.19.1.1-29.el10_3
     sourcerpm: rpm-4.19.1.1-29.el10_3.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/r/rsync-3.5.0-3.el10_2.aarch64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/r/rsync-3.5.0-4.el10_3.aarch64.rpm
     repoid: ubi-10-for-aarch64-baseos-rpms
-    size: 477268
-    checksum: sha256:40440ac2388f6b51d0e3dcfaf0d26813ea97d83c64d609fef29060045432adb0
+    size: 479347
+    checksum: sha256:614e0868a39efb8ef7de97c3df025e733f26a2b5fae8d68b0f9b5f6361ae4fa7
     name: rsync
-    evr: 3.5.0-3.el10_2
-    sourcerpm: rsync-3.5.0-3.el10_2.src.rpm
+    evr: 3.5.0-4.el10_3
+    sourcerpm: rsync-3.5.0-4.el10_3.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/os/Packages/s/shadow-utils-4.15.0-13.el10.aarch64.rpm
     repoid: ubi-10-for-aarch64-baseos-rpms
     size: 1417152
@@ -416,12 +416,12 @@ arches:
     checksum: sha256:2f3b33cceff785a825492ac0f8753aba1badf08a13cd8cd127c41ed815109464
     name: rpm
     evr: 4.19.1.1-29.el10_3
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/source/SRPMS/Packages/r/rsync-3.5.0-3.el10_2.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/source/SRPMS/Packages/r/rsync-3.5.0-4.el10_3.src.rpm
     repoid: ubi-10-for-aarch64-baseos-source-rpms
-    size: 1967336
-    checksum: sha256:4df6621312ce2620f5ab03dc202cf35a1731852e362cedea8cfa7eb343376ee9
+    size: 1983343
+    checksum: sha256:413dd74ee3bccf6fbc6198d1001ff4e9ab74d03be522f7fc30f4c3da2c06db4f
     name: rsync
-    evr: 3.5.0-3.el10_2
+    evr: 3.5.0-4.el10_3
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/aarch64/baseos/source/SRPMS/Packages/s/shadow-utils-4.15.0-13.el10.src.rpm
     repoid: ubi-10-for-aarch64-baseos-source-rpms
     size: 1930087
@@ -673,13 +673,13 @@ arches:
     name: rpm-plugin-syslog
     evr: 4.19.1.1-29.el10_3
     sourcerpm: rpm-4.19.1.1-29.el10_3.src.rpm
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/r/rsync-3.5.0-3.el10_2.x86_64.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/r/rsync-3.5.0-4.el10_3.x86_64.rpm
     repoid: ubi-10-for-x86_64-baseos-rpms
-    size: 485287
-    checksum: sha256:819e954c8b453406f638a446f0c074938d73d1a3b5d2e9d22b22ca6bfc46e2cb
+    size: 487806
+    checksum: sha256:645cede15f016cfe5c53fccb12509bba37f91a0f1da1d7a9d12764b56c948082
     name: rsync
-    evr: 3.5.0-3.el10_2
-    sourcerpm: rsync-3.5.0-3.el10_2.src.rpm
+    evr: 3.5.0-4.el10_3
+    sourcerpm: rsync-3.5.0-4.el10_3.src.rpm
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/os/Packages/s/shadow-utils-4.15.0-13.el10.x86_64.rpm
     repoid: ubi-10-for-x86_64-baseos-rpms
     size: 1413886
@@ -861,12 +861,12 @@ arches:
     checksum: sha256:2f3b33cceff785a825492ac0f8753aba1badf08a13cd8cd127c41ed815109464
     name: rpm
     evr: 4.19.1.1-29.el10_3
-  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/source/SRPMS/Packages/r/rsync-3.5.0-3.el10_2.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/source/SRPMS/Packages/r/rsync-3.5.0-4.el10_3.src.rpm
     repoid: ubi-10-for-x86_64-baseos-source-rpms
-    size: 1967336
-    checksum: sha256:4df6621312ce2620f5ab03dc202cf35a1731852e362cedea8cfa7eb343376ee9
+    size: 1983343
+    checksum: sha256:413dd74ee3bccf6fbc6198d1001ff4e9ab74d03be522f7fc30f4c3da2c06db4f
     name: rsync
-    evr: 3.5.0-3.el10_2
+    evr: 3.5.0-4.el10_3
   - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi10/10/x86_64/baseos/source/SRPMS/Packages/s/shadow-utils-4.15.0-13.el10.src.rpm
     repoid: ubi-10-for-x86_64-baseos-source-rpms
     size: 1930087

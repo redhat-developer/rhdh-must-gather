@@ -4,6 +4,12 @@ go 1.26.0
 
 toolchain go1.26.11
 
+// Tracks the go directive, so that release branches inherit this pin at branch
+// cut, where it preserves their GODEBUG-gated behaviour if the go directive is
+// later raised for a security fix. Update it together with the go directive, on
+// the main branch only.
+godebug default=go1.26
+
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/openshift/must-gather-clean v0.0.5
@@ -11,12 +17,12 @@ require (
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v3 v3.0.6
 	helm.sh/helm/v4 v4.3.2
-	k8s.io/api v0.37.2
-	k8s.io/apimachinery v0.37.2
-	k8s.io/cli-runtime v0.37.2
-	k8s.io/client-go v0.37.2
+	k8s.io/api v0.37.3
+	k8s.io/apimachinery v0.37.3
+	k8s.io/cli-runtime v0.37.3
+	k8s.io/client-go v0.37.3
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kubectl v0.37.2
+	k8s.io/kubectl v0.37.3
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -126,10 +132,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.37.2 // indirect
 	k8s.io/apiserver v0.37.2 // indirect
-	k8s.io/component-base v0.37.2 // indirect
-	k8s.io/component-helpers v0.37.2 // indirect
+	k8s.io/component-base v0.37.3 // indirect
+	k8s.io/component-helpers v0.37.3 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
-	k8s.io/streaming v0.37.2 // indirect
+	k8s.io/streaming v0.37.3 // indirect
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
 	oras.land/oras-go/v2 v2.6.2 // indirect
 	sigs.k8s.io/controller-runtime v0.25.2 // indirect

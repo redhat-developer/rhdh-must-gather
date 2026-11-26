@@ -48,6 +48,15 @@
       ]
     },
     {
+      "description": "Group all Python dependencies (requirements*.txt, pyproject.toml, etc.) into their own PRs, so Python bumps are never mixed with Go, GitHub Actions or container image updates. Must stay after the 'all patch dependencies' rule to override its group.",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "groupName": "all python dependencies",
+      "groupSlug": "all-python",
+      "automerge": false
+    },
+    {
       "description": "Do NOT generate PRs to pin or apply digests to dockerfiles",
       "enabled": false,
       "matchDatasources": [
@@ -59,6 +68,20 @@
         "digest"
       ],
       "automerge": false
+    },
+    {
+      "description": "Allow digest updates for the renovate-config-validator image",
+      "matchPackageNames": [
+        "ghcr.io/renovatebot/renovate"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "pinDigest"
+      ],
+      "enabled": true,
+      "digest": {
+        "enabled": true
+      }
     },
     {
       "description": "Group all Containerfile image updates. Complementary to Containerfile base image and RPM lock updates on main and release-* done by https://gitlab.cee.redhat.com/rhidp/rhdh/-/blob/main/build/ci/weekly-maintenance.sh using https://github.com/redhat-developer/rhdh-skills/tree/main/skills/ci/rhdh-base-images",
@@ -155,14 +178,6 @@
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
-      "matchStrings": [
-        "#\\s*renovate:\\s*datasource=npm\\n\\s*npm install\\s+--no-save\\s+(?<depName>[^@\\s]+)@(?<currentValue>[\\d.]+)"
-      ],
-      "datasourceTemplate": "npm"
     },
     {
       "customType": "regex",
