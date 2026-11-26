@@ -1,8 +1,8 @@
 module github.com/redhat-developer/rhdh-must-gather
 
-go 1.26.0
+go 1.27.0
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 // Tracks the go directive, so that release branches inherit this pin at branch
 // cut, where it preserves their GODEBUG-gated behaviour if the go directive is
