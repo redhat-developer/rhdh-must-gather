@@ -19,7 +19,7 @@ jobs:
     name: Renovate Config Validator
     # Avoids npx lifecycle scripts (Sonar S6505). tag@digest so Renovate can bump both.
     container:
-      image: ghcr.io/renovatebot/renovate:44.262.1@sha256:9f571539ab94f0798d9439110ecf38c1e540920520794d87e111fbb97c322d50 # 44.145.1
+      image: ghcr.io/renovatebot/renovate:44.263.5@sha256:9806d1b444f2b0b57d7c3b882d453b99c7494db07689c2e1abed8e6ae502b271 # 44.145.1
       # Match GitHub-hosted runner UID so actions/checkout can write to /__w/_temp
       # https://github.com/renovatebot/github-action/blob/main/.github/workflows/build.yml
       options: --user 1001:0 --group-add 1000 --group-add 12021 --group-add 127
