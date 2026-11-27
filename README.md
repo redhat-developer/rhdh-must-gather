@@ -140,7 +140,8 @@ Usage: ./must_gather [params...]
 
 
   > You can also choose to enable optional collectors:
-  --cluster-info                Collect cluster-wide diagnostic information
+  --with-cluster-info           Collect cluster-wide diagnostic information
+                                (`--cluster-info` is deprecated, but still accepted)
 
   > You can limit collection to specific namespaces:
   --namespaces ns1,ns2    Collect data only from specified comma-separated namespaces
@@ -234,9 +235,12 @@ Usage: ./must_gather [params...]
 
 | Flag | Description | Use Case |
 |------|-------------|----------|
-| `--cluster-info` | Collect cluster-wide diagnostic information | For comprehensive cluster analysis |
+| `--with-cluster-info` | Collect cluster-wide diagnostic information | For comprehensive cluster analysis |
 | `--with-secrets` | Include Kubernetes Secrets (sanitized) | For detailed troubleshooting requiring secret metadata |
 | `--with-heap-dumps` | Collect heap dumps from backstage-backend containers | For memory leak investigation and performance analysis |
+
+> `--cluster-info` is deprecated in favor of `--with-cluster-info`. It is still
+> accepted (hidden from `--help`) and logs a deprecation warning.
 
 **Examples:**
 - `--with-heap-dumps` - Collect heap dumps for all backstage-backend pods
@@ -257,7 +261,7 @@ Usage: ./must_gather [params...]
 ├── all-routes.txt                  # All OpenShift routes cluster-wide
 ├── all-ingresses.txt               # All Kubernetes ingresses cluster-wide
 ├── must-gather.log                 # Must-gather container logs (if running in pod)
-├── cluster-info/                   # Cluster-wide information (if --cluster-info used)
+├── cluster-info/                   # Cluster-wide information (if --with-cluster-info used)
 │   └── [cluster-info dump output]
 ├── network-policies/               # NetworkPolicy diagnostics (collected by default)
 │   ├── detected-namespaces.txt
@@ -569,7 +573,7 @@ Usage: ./must_gather [params...]
 
 </details>
 
-> **Note**: The tool automatically detects and collects data for both Helm and Operator-based RHDH deployments. For cluster-wide information, use the `--cluster-info` flag or combine with standard `oc adm must-gather`.
+> **Note**: The tool automatically detects and collects data for both Helm and Operator-based RHDH deployments. For cluster-wide information, use the `--with-cluster-info` flag or combine with standard `oc adm must-gather`.
 
 ## Contributing and reporting issues
 

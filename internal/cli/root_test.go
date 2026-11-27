@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/redhat-developer/rhdh-must-gather/internal/collector"
 )
 
 func TestBuildScriptList_Default(t *testing.T) {
@@ -17,8 +21,7 @@ func TestBuildScriptList_Default(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect", "network-policies"}
 	if len(scripts) != len(expected) {
@@ -33,19 +36,35 @@ func TestBuildScriptList_Default(t *testing.T) {
 
 func TestBuildScriptList_WithClusterInfo(t *testing.T) {
 	cmd := newRootCmd()
+	if err := cmd.ParseFlags([]string{"--with-cluster-info"}); err != nil {
+		t.Fatalf("ParseFlags: %v", err)
+	}
+
+	scripts := buildScriptList(cmd)
+
+	expected := []string{"platform", "helm", "operator", "orchestrator", "route", "ingress", "namespace-inspect", "network-policies", "cluster-info"}
+	if !slices.Equal(scripts, expected) {
+		t.Errorf("got %v, want %v", scripts, expected)
+	}
+}
+
+func TestBuildScriptList_DeprecatedClusterInfoAlias(t *testing.T) {
+	cmd := newRootCmd()
 	if err := cmd.ParseFlags([]string{"--cluster-info"}); err != nil {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{clusterInfo: true}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
-	last := scripts[len(scripts)-1]
-	if last != "cluster-info" {
-		t.Errorf("last script = %q, want %q", last, "cluster-info")
+	found := false
+	for _, s := range scripts {
+		if s == "cluster-info" {
+			found = true
+			break
+		}
 	}
-	if len(scripts) != len(mandatoryScripts)+1 {
-		t.Errorf("got %d scripts, want %d", len(scripts), len(mandatoryScripts)+1)
+	if !found {
+		t.Errorf("deprecated --cluster-info alias should still enable cluster-info collector, got %v", scripts)
 	}
 }
 
@@ -55,34 +74,146 @@ func TestBuildScriptList_WithExclusions(t *testing.T) {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	for _, s := range scripts {
 		if s == "helm" || s == "operator" {
 			t.Errorf("excluded script %q still in list", s)
 		}
 	}
-	if len(scripts) != len(mandatoryScripts)-2 {
-		t.Errorf("got %d scripts, want %d", len(scripts), len(mandatoryScripts)-2)
+	// Every Default collector except the two excluded, plus every AlwaysOn one.
+	want := countMode(collector.Default) - 2 + countMode(collector.AlwaysOn)
+	if len(scripts) != want {
+		t.Errorf("got %d scripts, want %d: %v", len(scripts), want, scripts)
 	}
 }
 
 func TestBuildScriptList_ExcludeAll(t *testing.T) {
 	cmd := newRootCmd()
-	args := make([]string, 0, len(mandatoryScripts))
-	for _, s := range mandatoryScripts {
-		args = append(args, "--without-"+s)
+	var args []string
+	for _, r := range collector.All() {
+		if r.RunMode == collector.Default {
+			args = append(args, "--without-"+r.Name)
+		}
 	}
 	if err := cmd.ParseFlags(args); err != nil {
 		t.Fatalf("ParseFlags: %v", err)
 	}
 
-	opts := &gatherOptions{}
-	scripts := buildScriptList(cmd, opts)
+	scripts := buildScriptList(cmd)
 
 	if len(scripts) != 1 || scripts[0] != "network-policies" {
 		t.Errorf("got %v, want [network-policies]", scripts)
+	}
+}
+
+// TestCollectorFlagsByMode locks the registry-driven flag contract: the run mode
+// alone decides which flags exist, and deprecated aliases stay hidden.
+func TestCollectorFlagsByMode(t *testing.T) {
+	flags := newRootCmd().Flags()
+
+	for _, r := range collector.All() {
+		t.Run(r.Name, func(t *testing.T) {
+			withFlag := flags.Lookup("with-" + r.Name)
+			withoutFlag := flags.Lookup("without-" + r.Name)
+
+			switch r.RunMode {
+			case collector.Default:
+				if withoutFlag == nil {
+					t.Errorf("Default collector %q should have --without-%s", r.Name, r.Name)
+				}
+				if withFlag != nil {
+					t.Errorf("Default collector %q should not have --with-%s", r.Name, r.Name)
+				}
+			case collector.AlwaysOn:
+				if withFlag != nil || withoutFlag != nil {
+					t.Errorf("AlwaysOn collector %q should have no flag", r.Name)
+				}
+			case collector.OptIn:
+				if withFlag == nil {
+					t.Errorf("OptIn collector %q should have --with-%s", r.Name, r.Name)
+				}
+				if withoutFlag != nil {
+					t.Errorf("OptIn collector %q should not have --without-%s", r.Name, r.Name)
+				}
+			}
+
+			for _, alias := range r.FlagAliases {
+				f := flags.Lookup(alias)
+				if f == nil {
+					t.Errorf("deprecated alias --%s for %q is not registered", alias, r.Name)
+					continue
+				}
+				if !f.Hidden {
+					t.Errorf("deprecated alias --%s should be hidden from help", alias)
+				}
+			}
+		})
+	}
+}
+
+// countMode returns how many registered collectors use the given run mode.
+func countMode(mode collector.RunMode) int {
+	n := 0
+	for _, r := range collector.All() {
+		if r.RunMode == mode {
+			n++
+		}
+	}
+	return n
+}
+
+func TestWarnDeprecatedCollectorFlags(t *testing.T) {
+	const wantWarn = "--cluster-info is deprecated, use --with-cluster-info instead"
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "deprecated alias", args: []string{"--cluster-info"}, want: wantWarn},
+		{
+			name: "alias and replacement together still warns",
+			args: []string{"--cluster-info", "--with-cluster-info"},
+			want: wantWarn,
+		},
+		{name: "replacement only", args: []string{"--with-cluster-info"}, want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newRootCmd()
+			if err := cmd.ParseFlags(tc.args); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+
+			oldStderr := os.Stderr
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("os.Pipe: %v", err)
+			}
+			os.Stderr = w
+
+			warnDeprecatedCollectorFlags(cmd)
+
+			if err := w.Close(); err != nil {
+				t.Fatalf("closing stderr pipe: %v", err)
+			}
+			os.Stderr = oldStderr
+
+			out, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatalf("reading stderr: %v", err)
+			}
+			got := string(out)
+
+			switch {
+			case tc.want == "" && strings.Contains(got, "deprecated"):
+				t.Errorf("unexpected deprecation warning: %q", got)
+			case tc.want != "" && !strings.Contains(got, tc.want):
+				t.Errorf("stderr = %q, want it to contain %q", got, tc.want)
+			}
+		})
 	}
 }
 
