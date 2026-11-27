@@ -17,7 +17,7 @@ OUTPUT_FILE ?= ## Output file for deploy-k8s (default: rhdh-must-gather-output.k
 HELM_TIMEOUT ?= ## Timeout for Helm install/upgrade in deploy-k8s (default: 60m)
 CONTAINER_TOOL ?= podman
 # renovate: datasource=docker depName=quay.io/konflux-ci/hermeto
-HERMETO_IMAGE ?= quay.io/konflux-ci/hermeto:0.64.1
+HERMETO_IMAGE ?= quay.io/konflux-ci/hermeto:0.65.1
 BUILD_ARGS ?=
 LABELS ?=
 RPM_LOCKFILE_CONTAINERFILE_PATH ?= .rhdh/docker/Containerfile
