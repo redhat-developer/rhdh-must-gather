@@ -118,7 +118,12 @@ jobs:
         uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: rhdh-must-gather-e2e
-          wait: 120s
+          config: hack/kind-config.yaml
+          # Nodes stay NotReady until a CNI is installed, so don't wait here.
+          wait: "0"
+
+      - name: Install Calico CNI (NetworkPolicy enforcement)
+        run: ./hack/install-calico.sh
 
       - name: Run E2E tests
         run: |
@@ -192,7 +197,12 @@ jobs:
         uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: rhdh-must-gather-e2e-heap-${{ matrix.method }}
-          wait: 120s
+          config: hack/kind-config.yaml
+          # Nodes stay NotReady until a CNI is installed, so don't wait here.
+          wait: "0"
+
+      - name: Install Calico CNI (NetworkPolicy enforcement)
+        run: ./hack/install-calico.sh
 
       - name: Run E2E tests with heap dumps (${{ matrix.method }} method)
         env:

@@ -412,7 +412,7 @@ if [ "$SKIP_OPERATOR" = false ]; then
     # Work around this by applying CRDs first, waiting, then applying the full
     # manifest including CRs.
     OPERATOR_MANIFEST_FILE=$(mktemp)
-    curl -sSL "$OPERATOR_MANIFEST" -o "$OPERATOR_MANIFEST_FILE"
+    curl --proto '=https' --proto-redir '=https' -fsSL "$OPERATOR_MANIFEST" -o "$OPERATOR_MANIFEST_FILE"
     if [ "$EFFECTIVE_OPERATOR_BRANCH" = "main" ]; then
         # On main, the manifest references the productized operator image
         # (quay.io/rhdh/rhdh-rhel10-operator or quay.io/rhdh/rhdh-rhel9-operator),
